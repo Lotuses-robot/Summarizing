@@ -108,7 +108,8 @@ function Row({
   // 已完成淡出（同款立方曲线）——锚定完成时刻（completedAt）：刚完成最浓，越久淡得越快
   const doneFade =
     item.status === "done" ? doneFadeStrength(row.completedAt ?? row.updatedAt, Date.now()) : 0;
-  // 日期未知（用户 2026-09-27 二轮：不要背景，改蓝色细边框——与过期红框同手法）
+  // 日期未知（用户 2026-09-27 二轮：不要背景，改主题色细边框——与过期红框同手法；
+  // 2026-09-30 修：原固定蓝 info 不跟色板，改 accent）
   const isUndated = item.status === "todo" && dueText === null;
   /** 行背景色：待办临近渐强 / 已完成淡出——全部从主题强调色出（跟色板走）；
    *  封顶同档（TINT_CAP_PERCENT）——「刚完成最亮」由此成立（走查修订 2026-09-30）。 */
@@ -128,7 +129,7 @@ function Row({
       className={cn(
         "group relative cursor-pointer overflow-hidden rounded-md border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
         row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
-        isUndated ? "border-info/60" : near ? "border-accent/60" : "",
+        isUndated || near ? "border-accent/60" : "", // 均在主题强调色系（跟色板走）
         flash && "row-flash",
         active && "bg-canvas ring-1 ring-accent",
       )}
@@ -141,11 +142,12 @@ function Row({
       }
       onClick={onToggle}
     >
-      {/* 左缘状态条（用户 2026-09-27 定；D-89 修订）：仅保留推断蓝条（存疑琥珀条随存疑段退场）。
+      {/* 左缘状态条（用户 2026-09-27 定；D-89 修订）：仅保留推断条（存疑琥珀条随存疑段退场）；
+          2026-09-30 修：固定蓝 info → 主题色 accent（跟色板走）。
           固定高度钉在标题行——不随展开体拉伸（否则展开行的条会巨长）。 */}
       {row.dueDateInferred && dueNote !== null && (
         <span
-          className="absolute left-1.5 top-2.5 h-5 w-1 rounded-full bg-info"
+          className="absolute left-1.5 top-2.5 h-5 w-1 rounded-full bg-accent"
           title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
         />
       )}

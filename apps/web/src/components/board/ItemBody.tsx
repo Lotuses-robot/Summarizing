@@ -101,7 +101,7 @@ export function ItemBody({ id, onChanged }: { id: string; onChanged: () => void 
                   点开/收起说明文字（样式同引文块）。哨兵键带 @ 前缀——不与自由元素 label 撞键 */}
               {dueNote !== null && (
                 <button
-                  className="cursor-pointer text-xs text-info hover:underline"
+                  className="cursor-pointer text-xs text-accent hover:underline"
                   onClick={() => toggleQuotes(DDL_NOTE_KEY)}
                 >
                   {" "}

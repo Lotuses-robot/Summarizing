@@ -18,7 +18,6 @@
   --accent: #0f766e;
   --danger: #b91c1c;
   --warn: #b45309;
-  --info: #1d4ed8;
   --font-app: "Segoe UI", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -31,7 +30,6 @@
   --accent: #2dd4bf;
   --danger: #f87171;
   --warn: #fbbf24;
-  --info: #93c5fd;
 }
 
 /* 主题色板（05§五 外观设置）：亮暗各给一档，保证暗底上可读 */
@@ -93,7 +91,6 @@
   --color-danger-soft: color-mix(in oklab, var(--danger) 11%, var(--surface));
   --color-warn: var(--warn);
   --color-warn-soft: color-mix(in oklab, var(--warn) 15%, var(--surface));
-  --color-info: var(--info);
   --font-sans: var(--font-app);
 }
 
