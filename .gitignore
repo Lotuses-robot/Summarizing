@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.env
+.env.*
+!.env.example
+*.local
+__pycache__/
+.DS_Store
+data/
+*.log
+.vitest/

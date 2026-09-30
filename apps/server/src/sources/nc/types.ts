@@ -1,0 +1,89 @@
+import { z } from "zod";
+
+// nc 事件形状（只读对接，D-84 §3.1）：只收群消息，其余 204 丢弃。
+// schema 住边界——nc 协议私有，不进 packages/shared（那是跨边界契约层）。
+
+/** nc 消息段（message 数组元素）：只声明我们要读的两处（type 与 data），
+ *  data 内部形状各异（url/text/qq/file…）——建成开放字典，取值时再逐项判类型。 */
+const NcSegmentSchema = z.object({
+  type: z.string(),
+  data: z.record(z.string(), z.unknown()).optional(),
+});
+export type NcSegment = z.infer<typeof NcSegmentSchema>;
+
+/** nc 上报的群消息事件（取用到的字段；message 段数组显式声明以免类型断言，其余未知字段放过）。 */
+export const NcEventSchema = z.object({
+  post_type: z.literal("message"),
+  message_type: z.literal("group"), // 私聊不收（D-84 Q-F）
+  group_id: z.union([z.string(), z.number()]).transform(String),
+  message_id: z.union([z.string(), z.number()]).transform(String),
+  user_id: z.union([z.string(), z.number()]).transform(String).optional(),
+  raw_message: z.string(),
+  time: z.number(), // unix 秒（消息自带时刻——比到达真实）
+  self_id: z.union([z.string(), z.number()]).optional(),
+  message: z.array(NcSegmentSchema).optional(), // 段结构（图片/文本/at…）；纯文本事件可能缺席
+  sender: z
+    .object({
+      user_id: z.union([z.string(), z.number()]).transform(String).optional(),
+      nickname: z.string().optional(),
+      card: z.string().optional(), // 群名片（有则比 nickname 更贴合群内身份）
+    })
+    .optional(),
+});
+export type NcEvent = z.infer<typeof NcEventSchema>;
+
+// ── 打包缓冲（信源私有内存态，按群分组；D-84 §3.3 不建事件表）──
+
+export interface BufferedEvent {
+  messageId: string;
+  content: string; // 单条消息文本（图片段已在 filter 阶段转 [图片] 占位）
+  sender: string; // 发信人显示名（群名片 > 昵称 > user_id）
+  senderId: string;
+  groupName: string; // 白名单里的群备注名（入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
+  at: string; // 消息自带时刻（本地墙钟）
+  raw: NcEvent; // 原始事件留底
+}
+
+export interface GroupBuffer {
+  groupId: string;
+  events: BufferedEvent[];
+  lastAt: string; // 组内最后一条消息时刻——去抖窗口从它起算
+}
+
+/** 从一组缓冲事件组装要投递的字段（纯函数；不含 ingest 副作用）。 */
+export interface SealedBatch {
+  groupId: string;
+  content: string;
+  eventTime: string; // 组内首条消息时刻（事项的相对日期按它锚定）
+  raw: NcEvent[]; // 原事件数组留底
+  sender: string; // 最后一条发信人（投递时作 sourceIdentity.sender）
+}
+
+/** 命中窗口的组（静默 ≥ windowMinutes 才封批）——纯函数，便于测试。 */
+export function dueGroups(
+  buffers: Map<string, GroupBuffer>,
+  nowMs: number,
+  windowMinutes: number,
+): GroupBuffer[] {
+  const windowMs = windowMinutes * 60_000;
+  const due: GroupBuffer[] = [];
+  for (const buf of buffers.values()) {
+    const lastMs = Date.parse(buf.lastAt);
+    if (!Number.isNaN(lastMs) && nowMs - lastMs >= windowMs) due.push(buf);
+  }
+  return due;
+}
+
+/** 把一批事件合并成标准批次内容（每条一行；组内首条时刻为 eventTime）。 */
+export function assembleBatch(buf: GroupBuffer): SealedBatch {
+  const first = buf.events[0];
+  const last = buf.events.at(-1);
+  if (!first || !last) throw new Error(`组 ${buf.groupId} 缓冲为空，不应封批`);
+  return {
+    groupId: buf.groupId,
+    content: buf.events.map((e) => e.content).join("\n"),
+    eventTime: first.at,
+    raw: buf.events.map((e) => e.raw),
+    sender: last.sender,
+  };
+}

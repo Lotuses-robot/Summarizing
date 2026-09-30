@@ -1,0 +1,65 @@
+{
+  "name": "summarizing",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
+    "test": "vitest run",
+    "check:tsc": "tsc -p apps/server --noEmit && tsc -p apps/web --noEmit && tsc -p packages/shared --noEmit && tsc -p tsconfig.json --noEmit",
+    "check": "npm run check:tsc && eslint . && vitest run",
+    "check:dead": "knip",
+    "stop": "node scripts/stop.mjs",
+    "prepare": "simple-git-hooks",
+    "db:reset": "tsx scripts/db-reset.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "npx lint-staged",
+    "pre-push": "npm run check"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,html,css}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import-x": "^4.17.1",
+    "eslint-plugin-jsdoc": "^64.5.4",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "knip": "^6.38.0",
+    "lint-staged": "^17.5.1",
+    "prettier": "^3.9.9",
+    "simple-git-hooks": "^2.14.0",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "simple-git-hooks@2.14.0": true
+  }
+}
