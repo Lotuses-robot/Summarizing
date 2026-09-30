@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Archive, Check, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
 import {
   dueDateElement,
   itemName,
@@ -14,6 +14,8 @@ import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urge
 import type { BoardFilter } from "./FilterBar";
 import { api } from "../api";
 import { ItemBody } from "./board/ItemBody";
+
+type RowAction = "complete" | "reopen" | "archive";
 
 // 四段元数据唯一出处（D-80/D-83；D-89 存疑段退场）——段名/提示/空态只改这里，派生物（allRows/段定位/计数）全部由此推导
 type SectionKey = Exclude<keyof BoardView, "failedRawInputs">;
@@ -58,8 +60,8 @@ function fmtDate(iso: string): string {
 }
 
 /** 看板单行（用户 2026-09-27 行布局 v3，借鉴 Todoist/Things 3）：标题 → 相对人话 ddl → tags
- *  同一条阅读线内联（不用视线右缘远跳）；ddl 颜色编码（过期红/临近 accent/远灰），悬停给绝对时间。
- *  行上不挂操作按钮（走查修订④ 2026-09-30：原悬停快捷按钮删除——操作统一在展开体内，此处纯冗余）。
+ *  同一条阅读线内联（不用视线右缘远跳）；ddl 颜色编码（过期红/临近 accent/远灰），悬停给绝对时间；
+ *  右缘只留状态点与新微标。悬停显形快捷按钮（勾=完成/恢复、归档）。
  *  点击整行 = 展开/收起详情（单开互斥由看板保证）；键盘 ↑↓ 选中行有底色。 */
 function Row({
   row,
@@ -69,6 +71,7 @@ function Row({
   viewedLocally,
   onToggle,
   onTag,
+  onQuickAction,
   children,
 }: {
   row: ItemRow;
@@ -78,6 +81,7 @@ function Row({
   viewedLocally: ReadonlySet<string>;
   onToggle: () => void;
   onTag: (tag: string) => void;
+  onQuickAction: (id: string, action: RowAction) => void;
   children: ReactNode;
 }) {
   const { item } = row;
@@ -181,6 +185,44 @@ function Row({
             {t}
           </button>
         ))}
+        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
+          {item.status !== "archived" && (
+            <button
+              className="row-act"
+              title="归档"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAction(item.id, "archive");
+              }}
+            >
+              <Archive size={13} />
+            </button>
+          )}
+          {item.status === "todo" && (
+            <button
+              className="row-act"
+              title="标完成"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAction(item.id, "complete");
+              }}
+            >
+              <Check size={13} />
+            </button>
+          )}
+          {item.status !== "todo" && (
+            <button
+              className="row-act"
+              title={item.status === "archived" ? "撤回归档" : "恢复待办"}
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAction(item.id, "reopen");
+              }}
+            >
+              <Undo2 size={13} />
+            </button>
+          )}
+        </span>
       </div>
       {expanded && (
         // 滚动规（用户 2026-09-26 修订）：max-h + 内滚；不做 overscroll 锁——滚到底自然接页面滚动。
@@ -212,7 +254,7 @@ function Section({
   onToggleFold,
   onToggleExpand,
   onTag,
-  onItemChanged,
+  onQuickAction,
 }: {
   title: string;
   rows: ItemRow[];
@@ -227,7 +269,7 @@ function Section({
   onToggleFold: () => void;
   onToggleExpand: (id: string) => void;
   onTag: (tag: string) => void;
-  onItemChanged: () => void;
+  onQuickAction: (id: string, action: RowAction) => void;
 }) {
   return (
     <section className="rounded-lg border border-line bg-surface p-3">
@@ -264,10 +306,9 @@ function Section({
                   viewedLocally={viewedLocally}
                   onToggle={() => onToggleExpand(row.item.id)}
                   onTag={onTag}
+                  onQuickAction={onQuickAction}
                 >
-                  {expandedId === row.item.id && (
-                    <ItemBody id={row.item.id} onChanged={onItemChanged} />
-                  )}
+                  {expandedId === row.item.id && <ItemBody id={row.item.id} />}
                 </Row>
               ))}
             </ul>
@@ -415,6 +456,23 @@ export function Board({
     setExpandedId(expandedId === id ? null : id);
   };
 
+  /** 行悬停快捷动作：发状态请求 + 刷新看板；展开体随行换段，收起避免旧详情误导。
+   *  失败无按钮级提示（看板无 toast 机制）——刷新让看板如实呈现现状。 */
+  const quickAction = (id: string, action: RowAction) => {
+    const p =
+      action === "complete"
+        ? api.complete(id)
+        : action === "reopen"
+          ? api.reopen(id)
+          : api.archive(id);
+    void p
+      .then(() => {
+        setExpandedId(null);
+        onRefresh();
+      })
+      .catch(() => onRefresh());
+  };
+
   /** 深链（05§三）：展开所在段 → 展开行 → 布局稳定后滚到行并短促高亮（清筛选由 App 统一做）。
    *  token 防同一条深链被看板轮询重放。 */
   useEffect(() => {
@@ -472,7 +530,7 @@ export function Board({
           onToggleFold={() => toggleFold(s.key)}
           onToggleExpand={toggleExpand}
           onTag={onTagClick}
-          onItemChanged={onRefresh}
+          onQuickAction={quickAction}
         />
       ))}
     </main>

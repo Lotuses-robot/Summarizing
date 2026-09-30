@@ -81,7 +81,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
 
   it("分级默认：基本信息与元素平铺可见、引文收起（点元素展开）、版本史只显计数", async () => {
     stubFetch(makeDetail());
-    render(<ItemBody id="it1" onChanged={() => {}} />);
+    render(<ItemBody id="it1" />);
 
     // 引文默认收起：原文按钮不可见，但证据计数可见
     await waitFor(() => expect(screen.getByText("[dueDate]")).toBeInTheDocument());
@@ -101,21 +101,14 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     expect(screen.getByText(/新建事项/)).toBeInTheDocument();
   });
 
-  it("按钮随状态切换：待办=标完成；完成=恢复待办（D-82）；存疑按钮随 D-89 退场", async () => {
+  it("展开体内没有操作按钮（走查修订④修正：操作统一走行右缘快捷）；存疑按钮随 D-89 退场", async () => {
     stubFetch(makeDetail());
-    const { rerender } = render(<ItemBody id="it1" onChanged={() => {}} />);
-    await waitFor(() => expect(screen.getByText("标完成")).toBeInTheDocument());
-    expect(screen.queryByText("恢复待办")).not.toBeInTheDocument();
-
-    const base = makeDetail();
-    stubFetch({
-      ...base,
-      item: { ...base.item, status: "done" },
-    });
-    // key 换掉强制重挂载（同 id 不会触发重拉）
-    rerender(<ItemBody key="done" id="it1" onChanged={() => {}} />);
-    await waitFor(() => expect(screen.getByText("恢复待办")).toBeInTheDocument());
+    render(<ItemBody id="it1" />);
+    await waitFor(() => expect(screen.getByText(/基本信息/)).toBeInTheDocument());
     expect(screen.queryByText("标完成")).not.toBeInTheDocument();
+    expect(screen.queryByText("归档")).not.toBeInTheDocument();
+    expect(screen.queryByText("恢复待办")).not.toBeInTheDocument();
+    expect(screen.queryByText("撤回归档")).not.toBeInTheDocument();
     // D-89：解除存疑按钮随存疑 UI 全退场（负断言）
     expect(screen.queryByText(/了解清楚/)).not.toBeInTheDocument();
   });
@@ -136,7 +129,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
         },
       }),
     );
-    render(<ItemBody id="it1" onChanged={() => {}} />);
+    render(<ItemBody id="it1" />);
     await waitFor(() => expect(screen.getByText(/还有 4 天/)).toBeInTheDocument());
     // 推断 = 行内后缀开关（与「· 证据(n)」同款，走查修订）：默认收起，点开/再点收
     expect(screen.queryByText(/按往年惯例推算/)).not.toBeInTheDocument();
@@ -148,7 +141,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
 
   it("「看原文」打开引文悬浮窗：批次原文 + 高亮引文句", async () => {
     stubFetch(makeDetail());
-    render(<ItemBody id="it1" onChanged={() => {}} />);
+    render(<ItemBody id="it1" />);
     fireEvent.click(await screen.findByText("[dueDate]"));
     // 引文旁标来源（D-89 选 B）：裸 sourceLabel 可见，hover 是**完整身份串**（含其余键）
     const label = screen.getByTitle("QQ（groupId=123 · sender=学习委员）");

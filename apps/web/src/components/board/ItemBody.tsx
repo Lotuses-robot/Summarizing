@@ -18,7 +18,7 @@ import { QuoteOverlay } from "./QuoteOverlay";
 
 /** 事项展开体（D-80 手风琴内容）：基本信息开 / 信息元素平铺引文收 / 版本史收只显计数。
  *  滚动四铁规（内滚隔离/sticky/70vh）由父级的展开容器承担，这里只管内容。 */
-export function ItemBody({ id, onChanged }: { id: string; onChanged: () => void }) {
+export function ItemBody({ id }: { id: string }) {
   const [detail, setDetail] = useState<GetItemResult | null>(null);
   const [openQuotes, setOpenQuotes] = useState<readonly string[]>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -39,16 +39,6 @@ export function ItemBody({ id, onChanged }: { id: string; onChanged: () => void 
   useEffect(() => {
     reload();
   }, [reload]);
-
-  /** 包一层手动操作：完成后刷新详情 + 通知外层刷看板；失败也重拉详情（让页面如实呈现现状）。 */
-  const act = (p: Promise<unknown>) => {
-    void p
-      .then(() => {
-        reload();
-        onChanged();
-      })
-      .catch(() => reload());
-  };
 
   /** 切换某元素的引文展开（引文是唯一的折叠层，D-80）。 */
   const toggleQuotes = (label: string) => {
@@ -136,23 +126,6 @@ export function ItemBody({ id, onChanged }: { id: string; onChanged: () => void 
             )}
           </div>
         )}
-        <div className="mt-3 flex gap-2">
-          {item.status === "todo" && (
-            <button className="btn btn-accent" onClick={() => act(api.complete(item.id))}>
-              标完成
-            </button>
-          )}
-          {item.status !== "archived" && (
-            <button className="btn" onClick={() => act(api.archive(item.id))}>
-              归档
-            </button>
-          )}
-          {item.status !== "todo" && (
-            <button className="btn" onClick={() => act(api.reopen(item.id))}>
-              {item.status === "archived" ? "撤回归档" : "恢复待办"}
-            </button>
-          )}
-        </div>
       </div>
 
       <div className="border-t border-line p-3">
