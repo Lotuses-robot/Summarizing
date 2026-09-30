@@ -60,6 +60,8 @@ npm run seed:demo          # 可选：载入一套虚构演示数据（会清空
 npm run dev                # web: http://localhost:5173 · server: http://localhost:3001
 ```
 
+不想配环境？到 [Releases](https://github.com/Lotuses-robot/Summarizing/releases) 下载 **Windows 便携包**（内置运行时，解压双击 `start.cmd` 即可）。
+
 装完之后，常用检查：
 
 ```bash

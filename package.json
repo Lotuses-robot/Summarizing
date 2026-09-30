@@ -19,7 +19,8 @@
     "stop": "node scripts/stop.mjs",
     "prepare": "simple-git-hooks",
     "db:reset": "tsx scripts/db-reset.ts",
-    "seed:demo": "tsx scripts/seed-demo.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "build:release": "node scripts/build-release.mjs"
   },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged",
@@ -42,6 +43,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
+    "esbuild": "^0.28.2",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.5",
