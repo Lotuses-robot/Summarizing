@@ -125,9 +125,6 @@
     @apply border-accent/40 text-accent hover:bg-accent-soft;
   }
   /* 看板行悬停快捷动作（勾/归档/恢复）：平时隐身，行悬停或键盘聚焦显形 */
-  .row-act {
-    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-ink-muted opacity-0 transition hover:bg-accent-soft hover:text-accent group-hover:opacity-100 focus-visible:opacity-100;
-  }
   .input {
     @apply w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none;
   }
