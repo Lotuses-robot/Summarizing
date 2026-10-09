@@ -24,13 +24,22 @@ export const NcEventSchema = z.object({
     .union([z.string(), z.number(), z.null()])
     .optional()
     .transform((v) => (v === null || v === undefined ? undefined : String(v))),
-  raw_message: z.string(),
-  time: z.number(), // unix 秒（消息自带时刻——比到达真实）
+  raw_message: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? ""),
+  time: z
+    .number()
+    .nullish()
+    .transform((v) => (typeof v === "number" ? v : Math.floor(Date.now() / 1000))), // null 时按接收时刻（unix 秒）
   self_id: z
     .union([z.string(), z.number(), z.null()])
     .optional()
     .transform((v) => (v === null || v === undefined ? undefined : String(v))),
-  message: z.array(NcSegmentSchema).optional(), // 段结构（图片/文本/at…）；纯文本事件可能缺席
+  message: z
+    .array(NcSegmentSchema)
+    .nullish()
+    .transform((v) => v ?? undefined), // 段结构（图片/文本/at…）；纯文本事件可能缺席
   sender: z
     .object({
       user_id: z
@@ -39,9 +48,12 @@ export const NcEventSchema = z.object({
         .transform((v) => (v === null || v === undefined ? undefined : String(v))),
       nickname: z.string().nullish(),
       card: z.string().nullish(), // 群名片（有则比 nickname 更贴合群内身份）
-      // 群角色（specs/003）：宽松收 string 且容 null——nc 变体会发 null/数字/大小写漂移，
-      // 归一与显示在 protocolLine。
-      role: z.string().nullish(),
+      // 群角色（specs/003）：宽松收 string/数字且容 null——nc 变体会发 null/数字/大小写漂移，
+      // 数字转字符串、归一与显示在 protocolLine。
+      role: z
+        .union([z.string(), z.number(), z.null()])
+        .nullish()
+        .transform((v) => (v === null || v === undefined ? undefined : String(v))),
     })
     .optional(),
 });
@@ -101,24 +113,26 @@ function timePrefix(at: string, sameDay: boolean): string {
 /** 墙钟串的日期段（D-64：YYYY-MM-DDTHH:mm:ss 前段）——同天判定用。 */
 const dateOf = (at: string): string => at.split("T")[0] ?? "";
 
+/** 群身份括注的单点出处：protocolLine 据此追加、safeSpeakerName 据此剥除——两处永不漂移（四轮评审）。 */
+const ROLE_LABELS: Record<string, string> = { owner: "（群主）", admin: "（管理员）" };
+
 /** 显示名净化（只影响协议前缀，正文不动）：换行先折、半角「: 」换全角——顺序反了会重新造出
- *  「: 」（三轮评审）；再剥「（群主）/（管理员）」字面量，防昵称冒充身份括注（三轮评审）。 */
-function safeSpeakerName(name: string): string {
-  return name
-    .replaceAll("\n", " ")
-    .replaceAll(": ", "：")
-    .replaceAll("（群主）", "")
-    .replaceAll("（管理员）", "");
+ *  「: 」（三轮评审）；再剥 ROLE_LABELS 身份括注字面量，防昵称冒充身份括注（三轮评审）。 */
+function safeSpeakerName(rawName: string): string {
+  let name = rawName.replaceAll("\n", " ").replaceAll(": ", "：");
+  for (const label of Object.values(ROLE_LABELS)) name = name.replaceAll(label, "");
+  return name;
 }
 
 /** 一条缓冲事件 → 行协议行：`[时刻] 发送者（身份）: 正文`。
  *  前缀只在行首、正文逐字不动——引文逐字校验（fence 对 content 空白归一查子串）因此不受影响。
  *  多行消息的续行缩进两空格：维持「每条一行有前缀」的归属边界（空白归一不伤引文，评审修正）。
- *  角色小写归一后只认 owner/admin（nc 变体大小写漂移；未知值不显示，specs/003 评审修正）。 */
+ *  角色小写归一后只认 owner/admin（nc 变体大小写/数字漂移；未知值不显示，specs/003 评审修正）。
+ *  净化后名字可能为空（昵称恰好是身份字面量）→ 退回 senderId 或「未知」（四轮评审）。 */
 function protocolLine(e: BufferedEvent, sameDay: boolean): string {
-  const roleKey = e.role?.toLowerCase();
-  const role = roleKey === "owner" ? "（群主）" : roleKey === "admin" ? "（管理员）" : "";
-  const prefix = `${timePrefix(e.at, sameDay)} ${safeSpeakerName(e.sender)}${role}: `;
+  const role = (e.role && ROLE_LABELS[e.role.toLowerCase()]) || "";
+  const speaker = safeSpeakerName(e.sender) || (e.senderId !== "" ? e.senderId : "未知");
+  const prefix = `${timePrefix(e.at, sameDay)} ${speaker}${role}: `;
   if (!e.content.includes("\n")) return prefix + e.content;
   return e.content
     .split("\n")
@@ -132,9 +146,9 @@ export function assembleBatch(buf: GroupBuffer): SealedBatch {
   if (!first) throw new Error(`组 ${buf.groupId} 缓冲为空，不应封批`);
   const firstDate = dateOf(first.at);
   const sameDay = buf.events.every((e) => dateOf(e.at) === firstDate);
-  // 发话人按 senderId 去重（显示名会撞——两人同名时 sender 仍不得说谎）。任一事件缺 senderId
-  // 即无法确证「唯一」→ 宁缺勿谎，多消息批次省略 sender（三轮评审）；单条批次恒署其显示名。
-  const speakers = new Set(buf.events.map((e) => (e.senderId !== "" ? e.senderId : e.sender)));
+  // 发话人按 senderId 去重；trustworthy（单条批次或全员有 id）才允许署名——缺 id 无法确证
+  // 「唯一」时宁缺勿谎，多消息批次省略 sender（三轮/四轮评审）。
+  const speakers = new Set(buf.events.map((e) => e.senderId));
   const trustworthy = buf.events.length === 1 || buf.events.every((e) => e.senderId !== "");
   return {
     groupId: buf.groupId,

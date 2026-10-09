@@ -1,4 +1,9 @@
-import { type ChangeItem, type Provenance, type UncertainInput } from "@summarizing/shared";
+import {
+  errText,
+  type ChangeItem,
+  type Provenance,
+  type UncertainInput,
+} from "@summarizing/shared";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient } from "../shared/llm";
@@ -108,7 +113,7 @@ async function runSweep(
       discarded += allowed.filter((c) => c.outcome === "discarded").length;
       anchorRawInputId ??= origin.id;
     } catch (err) {
-      process.stderr.write(`[sweep] 复核条目 ${entry.id} 失败：${String(err)}\n`);
+      process.stderr.write(`[sweep] 复核条目 ${entry.id} 失败：${errText(err)}\n`);
     }
   }
 

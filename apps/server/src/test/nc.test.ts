@@ -102,7 +102,7 @@ function emit(
 /** 集成断言用的「时:分」显示——现算而非手抄，时区无关（specs/003 三处共用）。 */
 const HM = wallClockFromUnix(1790595828).slice(11, 16);
 describe("nc 适配器：纯函数", () => {
-  /** assembleBatch 夹具工厂：默认 小明/10001/英语群/2026-09-28T10:00:00，按需覆盖（specs/003）。 */
+  /** assembleBatch 夹具工厂：默认 小明/senderId 1/英语群/2026-09-28T10:00:00，按需覆盖（specs/003）。 */
   function mkEvent(overrides: {
     messageId: string;
     content?: string;
@@ -343,6 +343,20 @@ describe("nc 适配器：webhook 快收", () => {
 });
 
 describe("nc 适配器：去抖封批全链路", () => {
+  /** 封批并等消化落档（单批次样板收尾——emit 完调它），返回该批（四轮评审：七处样板收敛）。 */
+  async function sealAndWaitDigested(db: ReturnType<typeof makeDb>) {
+    sweepNow();
+    await vi.waitFor(
+      () => {
+        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
+      },
+      { timeout: 3000 },
+    );
+    const raw = repo.listRawInputsByState(db, "digested")[0];
+    if (!raw) throw new Error("封批未落档");
+    return raw;
+  }
+
   it("静默满窗 sweep → 合并投递 → agent0 消化（弹性的 sourceIdentity）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
@@ -356,18 +370,8 @@ describe("nc 适配器：去抖封批全链路", () => {
       app,
       groupEvent({ groupId: "g1", messageId: "m2", text: "截止10月8日", time: 1790595830 }),
     );
-    sweepNow();
 
-    const digested = repo.listRawInputsByState(db, "digested");
-    await vi.waitFor(
-      () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
-      },
-      { timeout: 3000 },
-    );
-    expect(digested.length).toBeLessThanOrEqual(1);
-    const raw = repo.listRawInputsByState(db, "digested")[0];
-    if (!raw) throw new Error("封批未落档");
+    const raw = await sealAndWaitDigested(db);
     expect(raw.sourceType).toBe("nc");
     expect(raw.content).toBe(`[${HM}] 小明: 通知：作业\n[${HM}] 小明: 截止10月8日`); // 组内合并（行协议逐行署名，specs/003）
   });
@@ -379,14 +383,7 @@ describe("nc 适配器：去抖封批全链路", () => {
     const ev = groupEvent({ groupId: "g1", messageId: "m1", text: "唯一一条", time: 1790595828 });
     await emit(app, ev);
     await emit(app, ev); // 重推
-    sweepNow();
-    await vi.waitFor(
-      () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
-      },
-      { timeout: 3000 },
-    );
-    expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
+    await sealAndWaitDigested(db); // 恰好一批（helper 内 waitFor 即精确断言 1）
   });
 
   it("已在缓冲的消息重推 → 不重复入缓冲（组内只一条）", async () => {
@@ -396,15 +393,8 @@ describe("nc 适配器：去抖封批全链路", () => {
     const ev = groupEvent({ groupId: "g1", messageId: "m1", text: "一次", time: 1790595828 });
     await emit(app, ev);
     await emit(app, ev);
-    sweepNow();
-    await vi.waitFor(
-      () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
-      },
-      { timeout: 3000 },
-    );
-    const raw = repo.listRawInputsByState(db, "digested")[0];
-    expect(raw?.content).toBe(`[${HM}] 小明: 一次`); // 只有一条，未重复
+    const raw = await sealAndWaitDigested(db);
+    expect(raw.content).toBe(`[${HM}] 小明: 一次`); // 只有一条，未重复
   });
 
   it("图片段 → [图片](url) 占位（base64 不进 content）", async () => {
@@ -424,16 +414,9 @@ describe("nc 适配器：去抖封批全链路", () => {
         ],
       }),
     );
-    sweepNow();
-    await vi.waitFor(
-      () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
-      },
-      { timeout: 3000 },
-    );
-    const raw = repo.listRawInputsByState(db, "digested")[0];
-    expect(raw?.content).toBe(`[${HM}] 小明: 看这个[图片](https://cdn.example/x.jpg)`);
-    expect(raw?.content).not.toContain("base64");
+    const raw = await sealAndWaitDigested(db);
+    expect(raw.content).toBe(`[${HM}] 小明: 看这个[图片](https://cdn.example/x.jpg)`);
+    expect(raw.content).not.toContain("base64");
   });
 
   it("raw 归档列：nc 原事件数组落库（D-84 §3.2 原始载荷留底——曾断线：适配器不传 raw）", async () => {
@@ -447,13 +430,7 @@ describe("nc 适配器：去抖封批全链路", () => {
       time: 1790595828,
     });
     await emit(app, event);
-    sweepNow();
-    await vi.waitFor(
-      () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
-      },
-      { timeout: 3000 },
-    );
+    await sealAndWaitDigested(db);
     // 直查 DB 的 raw 列（RawInput 类型不含它——归档字段只进不出，D-84）
     const row = z
       .object({ raw: z.string().nullable() })
@@ -499,15 +476,8 @@ describe("nc 适配器：去抖封批全链路", () => {
       time: 1790595828,
       sender: { user_id: null, nickname: null, card: null, role: null },
     });
-    sweepNow();
-    await vi.waitFor(
-      () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
-      },
-      { timeout: 3000 },
-    );
-    const raw = repo.listRawInputsByState(db, "digested")[0];
-    expect(raw?.content).toBe(`[${HM}] 未知: null 字段也收`); // 全 null → 显示名兜「未知」
+    const raw = await sealAndWaitDigested(db);
+    expect(raw.content).toBe(`[${HM}] 未知: null 字段也收`); // 全 null → 显示名兜「未知」
   });
 });
 
