@@ -1,21 +1,23 @@
-import { LayoutDashboard, Settings, TriangleAlert } from "lucide-react";
+import { LayoutDashboard, ScrollText, Settings, TriangleAlert } from "lucide-react";
 import { cn } from "../lib/cn";
 
-/** 最左活动栏（05§一）：主视图切换（看板 / 存疑库审核，D-89）+ 设置固定最底。
+/** 最左活动栏（05§一）：主视图切换（看板 / 存疑库审核 / 流水，specs/005）+ 设置固定最底。
  *  对话开关不在这——它管的停靠面板在右边，开关也放右边（用户 2026-09-26 定）。 */
 export function ActivityBar({
   view,
   uncertainCount,
   onHome,
   onShowUncertain,
+  onShowPipeline,
   onOpenSettings,
 }: {
-  view: "board" | "uncertain";
+  view: "board" | "uncertain" | "pipeline";
   /** open 条数——徽标计数（0 = 不显示徽标）。 */
   uncertainCount: number;
   /** 看板图标：在审核页时 = 切回看板；已在看板 = 回顶部锚点。 */
   onHome: () => void;
   onShowUncertain: () => void;
+  onShowPipeline: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -44,6 +46,16 @@ export function ActivityBar({
             {uncertainCount}
           </span>
         )}
+      </button>
+      <button
+        title="流水：一条信息从进站到成事项的全程"
+        onClick={onShowPipeline}
+        className={cn(
+          "flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent-soft hover:text-accent",
+          view === "pipeline" ? "text-accent" : "text-ink-muted",
+        )}
+      >
+        <ScrollText size={18} />
       </button>
       <button
         title="设置"

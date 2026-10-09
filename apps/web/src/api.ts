@@ -9,6 +9,8 @@ import type {
   DigestState,
   GetItemResult,
   Item,
+  PipelineRun,
+  PipelineRunDetail,
   SourceSummary,
   UncertainInput,
 } from "@summarizing/shared";
@@ -138,4 +140,14 @@ export const api = {
   /** 最近 N 轮历史（时间升序）；纯文本气泡，chips 不回填（L20）。 */
   chatHistory: (limit = 50): Promise<ChatHistoryResponse> =>
     fetch(`/api/chat/history?limit=${limit}`).then((r) => to<ChatHistoryResponse>(r)),
+
+  // ── 流水（specs/005 进站台账）──
+
+  /** 进站台账：最近 N 个批次概要（含流水计数与消化结果一句话）。 */
+  pipelineRuns: (limit = 50): Promise<{ runs: PipelineRun[] }> =>
+    fetch(`/api/pipeline/runs?limit=${limit}`).then((r) => to<{ runs: PipelineRun[] }>(r)),
+
+  /** 单批详情：原文 + 全部流水事件（按 action 分频道渲染）。 */
+  pipelineRun: (id: string): Promise<PipelineRunDetail> =>
+    fetch(`/api/pipeline/runs/${id}`).then((r) => to<PipelineRunDetail>(r)),
 };

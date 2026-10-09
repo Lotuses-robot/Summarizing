@@ -149,6 +149,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         uncertainCount={3}
         onHome={() => {}}
         onShowUncertain={() => {}}
+        onShowPipeline={() => {}}
         onOpenSettings={() => {}}
       />,
     );
@@ -159,6 +160,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         uncertainCount={0}
         onHome={() => {}}
         onShowUncertain={() => {}}
+        onShowPipeline={() => {}}
         onOpenSettings={() => {}}
       />,
     );
@@ -168,6 +170,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
   it("三个入口回调各就各位：看板/审核/设置", () => {
     const onHome = vi.fn();
     const onShowUncertain = vi.fn();
+    const onShowPipeline = vi.fn();
     const onOpenSettings = vi.fn();
     render(
       <ActivityBar
@@ -175,6 +178,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         uncertainCount={0}
         onHome={onHome}
         onShowUncertain={onShowUncertain}
+        onShowPipeline={onShowPipeline}
         onOpenSettings={onOpenSettings}
       />,
     );

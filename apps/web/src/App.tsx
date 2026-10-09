@@ -6,6 +6,7 @@ import { ActivityBar } from "./components/ActivityBar";
 import { FilterBar, type BoardFilter } from "./components/FilterBar";
 import { Board } from "./components/Board";
 import { UncertainReview } from "./components/UncertainReview";
+import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { cn } from "./lib/cn";
@@ -26,7 +27,7 @@ function Banner({ text }: { text: string }) {
 export default function App() {
   const [board, setBoard] = useState<BoardView | null>(null);
   const [uncertain, setUncertain] = useState<UncertainInput[]>([]);
-  const [view, setView] = useState<"board" | "uncertain">("board"); // 主视图切换（D-89）
+  const [view, setView] = useState<"board" | "uncertain" | "pipeline">("board"); // 主视图切换（D-89 + specs/005 流水）
   const [error, setError] = useState<string | null>(null);
   const [uncertainError, setUncertainError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -152,6 +153,7 @@ export default function App() {
           setView("uncertain");
           loadUncertain(); // 进页即拉一次（审核期间轮询已暂停——见上）
         }}
+        onShowPipeline={() => setView("pipeline")}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
@@ -162,6 +164,8 @@ export default function App() {
 
         {view === "uncertain" ? (
           <UncertainReview items={uncertain} onRemoved={loadUncertain} />
+        ) : view === "pipeline" ? (
+          <PipelineView />
         ) : (
           <>
             {/* 顶部整栏筛选（token 堆左、搜索框占满）+ 对话开关 */}

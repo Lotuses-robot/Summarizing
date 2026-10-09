@@ -1,9 +1,10 @@
 import crypto from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   EvidenceSourceSchema,
   FragmentSchema,
   PipelineEventSchema,
+  PipelineRunSchema,
   ItemSchema,
   ItemSnapshotSchema,
   ItemVersionSchema,
@@ -11,11 +12,13 @@ import {
   RawInputSchema,
   UncertainInputSchema,
   normalizeSourceIdentity,
+  sourceLabelOf,
   type EvidenceSource,
   type Fragment,
   type Item,
   type ItemVersion,
   type PipelineEvent,
+  type PipelineRun,
   type Provenance,
   type RawInput,
   type SourceIdentity,
@@ -339,6 +342,51 @@ export function listPipelineEvents(db: DbOrTx, rawInputId: string): PipelineEven
         by: parseJsonMaybe(r.by),
       }),
     );
+}
+
+/** 进站台账：最近 N 个批次的概要（含流水计数与消化结果一句话）——流水视图列表数据源（specs/005）。
+ *  两条查询（批次 + 按 id 集合取流水）+ JS 分组，避免逐批 N+1。summary 取末条 digest_done/failed。 */
+export function listPipelineRuns(db: DbOrTx, limit = 50): PipelineRun[] {
+  const raws = db
+    .select()
+    .from(s.rawInputs)
+    .orderBy(desc(s.rawInputs.receivedAt))
+    .limit(limit)
+    .all();
+  if (raws.length === 0) return [];
+  const events = db
+    .select()
+    .from(s.pipelineEvents)
+    .where(
+      inArray(
+        s.pipelineEvents.entityId,
+        raws.map((r) => r.id),
+      ),
+    )
+    .orderBy(...PIPELINE_ORDER)
+    .all();
+  const byRaw = new Map<string, (typeof events)[number][]>();
+  for (const e of events) {
+    const list = byRaw.get(e.entityId) ?? [];
+    list.push(e);
+    byRaw.set(e.entityId, list);
+  }
+  return raws.map((r) => {
+    const evts = byRaw.get(r.id) ?? [];
+    const done = [...evts]
+      .reverse()
+      .find((e) => e.action === "digest_done" || e.action === "digest_failed");
+    return PipelineRunSchema.parse({
+      id: r.id,
+      sourceType: r.sourceType,
+      sourceLabel: sourceLabelOf(normalizeSourceIdentity(parseJsonMaybe(r.sourceIdentity))),
+      receivedAt: r.receivedAt,
+      eventTime: r.eventTime,
+      digestState: r.digestState,
+      summary: done?.detail ?? null,
+      eventCount: evts.length,
+    });
+  });
 }
 
 // ── 片段池（快照按内容去重，01§4.4）──

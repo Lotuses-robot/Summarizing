@@ -616,3 +616,23 @@ export const PipelineEventSchema = z.object({
   by: ProvenanceSchema,
 });
 export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
+
+/** 进站台账行：一个批次的概要（不含正文——正文在详情接口）。流水视图列表的数据源（specs/005）。 */
+export const PipelineRunSchema = z.object({
+  id: z.string(),
+  sourceType: z.string(),
+  sourceLabel: z.string(), // 来源显示名（sourceIdentity.sourceLabel）
+  receivedAt: z.string(),
+  eventTime: z.string().nullable(),
+  digestState: DigestState,
+  summary: z.string().nullable(), // 消化结果一句话（digest_done/digest_failed 的 detail；无则 null）
+  eventCount: z.number().int(), // 该批流水事件总数
+});
+export type PipelineRun = z.infer<typeof PipelineRunSchema>;
+
+/** 进站详情：批次原文 + 全部流水事件（流水视图展开行的数据源）。 */
+export const PipelineRunDetailSchema = z.object({
+  raw: RawInputSchema,
+  events: z.array(PipelineEventSchema),
+});
+export type PipelineRunDetail = z.infer<typeof PipelineRunDetailSchema>;

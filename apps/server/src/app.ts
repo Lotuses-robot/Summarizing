@@ -17,6 +17,7 @@ import { ingestBatch } from "./application/ingest";
 import { handleChat } from "./application/chat";
 import { buildBoard } from "./application/board";
 import { registerItemRoutes } from "./routes/items";
+import { registerPipelineRoutes } from "./routes/pipeline";
 import { registerSourceRoutes, SOURCE_SCHEMA_KEY } from "./routes/sources";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerUncertainRoutes } from "./routes/uncertain";
@@ -201,6 +202,7 @@ export function makeApp(deps: AppDeps) {
   });
 
   registerItemRoutes(app, { db: deps.db });
+  registerPipelineRoutes(app, { db: deps.db });
   registerSettingsRoutes(app, { db: deps.db, llmRef: deps.llmRef });
   registerSourceRoutes(app, { db: deps.db, sourceStates });
   registerUncertainRoutes(app, {
