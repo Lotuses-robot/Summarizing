@@ -110,7 +110,11 @@ export function makeNcAdapter(): SourceAdapter {
     const result = ctx.ingest({
       content: batch.content,
       sourceType: NC_SOURCE_NAME,
-      sourceIdentity: { sourceLabel: groupNameOf(buf), groupId: buf.groupId, sender: batch.sender },
+      sourceIdentity: {
+        sourceLabel: groupNameOf(buf),
+        groupId: buf.groupId,
+        ...(batch.sender === undefined ? {} : { sender: batch.sender }), // 多人批次省略——行协议已逐行署名（specs/003 FR-004）
+      },
       eventTime: batch.eventTime,
       raw: batch.raw,
     });
@@ -159,6 +163,7 @@ export function makeNcAdapter(): SourceAdapter {
           content: textFromSegments(ev.message, ev.raw_message),
           sender: senderName(ev),
           senderId: ev.sender?.user_id ?? ev.user_id ?? "",
+          role: ev.sender?.role,
           groupName,
           at: wallClockFromUnix(ev.time),
           raw: ev,

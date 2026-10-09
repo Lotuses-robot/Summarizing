@@ -27,6 +27,7 @@ export const NcEventSchema = z.object({
       user_id: z.union([z.string(), z.number()]).transform(String).optional(),
       nickname: z.string().optional(),
       card: z.string().optional(), // 群名片（有则比 nickname 更贴合群内身份）
+      role: z.enum(["owner", "admin", "member"]).optional(), // 群角色（specs/003 FR-003；缺席放过）
     })
     .optional(),
 });
@@ -39,6 +40,7 @@ export interface BufferedEvent {
   content: string; // 单条消息文本（图片段已在 filter 阶段转 [图片] 占位）
   sender: string; // 发信人显示名（群名片 > 昵称 > user_id）
   senderId: string;
+  role?: "owner" | "admin" | "member"; // 群角色（specs/003；member/缺席不显示，防噪声）
   groupName: string; // 白名单里的群备注名（入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
   at: string; // 消息自带时刻（本地墙钟）
   raw: NcEvent; // 原始事件留底
@@ -56,7 +58,7 @@ export interface SealedBatch {
   content: string;
   eventTime: string; // 组内首条消息时刻（事项的相对日期按它锚定）
   raw: NcEvent[]; // 原事件数组留底
-  sender: string; // 最后一条发信人（投递时作 sourceIdentity.sender）
+  sender?: string; // 批内唯一发送者才写；多人批次省略——身份由行协议逐行承载（D-91）
 }
 
 /** 命中窗口的组（静默 ≥ windowMinutes 才封批）——纯函数，便于测试。 */
@@ -74,16 +76,33 @@ export function dueGroups(
   return due;
 }
 
-/** 把一批事件合并成标准批次内容（每条一行；组内首条时刻为 eventTime）。 */
+/** 行内时刻前缀：同天批次 `[HH:mm]`；跨天批次 `[MM-DD HH:mm]`（消歧义，specs/003 FR-001）。 */
+function timePrefix(at: string, sameDay: boolean): string {
+  const [date, time] = at.split("T");
+  const hm = (time ?? "").slice(0, 5);
+  return sameDay ? `[${hm}]` : `[${(date ?? "").slice(5)} ${hm}]`;
+}
+
+/** 一条缓冲事件 → 行协议行：`[时刻] 发送者（身份）: 正文`。
+ *  前缀只在行首、正文逐字不动——引文逐字校验（fence 对 content 查子串）因此不受影响。 */
+function protocolLine(e: BufferedEvent, sameDay: boolean): string {
+  const role = e.role === "owner" ? "（群主）" : e.role === "admin" ? "（管理员）" : "";
+  return `${timePrefix(e.at, sameDay)} ${e.sender}${role}: ${e.content}`;
+}
+
+/** 把一批事件合并成行协议批次内容（每条一行；组内首条时刻为 eventTime；specs/003 D-91）。 */
 export function assembleBatch(buf: GroupBuffer): SealedBatch {
   const first = buf.events[0];
   const last = buf.events.at(-1);
   if (!first || !last) throw new Error(`组 ${buf.groupId} 缓冲为空，不应封批`);
+  const firstDate = first.at.split("T")[0] ?? "";
+  const sameDay = buf.events.every((e) => (e.at.split("T")[0] ?? "") === firstDate);
+  const senders = new Set(buf.events.map((e) => e.sender));
   return {
     groupId: buf.groupId,
-    content: buf.events.map((e) => e.content).join("\n"),
+    content: buf.events.map((e) => protocolLine(e, sameDay)).join("\n"),
     eventTime: first.at,
     raw: buf.events.map((e) => e.raw),
-    sender: last.sender,
+    sender: senders.size === 1 ? first.sender : undefined,
   };
 }
