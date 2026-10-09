@@ -8,13 +8,14 @@ import {
   type Provenance,
   type RawInput,
 } from "@summarizing/shared";
-import type { Db } from "../../storage/db";
-import * as repo from "../../storage/repo";
-import type { ChatMsg, LlmClient } from "../../shared/llm";
-import { describeRejections, parseChangeList, runFence } from "./fence";
+import type { Db } from "../storage/db";
+import * as repo from "../storage/repo";
+import type { ChatMsg, LlmClient } from "../shared/llm";
+import { errText } from "../shared/err";
+import { describeRejections, parseChangeList, runFence } from "../executor/fence";
 import { DIGEST_SYSTEM_PROMPT } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
-import { executeChanges } from "./executor";
+import { executeChanges } from "../executor/executor";
 
 // 消化管线（01§4.10 全景）：
 // ① 入口 RawInput（已落档）→ ② 自由推理（工具循环）→ ③ 变更清单
@@ -136,11 +137,6 @@ export function kickDigest(
       `[digest] 兜底泄漏（${from}）：${errText(err)}`,
     ),
   );
-}
-
-/** 异常 → 人话单行（日志与回喂共用；仓库内统一出处）。 */
-export function errText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** 启动清扫（L11）：消化是进程内异步——进程死后 pending 永滞，而重启的这一刻不可能存在

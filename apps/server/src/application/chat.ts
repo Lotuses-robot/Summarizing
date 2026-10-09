@@ -11,14 +11,17 @@ import type { Db } from "../storage/db";
 import { nowLocalWallClock } from "../shared/time";
 import * as repo from "../storage/repo";
 import { buildBoard } from "./board";
-import { describeSweep, sweepUncertainLibrary } from "./agent0/sweep";
-import { errText, kickDigest } from "./agent0/digest";
-import { makeAgentTools, type AgentTools } from "./agent0/tools";
+import { describeSweep, sweepUncertainLibrary } from "../agent0/sweep";
+import { kickDigest } from "../agent0/digest";
+import { errText } from "../shared/err";
+import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { ChatMsg, LlmClient, ToolCall, ToolDef } from "../shared/llm";
 
 // 前台 buddy（D-78）：有连续上下文的多轮对话 agent——像聊天一样答问、收信息、留痕。
 // 红线：只读 + 只能调工具，写权永远在执行器；拿不准宁可误录入（D-14）；全留痕。
 // 工具循环与 agent0/digest.ts 的 elicitChangeList 互为镜像——读懂数管线就读懂了前台。
+// ⚠️ 本文件编排之外还内含一个未拆的前台对话 agent（converse/runTool/提示词/工具定义）——
+//    拆出与「agent 机制对齐」（两循环抽象共用）为观察项，待两个循环都被验证过后处理（2026-10-09）。
 
 const MAX_ROUNDS = 4;
 

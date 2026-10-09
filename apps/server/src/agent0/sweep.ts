@@ -4,15 +4,17 @@ import {
   type Provenance,
   type UncertainInput,
 } from "@summarizing/shared";
-import type { Db } from "../../storage/db";
-import * as repo from "../../storage/repo";
-import type { ChatMsg, LlmClient } from "../../shared/llm";
-import { resolveUncertainWellFormed } from "./fence";
-import { executeChanges } from "./executor";
+import type { Db } from "../storage/db";
+import * as repo from "../storage/repo";
+import type { ChatMsg, LlmClient } from "../shared/llm";
+import { resolveUncertainWellFormed } from "../executor/fence";
+import { executeChanges } from "../executor/executor";
 
 // 存疑库清扫循环（D-85）：复核 open 条目——被取代/证伪/重复的丢弃留痕，仍有效的不动。
 // 双入口共用：对话触发（前台工具）+ POST /api/uncertain/sweep。
 // 围栏只许动库（只接受 resolve_uncertain 一个动作，其余全部忽略）——清扫绝不碰事项。
+// ⚠️ 本文件是第二个执行者任务（清扫 agent：独立提示词/独立围栏约束）——暂居 agent0 目录，
+//    独立成模块与「agent 机制对齐」同为观察项（2026-10-09 布局定稿）。
 
 const MAX_ROUNDS = 20; // 一次最多复核这么多条目（防失控；单机库规模远小于此）
 

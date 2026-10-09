@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatHistoryItem } from "@summarizing/shared";
 import { makeApp } from "../app";
-import { handleChat } from "../features/chat";
-import { executeChanges } from "../features/agent0/executor";
+import { handleChat } from "../application/chat";
+import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";

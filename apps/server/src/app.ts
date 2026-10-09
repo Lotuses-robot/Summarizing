@@ -5,12 +5,13 @@ import { ChatRequestSchema, IngestRequestSchema, SettingFieldSchema } from "@sum
 import type { Db } from "./storage/db";
 import * as repo from "./storage/repo";
 import { nowLocalWallClock } from "./shared/time";
-import { retryRawInput, errText } from "./features/agent0/digest";
-import { sweepUncertainLibrary } from "./features/agent0/sweep";
-import { makeAgentTools, type AgentTools } from "./features/agent0/tools";
-import { ingestBatch } from "./features/ingest";
-import { handleChat } from "./features/chat";
-import { buildBoard } from "./features/board";
+import { retryRawInput } from "./agent0/digest";
+import { errText } from "./shared/err";
+import { sweepUncertainLibrary } from "./agent0/sweep";
+import { makeAgentTools, type AgentTools } from "./agent0/tools";
+import { ingestBatch } from "./application/ingest";
+import { handleChat } from "./application/chat";
+import { buildBoard } from "./application/board";
 import { registerItemRoutes } from "./routes/items";
 import { registerSourceRoutes, SOURCE_SCHEMA_KEY } from "./routes/sources";
 import { registerSettingsRoutes } from "./routes/settings";
@@ -143,7 +144,7 @@ export function makeApp(deps: AppDeps) {
     if (!parsed.success) {
       return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
     }
-    // 进站装配唯一出处（features/ingest.ts）：先落盘后异步消化
+    // 进站装配唯一出处（application/ingest.ts）：先落盘后异步消化
     const raw = ingestBatch(deps.db, deps.llmRef, tools, parsed.data, "ingest-api", (msg) =>
       req.log.error(msg),
     );

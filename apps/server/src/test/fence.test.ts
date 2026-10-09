@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ChangeList } from "@summarizing/shared";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
-import { runFence } from "../features/agent0/fence";
+import { runFence } from "../executor/fence";
 
 /** 围栏夹具的原文（引文逐字校验的比对基准）。 */
 const RAW_TEXT = "数据结构 老师说下周要交第三次作业 好像还要交实验报告？";

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { itemDueDate, type Item, type RawInput } from "@summarizing/shared";
-import { executeChanges } from "../features/agent0/executor";
-import { sweepOrphanPending } from "../features/agent0/digest";
+import { executeChanges } from "../executor/executor";
+import { sweepOrphanPending } from "../agent0/digest";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 

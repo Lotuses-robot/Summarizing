@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { itemName, type RawInput } from "@summarizing/shared";
-import { executeChanges } from "../features/agent0/executor";
+import { executeChanges } from "../executor/executor";
 import { makeApp } from "../app";
-import { buildBoard } from "../features/board";
+import { buildBoard } from "../application/board";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 

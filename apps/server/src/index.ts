@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import { exitAfter, gracefulClose, makeApp, registerSources, startSources } from "./app";
 import { readStoredAi } from "./routes/settings";
 import { envFromAiSettings, makeOpenAiLlm, type TaggedLlm } from "./shared/llm";
-import { sweepOrphanPending } from "./features/agent0/digest";
+import { sweepOrphanPending } from "./agent0/digest";
 import { allSourceAdapters } from "./sources/registry";
 import { makeDb } from "./storage/db";
 

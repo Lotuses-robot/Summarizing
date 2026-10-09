@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { UncertainStatus } from "@summarizing/shared";
 import type { Db } from "../storage/db";
-import type { SweepResult } from "../features/agent0/sweep";
+import type { SweepResult } from "../agent0/sweep";
 import * as repo from "../storage/repo";
 import { nowLocalWallClock } from "../shared/time";
 

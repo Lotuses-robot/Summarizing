@@ -6,9 +6,9 @@ import {
   type ChangeList,
   type RawInput,
 } from "@summarizing/shared";
-import type { Db } from "../../storage/db";
-import * as repo from "../../storage/repo";
-import { parseModelJson } from "../../shared/modelJson";
+import type { Db } from "../storage/db";
+import * as repo from "../storage/repo";
+import { parseModelJson } from "../shared/modelJson";
 
 // 行为围栏（01§4.10④）：只查「行为」，不查「观点」。
 // 硬拒收 = ID 不存在 / 动作不在白名单(zod schema) / 格式不完整(zod schema) / 引文非原文逐字（空白归一后比对）。

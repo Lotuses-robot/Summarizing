@@ -3,8 +3,8 @@ import type { TaggedLlm } from "../shared/llm";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import { nowLocalWallClock } from "../shared/time";
-import { kickDigest } from "./agent0/digest";
-import type { AgentTools } from "./agent0/tools";
+import { kickDigest } from "../agent0/digest";
+import type { AgentTools } from "../agent0/tools";
 
 // 进站装配（D-84 唯一出处）：HTTP 路由与 SourceContext.ingest 共用同一段
 // 「落档 → fire-and-forget 消化」——信源源与手动源同一条管线，from 标记区分来源。

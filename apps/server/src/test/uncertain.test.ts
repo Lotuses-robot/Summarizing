@@ -3,10 +3,10 @@ import { ChangeListSchema, type Item, type RawInput } from "@summarizing/shared"
 import { makeApp } from "../app";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
-import { digestRawInput } from "../features/agent0/digest";
-import { executeChanges } from "../features/agent0/executor";
-import { sweepUncertainLibrary } from "../features/agent0/sweep";
-import { makeAgentTools } from "../features/agent0/tools";
+import { digestRawInput } from "../agent0/digest";
+import { executeChanges } from "../executor/executor";
+import { sweepUncertainLibrary } from "../agent0/sweep";
+import { makeAgentTools } from "../agent0/tools";
 import { FakeLlm } from "./helpers/fakeLlm";
 
 // 存疑信息库（D-85）：park_uncertain 入库 / resolve_uncertain 流转 / 查询端点排序 /

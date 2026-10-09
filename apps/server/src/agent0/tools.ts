@@ -19,9 +19,9 @@ import {
   type SearchUncertainResult,
   type SourceIdentity,
 } from "@summarizing/shared";
-import type { Db } from "../../storage/db";
-import * as repo from "../../storage/repo";
-import type { ToolDef } from "../../shared/llm";
+import type { Db } from "../storage/db";
+import * as repo from "../storage/repo";
+import type { ToolDef } from "../shared/llm";
 
 // agent0 的检索工具（01§4.14）：全部真代码检索，LLM 永不裸操作存储。
 // search_recent_raws / search_uncertain 归信源阶段（D-85）：前者找碎片兄弟，后者查存疑库复原。

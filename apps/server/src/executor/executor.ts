@@ -10,10 +10,10 @@ import {
   type Provenance,
   type RawInput,
 } from "@summarizing/shared";
-import type { Db, DbOrTx } from "../../storage/db";
-import { runInTransaction } from "../../storage/db";
-import * as repo from "../../storage/repo";
-import { normalizeWallClock, nowLocalWallClock } from "../../shared/time";
+import type { Db, DbOrTx } from "../storage/db";
+import { runInTransaction } from "../storage/db";
+import * as repo from "../storage/repo";
+import { normalizeWallClock, nowLocalWallClock } from "../shared/time";
 
 /** 独占执行器（01§4.10⑤）：合格项逐条落库+Replay；返回每项的人话说明供消化留痕。
  *  整批包在一个事务里——任一项抛错则全部回滚，避免「部分落笔 + 状态谎报失败」（原文仍在，可重跑）。
