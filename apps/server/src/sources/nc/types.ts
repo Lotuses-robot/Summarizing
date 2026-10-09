@@ -79,7 +79,7 @@ export interface SealedBatch {
   groupId: string;
   content: string;
   hasContent: boolean; // 批内是否有任何非空正文——空批守卫的依据（行前缀会让 content 恒非空，specs/003 评审）
-  eventTime: string | null; // 批内首条消息的**真**时刻；任一为机械时刻（桥接发 null）即整批置 null——禁接收兜底（01§5.3）
+  eventTime: string | null; // 批内最早一条带真时刻消息的时刻；全批无真时刻 → null（禁接收兜底，01§5.3）
   raw: NcEvent[]; // 原事件数组留底
   sender?: string; // 批内唯一发送者才写；多人批次省略——身份由行协议逐行承载（D-91）
 }
@@ -114,11 +114,11 @@ const ROLE_LABELS: Record<string, string> = { owner: "（群主）", admin: "（
 
 /** 显示名净化（只影响协议前缀，正文不动）：换行先折、**全部**半角冒号换全角——名字内不再含
  *  结构分隔符（五轮评审：裸「:」/结尾「：」同样致歧义）；再剥 ROLE_LABELS 身份括注字面量，
- *  防昵称冒充身份括注（三轮评审）；尾部冒号剥掉防「名字：: 正文」双分隔。 */
+ *  防昵称冒充身份括注（三轮评审）；尾部冒号与空白剥掉防「名字：: 正文」双分隔（六轮评审）。 */
 function safeSpeakerName(rawName: string): string {
   let name = rawName.replaceAll("\n", " ").replaceAll(":", "：");
   for (const label of Object.values(ROLE_LABELS)) name = name.replaceAll(label, "");
-  return name.replace(/[：:]+$/, "");
+  return name.replace(/[：:\s]+$/, "");
 }
 
 /** 一条缓冲事件 → 行协议行：`[时刻] 发送者（身份）: 正文`。
@@ -151,8 +151,8 @@ export function assembleBatch(buf: GroupBuffer): SealedBatch {
     groupId: buf.groupId,
     content: buf.events.map((e) => protocolLine(e, sameDay)).join("\n"),
     hasContent: buf.events.some((e) => e.content.trim() !== ""),
-    // 事件时间只认真时刻：批内混入机械时刻（桥接发 null 的消息）→ 整批置 null，禁接收兜底（01§5.3）
-    eventTime: first.trueTime ? first.at : null,
+    // 事件时间取批内最早一条带真时刻的消息；全批无真时刻 → null（禁接收兜底，01§5.3；六轮评审定语义）
+    eventTime: buf.events.find((e) => e.trueTime)?.at ?? null,
     raw: buf.events.map((e) => e.raw),
     // 显示名兜「未知」= 根本不知道谁发的——「未知」不署名（宁缺勿谎，五轮评审）
     sender:

@@ -167,9 +167,7 @@ export function makeNcAdapter(): SourceAdapter {
           role: ev.sender?.role,
           groupName,
           // 机械时刻（去抖/行前缀用）——桥接发 null 时按接收时刻；真伪由 trueTime 区分（01§5.3 禁兜底进 eventTime）
-          at: wallClockFromUnix(
-            typeof ev.time === "number" ? ev.time : Math.floor(Date.now() / 1000),
-          ),
+          at: wallClockFromUnix(ev.time ?? Math.floor(Date.now() / 1000)),
           trueTime: typeof ev.time === "number",
           raw: ev,
         };

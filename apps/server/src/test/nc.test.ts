@@ -268,6 +268,27 @@ describe("nc 适配器：纯函数", () => {
     expect(batch.sender).toBeUndefined(); // 两个不同的 user_id——不能署成一个人
   });
 
+  it("assembleBatch：混批取最早一条真时刻；全机械才置 null（specs/003 六轮评审）", () => {
+    const trueFirst = assembleBatch({
+      groupId: "g1",
+      events: [
+        mkEvent({ messageId: "m1", at: "2026-09-28T10:00:00", content: "带真时刻" }),
+        mkEvent({ messageId: "m2", at: "2026-09-28T10:01:00", content: "机械", trueTime: false }),
+      ],
+      lastAt: "2026-09-28T10:01:00",
+    });
+    expect(trueFirst.eventTime).toBe("2026-09-28T10:00:00"); // 混批：真时刻仍作锚
+    const falseFirst = assembleBatch({
+      groupId: "g1",
+      events: [
+        mkEvent({ messageId: "m1", at: "2026-09-28T10:00:00", content: "机械", trueTime: false }),
+        mkEvent({ messageId: "m2", at: "2026-09-28T10:01:00", content: "带真时刻" }),
+      ],
+      lastAt: "2026-09-28T10:01:00",
+    });
+    expect(falseFirst.eventTime).toBe("2026-09-28T10:01:00"); // 真时刻在哪条就从哪条取
+  });
+
   it("assembleBatch：无真时刻的事件 eventTime = null（禁接收兜底，specs/003 五轮评审/01§5.3）", () => {
     const batch = assembleBatch({
       groupId: "g1",
