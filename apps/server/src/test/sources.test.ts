@@ -159,7 +159,9 @@ describe("SourceContext（信源视角）", () => {
     expect(first.sourceIdentity).toEqual({ sourceLabel: "测试源" });
     expect(first.content).toBe("群里说的作业通知");
     // 零变更留痕（与手动源同一消化语义）
-    expect(repo.listRawAudit(db, first.id).some((n) => n.detail.includes("零变更"))).toBe(true);
+    expect(repo.listPipelineEvents(db, first.id).some((n) => n.detail.includes("零变更"))).toBe(
+      true,
+    );
   });
 
   it("ctx.ingest 给返回值：成功 { ok:true, id }（信源能感知落地）", async () => {

@@ -39,7 +39,7 @@ export async function digestRawInput(
 ): Promise<DigestResult> {
   const by: Provenance = { actor: "agent0", model: modelTag };
   try {
-    const list = await elicitChangeList(llm, tools, raw);
+    const list = await elicitChangeList(db, llm, tools, modelTag, raw);
 
     let { accepted, rejected } = runFence(db, raw, list);
     if (rejected.length > 0) {
@@ -57,7 +57,7 @@ export async function digestRawInput(
 
     for (const r of rejected) {
       // 再失败 → 放弃该项并留痕（不静默）
-      repo.appendRawAudit(db, {
+      repo.appendPipelineEvent(db, {
         rawInputId: raw.id,
         action: "fence_reject",
         detail: `围栏拒收并放弃：${r.reason}`,
@@ -70,7 +70,7 @@ export async function digestRawInput(
       accepted.length === 0
         ? "评估后未产生变更（零变更合法）"
         : `应用 ${accepted.length} 项变更：${details.join("；")}`;
-    repo.appendRawAudit(db, {
+    repo.appendPipelineEvent(db, {
       rawInputId: raw.id,
       action: "digest_done",
       detail: note + (rejected.length > 0 ? `（围栏拒收 ${rejected.length} 项）` : ""),
@@ -85,7 +85,7 @@ export async function digestRawInput(
     const detail = errText(err);
     try {
       repo.setDigestState(db, raw.id, "failed");
-      repo.appendRawAudit(db, {
+      repo.appendPipelineEvent(db, {
         rawInputId: raw.id,
         action: "digest_failed",
         detail: `AI 处理失败，标记「未处理」：${detail}`,
@@ -132,6 +132,8 @@ export function kickDigest(
   from: string,
   log?: (msg: string) => void,
 ): void {
+  // 发射即置「消化中」（同步、确定性）——与 pending（排队）区分，specs/004 FR-005
+  repo.setDigestState(db, raw.id, "digesting");
   void digestRawInput(db, llm, tools, modelTag, raw).catch((err) =>
     (log ?? ((msg: string) => process.stderr.write(`${msg}\n`)))(
       `[digest] 兜底泄漏（${from}）：${errText(err)}`,
@@ -139,16 +141,19 @@ export function kickDigest(
   );
 }
 
-/** 启动清扫（L11）：消化是进程内异步——进程死后 pending 永滞，而重启的这一刻不可能存在
- *  在途消化，所以「启动时仍是 pending」与「被中断的孤儿」严格等价，无需超时阈值。
- *  全部置为「未处理」：横幅可见、D-71 重试口可救（不可见不可救才是真丢失）。
- *  ⚠️ 单实例硬前提（S2 评审）：双进程并发时新实例会把旧实例在途的 pending 误扫成 failed，
+/** 启动清扫（L11 + specs/004 FR-005）：消化是进程内异步——进程死后 pending/digesting 永滞，
+ *  而重启的这一刻不可能存在在途消化，所以「启动时仍是 pending/digesting」与「被中断的孤儿」
+ *  严格等价，无需超时阈值。全部置为「未处理」：横幅可见、D-71 重试口可救（不可见不可救才是真丢失）。
+ *  ⚠️ 单实例硬前提（S2 评审）：双进程并发时新实例会把旧实例在途的批次误扫成 failed，
  *  随后重试即双消化——本地单用户部署下成立，勿多开。 */
 export function sweepOrphanPending(db: Db): void {
-  const orphans = repo.listRawInputsByState(db, "pending");
+  const orphans = [
+    ...repo.listRawInputsByState(db, "pending"),
+    ...repo.listRawInputsByState(db, "digesting"),
+  ];
   for (const raw of orphans) {
     repo.setDigestState(db, raw.id, "failed");
-    repo.appendRawAudit(db, {
+    repo.appendPipelineEvent(db, {
       rawInputId: raw.id,
       action: "startup_sweep",
       detail: "启动清扫：上次进程中断，本批未消化完——已标「未处理」，可重试",
@@ -157,22 +162,36 @@ export function sweepOrphanPending(db: Db): void {
   }
 }
 
-/** 工具循环：让模型自由检索（它决定查什么、查几次），直到吐出合法变更清单或超轮数抛错。 */
+/** 工具循环：让模型自由检索（它决定查什么、查几次），直到吐出合法变更清单或超轮数抛错。
+ *  每个带工具调用的轮次落一条 digest_trace 流水（specs/004 FR-006）——用户将来在流水视图
+ *  看到「先查了什么、后查了什么」；轨迹写失败只记 stderr，绝不拖垮消化。 */
 async function elicitChangeList(
+  db: Db,
   llm: LlmClient,
   tools: AgentTools,
+  modelTag: string,
   raw: RawInput,
 ): Promise<ChangeList> {
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const turn = await llm.chat({ system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS });
-    if (process.env.DIGEST_DEBUG === "1") {
-      // 调试观察：每轮模型在干什么（开 DIGEST_DEBUG=1 查看）
-      process.stderr.write(
-        `[digest] round ${round}: toolCalls=${JSON.stringify(turn.toolCalls.map((t) => t.name))} content=${JSON.stringify((turn.content ?? "").slice(0, 300))}\n`,
-      );
-    }
     if (turn.toolCalls.length > 0) {
+      try {
+        repo.appendPipelineEvent(db, {
+          rawInputId: raw.id,
+          action: "digest_trace",
+          detail: `第 ${round + 1} 轮：${turn.toolCalls.map((t) => t.name).join("、")}`,
+          payload: {
+            round,
+            thought: (turn.content ?? "").slice(0, 500),
+            tools: turn.toolCalls.map((t) => t.name),
+          },
+          by: { actor: "agent0", model: modelTag },
+        });
+      } catch (traceErr) {
+        // 轨迹是附属品：写失败绝不拖垮消化（specs/004 FR-006）
+        process.stderr.write(`[digest] 轨迹写入失败（尽力而为）：${errText(traceErr)}\n`);
+      }
       messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
       const ctx = { sourceIdentity: raw.sourceIdentity, eventTime: raw.eventTime };
       for (const call of turn.toolCalls) {

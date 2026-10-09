@@ -120,7 +120,7 @@ async function runSweep(
   // 每轮一条汇总审计（触发来源/处置量可回溯；逐条审计已由执行器事务内落过，不重复）
   const anchor = anchorRawInputId ? repo.getRawInput(db, anchorRawInputId) : null;
   if (anchor !== null) {
-    repo.appendRawAudit(db, {
+    repo.appendPipelineEvent(db, {
       rawInputId: anchor.id,
       action: "sweep_done",
       detail: `存疑库清扫（触发：${from}）：复核 ${open.length} 条，处置 ${touched} 条（丢弃 ${discarded}）`,

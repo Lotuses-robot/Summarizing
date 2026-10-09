@@ -73,9 +73,8 @@ function ensureSchema(sqlite: Database.Database): void {
       digest_state TEXT NOT NULL DEFAULT 'pending',
       raw TEXT
     );
-    CREATE TABLE IF NOT EXISTS replay_nodes (
+    CREATE TABLE IF NOT EXISTS pipeline_events (
       id TEXT PRIMARY KEY,
-      entity_type TEXT NOT NULL,
       entity_id TEXT NOT NULL,
       action TEXT NOT NULL,
       detail TEXT NOT NULL,
@@ -83,7 +82,7 @@ function ensureSchema(sqlite: Database.Database): void {
       at TEXT NOT NULL,
       by TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS replay_entity_idx ON replay_nodes (entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS pipeline_entity_idx ON pipeline_events (entity_id);
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -169,11 +168,11 @@ function ensureSchema(sqlite: Database.Database): void {
     renamePluginColumnIfNeeded(sqlite);
   }
 
-  // ── 版本署名迁移（D-88）：item_versions.by / replay_nodes.by 裸串 → 结构化 JSON ──
+  // ── 版本署名迁移（D-88）：item_versions.by / pipeline_events.by 裸串 → 结构化 JSON ──
   // 存量裸串（agent0:flash / 前台:flash / sweep:api / user:手动 / system / sweep(...):agent0:x）
   // 解析成 {actor, model}；已是对象（json_valid 且 json_type=object）的不动。幂等。
   migrateByToProvenance(sqlite, "item_versions");
-  migrateByToProvenance(sqlite, "replay_nodes");
+  migrateByToProvenance(sqlite, "pipeline_events");
 }
 
 /** source_settings 若还带着旧列名 plugin（改名中断的中间态）→ 补跑列改名（幂等）。 */

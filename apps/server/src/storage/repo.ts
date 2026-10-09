@@ -3,6 +3,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import {
   EvidenceSourceSchema,
   FragmentSchema,
+  PipelineEventSchema,
   ItemSchema,
   ItemSnapshotSchema,
   ItemVersionSchema,
@@ -14,6 +15,7 @@ import {
   type Fragment,
   type Item,
   type ItemVersion,
+  type PipelineEvent,
   type Provenance,
   type RawInput,
   type SourceIdentity,
@@ -46,7 +48,7 @@ function parseJsonUnknown(text: string): unknown {
 // ── 排序不变量（唯一出处）：墙钟是秒级精度，同事务同秒连写多条是常态，
 // 一切按 at 的排序必须 rowid 破平，否则同秒顺序未定义（本轮曾漏两处真踩）。
 const VERSION_ORDER = [asc(s.itemVersions.at), asc(sql`rowid`)] as const;
-const REPLAY_ORDER = [asc(s.replayNodes.at), asc(sql`rowid`)] as const;
+const PIPELINE_ORDER = [asc(s.pipelineEvents.at), asc(sql`rowid`)] as const;
 
 /** 追加一个事项版本（完整快照）。一切事项写入的必经之路。
  *  写前过 ItemSchema——不变量（恰好一个 name 等）在**写路径**强制，投毒数据在此拒收
@@ -226,7 +228,8 @@ function rowToRawInput(row: typeof s.rawInputs.$inferSelect): RawInput {
 }
 
 /** 尝试把字符串当 JSON 解析；不是合法 JSON 就原样返回（存量裸字符串走这里）。 */
-function parseJsonMaybe(text: string): unknown {
+function parseJsonMaybe(text: string | null): unknown {
+  if (text === null) return null;
   try {
     return parseJsonUnknown(text);
   } catch {
@@ -301,14 +304,13 @@ function wallClockDaysAgo(days: number): string {
 /** SQL 端截断上限（rowid 倒序 = 最新优先；过滤后数量由调用方再截）。 */
 const RECENT_RAWS_SQL_LIMIT = 200;
 
-/** 批次级审计（消化生命周期；事项历史在 item_versions）。 */
-export function appendRawAudit(
+/** 批次级流水（消化生命周期 + agent0 轨迹；事项历史在 item_versions；specs/004 正名）。 */
+export function appendPipelineEvent(
   db: DbOrTx,
   args: { rawInputId: string; action: string; detail: string; payload?: unknown; by: Provenance },
 ): void {
   const row = {
     id: newId(),
-    entityType: "raw_input",
     entityId: args.rawInputId,
     action: args.action,
     detail: args.detail,
@@ -316,18 +318,27 @@ export function appendRawAudit(
     at: nowLocalWallClock(),
     by: JSON.stringify(args.by), // Provenance 结构化存 JSON 串（列仍是 TEXT，D-88）
   };
-  db.insert(s.replayNodes).values(row).run();
+  db.insert(s.pipelineEvents).values(row).run();
 }
 
-/** 某批次的审计记录（时间升序）——走复合索引 (entity_type, entity_id)。 */
-export function listRawAudit(db: DbOrTx, rawInputId: string): { action: string; detail: string }[] {
+/** 某批次的全部流水（时间升序，全字段 zod 解析——C2 读口与测试共用；走 entity_id 索引）。 */
+export function listPipelineEvents(db: DbOrTx, rawInputId: string): PipelineEvent[] {
   return db
     .select()
-    .from(s.replayNodes)
-    .where(and(eq(s.replayNodes.entityType, "raw_input"), eq(s.replayNodes.entityId, rawInputId)))
-    .orderBy(...REPLAY_ORDER)
+    .from(s.pipelineEvents)
+    .where(eq(s.pipelineEvents.entityId, rawInputId))
+    .orderBy(...PIPELINE_ORDER)
     .all()
-    .map((r) => ({ action: r.action, detail: r.detail }));
+    .map((r) =>
+      PipelineEventSchema.parse({
+        id: r.id,
+        action: r.action,
+        detail: r.detail,
+        payload: parseJsonMaybe(r.payload),
+        at: r.at,
+        by: parseJsonMaybe(r.by),
+      }),
+    );
 }
 
 // ── 片段池（快照按内容去重，01§4.4）──

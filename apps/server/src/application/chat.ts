@@ -301,14 +301,14 @@ function insertChatRaw(db: Db, content: string) {
   });
 }
 
-/** 纯寒暄留痕（D-14）：原文入库即视为已处理，审计记 chitchat_discard，不进消化。 */
+/** 纯寒暄留痕（D-14）：原文入库即视为已处理（零变更的一种），流水记 digest_done，不进消化。 */
 function chitchatAudit(db: Db, content: string, modelTag: string): void {
   const raw = insertChatRaw(db, content);
   repo.setDigestState(db, raw.id, "digested");
-  repo.appendRawAudit(db, {
+  repo.appendPipelineEvent(db, {
     rawInputId: raw.id,
-    action: "chitchat_discard",
-    detail: "前台判定纯寒暄，未入库处理（留痕）",
+    action: "digest_done",
+    detail: "前台判定纯寒暄，未产生变更（留痕）",
     by: { actor: "前台", model: modelTag },
   });
 }

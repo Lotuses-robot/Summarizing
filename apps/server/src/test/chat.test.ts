@@ -42,6 +42,7 @@ function seedBoard(db: ReturnType<typeof makeDb>): string {
 function chatRaws(db: ReturnType<typeof makeDb>) {
   return [
     ...repo.listRawInputsByState(db, "pending"),
+    ...repo.listRawInputsByState(db, "digesting"),
     ...repo.listRawInputsByState(db, "digested"),
     ...repo.listRawInputsByState(db, "failed"),
   ].filter((r) => r.sourceType === "chat");
@@ -125,8 +126,8 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     const raw = raws[0];
     if (!raw) throw new Error("留痕批次缺失");
     expect(raw.digestState).toBe("digested");
-    const notes = repo.listRawAudit(db, raw.id);
-    expect(notes.some((n) => n.action === "chitchat_discard")).toBe(true);
+    const notes = repo.listPipelineEvents(db, raw.id);
+    expect(notes.some((n) => n.action === "digest_done" && n.detail.includes("寒暄"))).toBe(true);
   });
 
   it("get_item → references 收集（chips 深链数据，05§四）", async () => {

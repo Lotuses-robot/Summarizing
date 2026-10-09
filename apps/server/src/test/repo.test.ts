@@ -117,16 +117,16 @@ describe("事项版本链", () => {
     expect(repo.listRawInputsByState(db, "failed")).toHaveLength(1);
   });
 
-  it("批次审计：appendRawAudit / listRawAudit", () => {
+  it("批次审计：appendPipelineEvent / listPipelineEvents", () => {
     const db = makeDb(":memory:");
     const raw = seedRaw(db);
-    repo.appendRawAudit(db, {
+    repo.appendPipelineEvent(db, {
       rawInputId: raw.id,
       action: "digest_done",
       detail: "应用 1 项变更",
       by: { actor: "agent0", model: "test" },
     });
-    const audit = repo.listRawAudit(db, raw.id);
+    const audit = repo.listPipelineEvents(db, raw.id);
     expect(audit).toHaveLength(1);
     expect(audit[0]?.action).toBe("digest_done");
   });
@@ -153,8 +153,8 @@ describe("孤儿清扫（L11）", () => {
     sweepOrphanPending(db);
     expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
     expect(repo.listRawInputsByState(db, "failed")).toHaveLength(2);
-    expect(repo.listRawAudit(db, a.id)[0]?.action).toBe("startup_sweep");
-    expect(repo.listRawAudit(db, b.id)[0]?.action).toBe("startup_sweep");
+    expect(repo.listPipelineEvents(db, a.id)[0]?.action).toBe("startup_sweep");
+    expect(repo.listPipelineEvents(db, b.id)[0]?.action).toBe("startup_sweep");
   });
 
   it("digested / failed 不动", () => {
@@ -201,7 +201,7 @@ describe("executeChanges 事务原子性", () => {
     ).toThrow();
     // 整批回滚：第 1 项不应存在
     expect(repo.deriveItems(db)).toHaveLength(0);
-    expect(repo.listRawAudit(db, raw.id)).toHaveLength(0);
+    expect(repo.listPipelineEvents(db, raw.id)).toHaveLength(0);
   });
 });
 

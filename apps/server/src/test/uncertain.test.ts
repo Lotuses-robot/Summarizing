@@ -115,7 +115,9 @@ describe("存疑信息库（D-85）", () => {
     expect(merged?.resolvedAt).not.toBeNull();
     expect(repo.getUncertainInput(db, b.id)?.status).toBe("discarded");
     // 处置有审计留痕
-    expect(repo.listRawAudit(db, raw.id).some((n) => n.action === "uncertain_resolved")).toBe(true);
+    expect(repo.listPipelineEvents(db, raw.id).some((n) => n.action === "uncertain_resolved")).toBe(
+      true,
+    );
   });
 
   it("围栏：resolve_uncertain 目标不存在 → 拒收（走 digest 全链路）", async () => {
@@ -143,7 +145,7 @@ describe("存疑信息库（D-85）", () => {
     expect(result.state).toBe("digested"); // 拒收项被丢弃，批次仍消化
     expect(result.appliedCount).toBe(0); // 坏目标未落库
     // 消化留痕：围栏拒收并放弃（不静默）
-    expect(repo.listRawAudit(db, raw.id).some((n) => n.detail.includes("拒收"))).toBe(true);
+    expect(repo.listPipelineEvents(db, raw.id).some((n) => n.detail.includes("拒收"))).toBe(true);
   });
 
   it("围栏：resolve_uncertain outcome=merged 缺去向 → 拒收", async () => {
@@ -262,7 +264,9 @@ describe("清扫循环（D-85）：丢被取代的、留仍有效的", () => {
     expect(repo.getUncertainInput(db, a.id)?.status).toBe("discarded");
     expect(repo.listUncertainByStatus(db, "open")).toHaveLength(1); // B 仍 open
     // 丢弃有审计留痕
-    expect(repo.listRawAudit(db, raw.id).some((n) => n.action === "uncertain_resolved")).toBe(true);
+    expect(repo.listPipelineEvents(db, raw.id).some((n) => n.action === "uncertain_resolved")).toBe(
+      true,
+    );
   });
 
   it("清扫围栏：模型试图改事项 → 被忽略（清扫只许动库）", async () => {

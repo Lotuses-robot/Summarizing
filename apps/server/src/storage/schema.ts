@@ -117,19 +117,18 @@ export const chatTurns = sqliteTable(
   (t) => [index("chat_turns_at_idx").on(t.at)],
 );
 
-// 仅承载「批次级」审计（消化完成/失败/围栏放弃/寒暄丢弃）——
-// 事项的历史在 item_versions（版本链），两者职责不同。
-export const replayNodes = sqliteTable(
-  "replay_nodes",
+// 仅承载「批次级」流水（消化完成/失败/围栏放弃/落笔动作/agent0 轨迹）——
+// 事项的历史在 item_versions（版本链），两者职责不同（specs/004 正名：原 replay_nodes）。
+export const pipelineEvents = sqliteTable(
+  "pipeline_events",
   {
     id: text("id").primaryKey(),
-    entityType: text("entity_type").notNull(), // S1 只有 raw_input
-    entityId: text("entity_id").notNull(),
+    entityId: text("entity_id").notNull(), // 挂靠的批次 id（raw_inputs.id）
     action: text("action").notNull(),
     detail: text("detail").notNull(), // 面向用户的一句话（01§4.6 禁内部堆栈）
     payload: text("payload"), // JSON 字符串，可空
     at: text("at").notNull(),
     by: text("by").notNull(), // 含模型标识
   },
-  (t) => [index("replay_entity_idx").on(t.entityType, t.entityId)],
+  (t) => [index("pipeline_entity_idx").on(t.entityId)],
 );

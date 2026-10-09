@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { itemDueDate, type Item, type RawInput } from "@summarizing/shared";
 import { makeApp } from "../app";
-import { digestRawInput } from "../agent0/digest";
+import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
 import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
 import { makeAgentTools } from "../agent0/tools";
@@ -105,7 +105,7 @@ describe("agent0 消化管线", () => {
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(0);
     expect(repo.deriveItems(db)).toHaveLength(0);
-    const audit = repo.listRawAudit(db, raw.id);
+    const audit = repo.listPipelineEvents(db, raw.id);
     expect(audit.some((n) => n.detail.includes("零变更"))).toBe(true);
   });
 
@@ -146,9 +146,9 @@ describe("agent0 消化管线", () => {
     expect(
       repo.deriveItems(db).some((i) => i.elements.some((e) => e.text === "修复轮的产物")),
     ).toBe(true);
-    expect(repo.listRawAudit(db, raw.id).filter((n) => n.action === "fence_reject")).toHaveLength(
-      0,
-    );
+    expect(
+      repo.listPipelineEvents(db, raw.id).filter((n) => n.action === "fence_reject"),
+    ).toHaveLength(0);
   });
 
   it("④ 修复仍失败 → 放弃该项并留痕", async () => {
@@ -167,7 +167,7 @@ describe("agent0 消化管线", () => {
 
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(0);
-    const audit = repo.listRawAudit(db, raw.id);
+    const audit = repo.listPipelineEvents(db, raw.id);
     expect(audit.filter((n) => n.action === "fence_reject")).toHaveLength(1);
   });
 
@@ -210,7 +210,7 @@ describe("agent0 消化管线", () => {
     expect(result.state).toBe("failed");
     expect(repo.getRawInput(db, raw.id)?.content).toBe(PASTE);
     expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
-    const audit = repo.listRawAudit(db, raw.id);
+    const audit = repo.listPipelineEvents(db, raw.id);
     expect(audit.some((n) => n.action === "digest_failed" && n.detail.includes("未处理"))).toBe(
       true,
     );
@@ -502,7 +502,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(0);
     expect(repo.deriveItems(db)).toHaveLength(0);
-    const audit = repo.listRawAudit(db, raw.id);
+    const audit = repo.listPipelineEvents(db, raw.id);
     expect(audit.some((n) => n.detail.includes("零变更"))).toBe(true);
   });
 });
@@ -781,5 +781,55 @@ describe("agent0 检索工具：search_recent_raws（二轮评审 C：原零测�
       { sourceIdentity: { sourceLabel: "群A" }, eventTime: null },
     );
     expect(same.raws.map((r) => r.content)).toEqual(["群A的"]);
+  });
+});
+
+describe("流水数据层（specs/004）", () => {
+  it("kickDigest 发射即置 digesting（同步确定性，FR-005）", () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    const raw = seedRaw(db);
+    kickDigest(db, llm, makeAgentTools(db), MODEL, raw, "test");
+    expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digesting");
+  });
+
+  it("sweepOrphanPending：digesting 孤儿 → failed + startup_sweep 流水（FR-005）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    repo.setDigestState(db, raw.id, "digesting");
+    sweepOrphanPending(db);
+    expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
+    expect(repo.listPipelineEvents(db, raw.id)[0]?.action).toBe("startup_sweep");
+  });
+
+  it("digest_trace：两轮工具循环 → 恰两条 trace（round/tools/thought 落 payload，FR-006）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({
+      content: "我先查查看",
+      toolCalls: [{ id: "t1", name: "search_items", argsJson: '{"query":"数据结构"}' }],
+    });
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t2", name: "get_item", argsJson: '{"id":"nope"}' }],
+    });
+    llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
+    const raw = seedRaw(db);
+    kickDigest(db, llm, makeAgentTools(db), MODEL, raw, "test");
+    await vi.waitFor(
+      () => {
+        expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digested");
+      },
+      { timeout: 3000 },
+    );
+    const traces = repo.listPipelineEvents(db, raw.id).filter((e) => e.action === "digest_trace");
+    expect(traces).toHaveLength(2);
+    expect(traces[0]?.payload).toMatchObject({
+      round: 0,
+      tools: ["search_items"],
+      thought: "我先查查看",
+    });
+    expect(traces[1]?.payload).toMatchObject({ round: 1, tools: ["get_item"] });
   });
 });

@@ -156,7 +156,7 @@ function applyChanges(
           const current = repo.deriveItem(tx, item.targetId);
           if (!current) {
             // 围栏已拦；双保险：降级为批次审计留痕，不因一条坏 target 回滚整批
-            repo.appendRawAudit(tx, {
+            repo.appendPipelineEvent(tx, {
               rawInputId: raw.id,
               action: "digest_note",
               detail: `${item.note}（目标事项 ${item.targetId} 不存在，降级为批次留痕）`,
@@ -178,7 +178,7 @@ function applyChanges(
             by,
           });
         } else {
-          repo.appendRawAudit(tx, {
+          repo.appendPipelineEvent(tx, {
             rawInputId: item.targetId,
             action: "digest_note",
             detail: item.note,
@@ -224,7 +224,7 @@ function applyChanges(
           }
           throw new Error(`uncertain not found: ${item.id}`); // 围栏已验，双保险
         }
-        repo.appendRawAudit(tx, {
+        repo.appendPipelineEvent(tx, {
           rawInputId: raw.id,
           action: "uncertain_resolved",
           detail: `${item.outcome === "merged" ? "合并" : "丢弃"}存疑条目：${item.note}`,

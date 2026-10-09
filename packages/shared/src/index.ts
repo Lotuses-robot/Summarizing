@@ -159,7 +159,7 @@ export type Fragment = z.infer<typeof FragmentSchema>;
 
 // ───────────────────────── RawInput（01§5.3）─────────────────────────
 
-export const DigestState = z.enum(["pending", "digested", "failed"]); // 未消化 / 已消化 / 未处理
+export const DigestState = z.enum(["pending", "digesting", "digested", "failed"]); // 未消化 / 消化中 / 已消化 / 未处理
 export type DigestState = z.infer<typeof DigestState>;
 
 /** 来源身份：**弹性字典**（D-84）——core 契约只约束「是对象 + 保留键 sourceLabel（非空）」，
@@ -601,3 +601,18 @@ export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 export function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+// ──────────────── 流水（批次级审计，specs/004）────────────────
+
+/** 流水事件：一个批次（raw_input）身上发生过什么——消化结果/落笔动作/agent0 轨迹/围栏拒收。
+ *  payload 按 action 各异且刻意不设严格 schema（自由形状，读侧防御性解析）；
+ *  detail 是给人看的一句话，必须不看 payload 也能自足。 */
+export const PipelineEventSchema = z.object({
+  id: z.string(),
+  action: z.string(),
+  detail: z.string(),
+  payload: z.unknown().nullable(),
+  at: z.string(), // 本地墙钟
+  by: ProvenanceSchema,
+});
+export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
