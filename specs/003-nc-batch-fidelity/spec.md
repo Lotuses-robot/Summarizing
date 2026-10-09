@@ -66,11 +66,12 @@
 
 ### Functional Requirements
 
-- **FR-001**: 组批正文 MUST 为逐行 `[HH:mm] 发送者（身份）: 内容` 格式（跨天批次 `[MM-DD HH:mm]`）。
+- **FR-001**: 组批正文 MUST 为逐行 `[HH:mm] 发送者（身份）: 内容` 格式（跨天批次 `[MM-DD HH:mm]`）。显示名 MUST 经净化：换行折空格、全部半角冒号换全角、剥「（群主）/（管理员）」字面量、尾部冒号剥除——净化后为空 MUST 退回 senderId 或「未知」（二/三轮评审）。
 - **FR-002**: 消息正文 MUST 逐字保真（空白归一层面——多行消息续行缩进两空格以维持行协议，评审修正）。
 - **FR-003**: 群角色 owner/admin（小写归一）MUST 显示为「群主/管理员」；member、缺席、null 与未知值 MUST 不显示；角色字段收宽松形状（含 null）MUST NOT 导致事件被丢（评审修正）。
-- **FR-004**: `sourceIdentity.sender` MUST 仅在「可确证唯一发送者」时存在——任一事件缺 senderId 的多消息批次 MUST 省略（宁缺勿谎，三轮评审）。
-- **FR-005**: 事件 schema MUST 解析 `sender.role`（owner/admin/member，缺席放过）。
+- **FR-004**: `sourceIdentity.sender` MUST 仅在「可确证唯一发送者」时存在——任一事件缺 senderId 的多消息批次 MUST 省略（宁缺勿谎，三轮评审）；显示名兜「未知」时 MUST 不署名（五轮评审）。
+- **FR-005**: 事件 schema MUST 宽松解析：`sender.role`（string/数字/null/缺席均不丢事件）与 `nickname/card/user_id/raw_message/time/message/段 data` 的同款 null 容忍（三轮评审——严格形状会让整条事件 safeParse 失败 → 204 静默丢）。
+- **FR-006**: 消息缺真时刻（桥接发 null/缺席）→ 批次 `eventTime` MUST 置 null（**禁按接收时刻兜底**——01§5.3 红线，五轮评审）；接收时刻仅可用于去抖与行前缀等机械用途，MUST NOT 进入 eventTime。
 
 ### Key Entities
 
@@ -87,5 +88,6 @@
 ## Assumptions
 
 - 仅改 nc 信源（weflow 搁置中，未跟踪不入库）；手打/对话源无此问题。
-- 时间取消息自带时刻（非接收时刻），既有 `at` 字段承载。
+- **时刻语义（FR-006）**：真时刻优先；桥接发 null → 批次 `eventTime=null`（下游本就支持「日期未知」，禁接收兜底）；接收时刻仅用于去抖与行前缀等机械用途。
 - 协议是信源侧约定（core/agent0 只当文本读），不进 shared 契约。
+- 已接受残余风险：成员可在消息正文伪造协议行（正文不可消毒）——记录于 D-91/docs/07，勿以转义正文「修」它。
