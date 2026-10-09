@@ -233,6 +233,18 @@ describe("nc 适配器：纯函数", () => {
     expect(batch.content.includes("收到")).toBe(true);
   });
 
+  it("assembleBatch：显示名含「: 」被净化，不冒充署名分隔（specs/003 二轮评审）", () => {
+    const batch = assembleBatch({
+      groupId: "g1",
+      events: [
+        mkEvent({ messageId: "m1", content: "明天交", sender: "注意: 下面" }),
+        mkEvent({ messageId: "m2", content: "收到" }),
+      ],
+      lastAt: "2026-09-28T10:00:30",
+    });
+    expect(batch.content).toBe("[10:00] 注意：下面: 明天交\n[10:00] 小明: 收到");
+  });
+
   it("assembleBatch：同显示名不同 senderId 视为多人，sender 省略（specs/003 评审修正）", () => {
     const batch = assembleBatch({
       groupId: "g1",

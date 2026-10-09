@@ -89,11 +89,13 @@ function timePrefix(at: string, sameDay: boolean): string {
 /** 一条缓冲事件 → 行协议行：`[时刻] 发送者（身份）: 正文`。
  *  前缀只在行首、正文逐字不动——引文逐字校验（fence 对 content 空白归一查子串）因此不受影响。
  *  多行消息的续行缩进两空格：维持「每条一行有前缀」的归属边界（空白归一不伤引文，评审修正）。
- *  角色小写归一后只认 owner/admin（nc 变体大小写漂移；未知值不显示，specs/003 评审修正）。 */
+ *  角色小写归一后只认 owner/admin（nc 变体大小写漂移；未知值不显示，specs/003 评审修正）。
+ *  显示名净化：昵称里合法的「: 」与换行会冒充行协议结构（二轮评审）——半角冒号换全角、换行折空格。 */
 function protocolLine(e: BufferedEvent, sameDay: boolean): string {
   const roleKey = e.role?.toLowerCase();
   const role = roleKey === "owner" ? "（群主）" : roleKey === "admin" ? "（管理员）" : "";
-  const prefix = `${timePrefix(e.at, sameDay)} ${e.sender}${role}: `;
+  const speaker = e.sender.replaceAll(": ", "：").replaceAll("\n", " ");
+  const prefix = `${timePrefix(e.at, sameDay)} ${speaker}${role}: `;
   if (!e.content.includes("\n")) return prefix + e.content;
   return e.content
     .split("\n")
