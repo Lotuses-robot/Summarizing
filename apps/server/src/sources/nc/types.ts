@@ -27,7 +27,9 @@ export const NcEventSchema = z.object({
       user_id: z.union([z.string(), z.number()]).transform(String).optional(),
       nickname: z.string().optional(),
       card: z.string().optional(), // 群名片（有则比 nickname 更贴合群内身份）
-      role: z.enum(["owner", "admin", "member"]).optional(), // 群角色（specs/003 FR-003；缺席放过）
+      // 群角色（specs/003）：宽松收 string——nc 变体（OneBot 实现）大小写/取值漂移，
+      // 严格枚举会让整条事件 safeParse 失败 → 204 静默丢（评审修正）；归一在 protocolLine。
+      role: z.string().optional(),
     })
     .optional(),
 });
@@ -40,7 +42,7 @@ export interface BufferedEvent {
   content: string; // 单条消息文本（图片段已在 filter 阶段转 [图片] 占位）
   sender: string; // 发信人显示名（群名片 > 昵称 > user_id）
   senderId: string;
-  role?: "owner" | "admin" | "member"; // 群角色（specs/003；member/缺席不显示，防噪声）
+  role?: string; // 群角色原文（owner/admin/member；nc 变体可能漂移——显示时小写归一，未知值不显示）
   groupName: string; // 白名单里的群备注名（入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
   at: string; // 消息自带时刻（本地墙钟）
   raw: NcEvent; // 原始事件留底
@@ -84,10 +86,18 @@ function timePrefix(at: string, sameDay: boolean): string {
 }
 
 /** 一条缓冲事件 → 行协议行：`[时刻] 发送者（身份）: 正文`。
- *  前缀只在行首、正文逐字不动——引文逐字校验（fence 对 content 查子串）因此不受影响。 */
+ *  前缀只在行首、正文逐字不动——引文逐字校验（fence 对 content 空白归一查子串）因此不受影响。
+ *  多行消息的续行缩进两空格：维持「每条一行有前缀」的归属边界（空白归一不伤引文，评审修正）。
+ *  角色小写归一后只认 owner/admin（nc 变体大小写漂移；未知值不显示，specs/003 评审修正）。 */
 function protocolLine(e: BufferedEvent, sameDay: boolean): string {
-  const role = e.role === "owner" ? "（群主）" : e.role === "admin" ? "（管理员）" : "";
-  return `${timePrefix(e.at, sameDay)} ${e.sender}${role}: ${e.content}`;
+  const roleKey = e.role?.toLowerCase();
+  const role = roleKey === "owner" ? "（群主）" : roleKey === "admin" ? "（管理员）" : "";
+  const prefix = `${timePrefix(e.at, sameDay)} ${e.sender}${role}: `;
+  if (!e.content.includes("\n")) return prefix + e.content;
+  return e.content
+    .split("\n")
+    .map((line, i) => (i === 0 ? prefix + line : `  ${line}`))
+    .join("\n");
 }
 
 /** 把一批事件合并成行协议批次内容（每条一行；组内首条时刻为 eventTime；specs/003 D-91）。 */
@@ -97,12 +107,14 @@ export function assembleBatch(buf: GroupBuffer): SealedBatch {
   if (!first || !last) throw new Error(`组 ${buf.groupId} 缓冲为空，不应封批`);
   const firstDate = first.at.split("T")[0] ?? "";
   const sameDay = buf.events.every((e) => (e.at.split("T")[0] ?? "") === firstDate);
-  const senders = new Set(buf.events.map((e) => e.sender));
+  // 发话人按 senderId 去重（显示名会撞——两人同名时 sender 仍不得说谎，specs/003 评审修正）；
+  // senderId 缺席（空串）退回显示名。
+  const speakers = new Set(buf.events.map((e) => (e.senderId !== "" ? e.senderId : e.sender)));
   return {
     groupId: buf.groupId,
     content: buf.events.map((e) => protocolLine(e, sameDay)).join("\n"),
     eventTime: first.at,
     raw: buf.events.map((e) => e.raw),
-    sender: senders.size === 1 ? first.sender : undefined,
+    sender: speakers.size === 1 ? first.sender : undefined,
   };
 }

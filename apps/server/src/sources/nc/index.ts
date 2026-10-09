@@ -100,8 +100,9 @@ export function makeNcAdapter(): SourceAdapter {
    *  组装端已保证载荷恒合法（见 groupNameOf / 组装兜底），ingest 拒收只剩真瞬态故障，重试才成立。 */
   const sealGroup = (ctx: SourceContext, buf: GroupBuffer): void => {
     const batch = assembleBatch(buf);
-    // 全空消息（raw_message 为空且无可展开段）= 无信息量，留痕后丢弃（留缓冲只会无限重试）
-    if (batch.content.trim() === "") {
+    // 全空消息（raw_message 为空且无可展开段）= 无信息量，留痕后丢弃（留缓冲只会无限重试）。
+    // ⚠️ 判「消息正文全空」而非组批后 content——行协议前缀会把全空批次衬成非空（specs/003 评审修正）。
+    if (batch.content.trim() === "" || buf.events.every((e) => e.content.trim() === "")) {
       ctx.log.warn(`群 ${buf.groupId} 的批次内容为空，丢弃（${buf.events.length} 条）`);
       for (const e of buf.events) rememberId(e.messageId);
       buffers.delete(buf.groupId);

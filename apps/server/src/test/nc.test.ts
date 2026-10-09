@@ -127,12 +127,12 @@ describe("nc 适配器：纯函数", () => {
   });
 
   it("assembleBatch：多人批次逐行各归其主，sender 键省略（specs/003 US1/US2）", () => {
-    /** 造一条缓冲事件（发信人可指定）。 */
-    const mk = (id: string, at: string, content: string, sender: string) => ({
+    /** 造一条缓冲事件（发信人与 senderId 可指定）。 */
+    const mk = (id: string, at: string, content: string, sender: string, senderId: string) => ({
       messageId: id,
       content,
       sender,
-      senderId: "1",
+      senderId,
       groupName: "英语群",
       at,
       raw: NcEventSchema.parse(
@@ -142,9 +142,9 @@ describe("nc 适配器：纯函数", () => {
     const batch = assembleBatch({
       groupId: "g1",
       events: [
-        mk("m1", "2026-09-28T10:00:00", "谁看到通知了", "小明"),
-        mk("m2", "2026-09-28T10:00:20", "在我这", "小红"),
-        mk("m3", "2026-09-28T10:00:40", "放学来拿", "小明"),
+        mk("m1", "2026-09-28T10:00:00", "谁看到通知了", "小明", "10001"),
+        mk("m2", "2026-09-28T10:00:20", "在我这", "小红", "10002"),
+        mk("m3", "2026-09-28T10:00:40", "放学来拿", "小明", "10001"),
       ],
       lastAt: "2026-09-28T10:00:40",
     });
@@ -154,9 +154,9 @@ describe("nc 适配器：纯函数", () => {
     expect(batch.sender).toBeUndefined(); // 多人批次不说谎：不写 sender
   });
 
-  it("assembleBatch：群身份括注只认 owner/admin；member 与缺席无噪声（specs/003 US3）", () => {
-    /** 造一条缓冲事件（角色可指定）。 */
-    const mk = (id: string, at: string, content: string, role?: "owner" | "admin" | "member") => ({
+  it("assembleBatch：群身份括注只认 owner/admin（大小写归一）；member 与缺席无噪声（specs/003 US3+评审）", () => {
+    /** 造一条缓冲事件（角色可指定——任意字符串，nc 变体漂移不丢消息）。 */
+    const mk = (id: string, at: string, content: string, role?: string) => ({
       messageId: id,
       content,
       sender: "老王",
@@ -174,13 +174,42 @@ describe("nc 适配器：纯函数", () => {
         mk("m1", "2026-09-28T10:00:00", "我宣布", "owner"),
         mk("m2", "2026-09-28T10:00:10", "同意", "admin"),
         mk("m3", "2026-09-28T10:00:20", "哦", "member"),
-        mk("m4", "2026-09-28T10:00:30", "…"),
+        mk("m4", "2026-09-28T10:00:30", "大写也认", "Owner"),
+        mk("m5", "2026-09-28T10:00:40", "…"),
+      ],
+      lastAt: "2026-09-28T10:00:40",
+    });
+    expect(batch.content).toBe(
+      "[10:00] 老王（群主）: 我宣布\n[10:00] 老王（管理员）: 同意\n[10:00] 老王: 哦\n[10:00] 老王（群主）: 大写也认\n[10:00] 老王: …",
+    );
+  });
+
+  it("assembleBatch：多行消息续行缩进，正文引文仍可命中（specs/003 评审修正）", () => {
+    /** 造一条缓冲事件（占位 raw）。 */
+    const mk = (id: string, at: string, content: string) => ({
+      messageId: id,
+      content,
+      sender: "小明",
+      senderId: "1",
+      groupName: "英语群",
+      at,
+      raw: NcEventSchema.parse(
+        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
+      ),
+    });
+    const batch = assembleBatch({
+      groupId: "g1",
+      events: [
+        mk("m1", "2026-09-28T10:00:00", "作业要求：\n1. 先写作文\n2. 下周交"),
+        mk("m2", "2026-09-28T10:00:30", "收到"),
       ],
       lastAt: "2026-09-28T10:00:30",
     });
     expect(batch.content).toBe(
-      "[10:00] 老王（群主）: 我宣布\n[10:00] 老王（管理员）: 同意\n[10:00] 老王: 哦\n[10:00] 老王: …",
+      "[10:00] 小明: 作业要求：\n  1. 先写作文\n  2. 下周交\n[10:00] 小明: 收到",
     );
+    // 引文（fence 空白归一比对）不受缩进影响：正文片段仍是子串
+    expect(batch.content.includes("1. 先写作文")).toBe(true);
   });
 
   it("assembleBatch：跨天批次时刻升级为 [MM-DD HH:mm]（specs/003 Edge）", () => {
@@ -393,6 +422,28 @@ describe("nc 适配器：去抖封批全链路", () => {
     expect(raw?.content).not.toContain("base64");
   });
 
+  it("assembleBatch：同显示名不同 senderId 视为多人，sender 省略（specs/003 评审修正）", () => {
+    /** 造一条缓冲事件（senderId 可指定——显示名撞车时按 id 分辨）。 */
+    const mk = (id: string, senderId: string, content: string) => ({
+      messageId: id,
+      content,
+      sender: "小明",
+      senderId,
+      groupName: "英语群",
+      at: "2026-09-28T10:00:00",
+      raw: NcEventSchema.parse(
+        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
+      ),
+    });
+    const batch = assembleBatch({
+      groupId: "g1",
+      events: [mk("m1", "10001", "我在 3 排"), mk("m2", "10002", "我在 7 排")],
+      lastAt: "2026-09-28T10:00:00",
+    });
+    expect(batch.content).toBe("[10:00] 小明: 我在 3 排\n[10:00] 小明: 我在 7 排");
+    expect(batch.sender).toBeUndefined(); // 两个不同的 user_id——不能署成一个人
+  });
+
   it("raw 归档列：nc 原事件数组落库（D-84 §3.2 原始载荷留底——曾断线：适配器不传 raw）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
@@ -419,6 +470,26 @@ describe("nc 适配器：去抖封批全链路", () => {
     const parsed: unknown = JSON.parse(row.raw ?? "null");
     expect(Array.isArray(parsed)).toBe(true); // 原事件数组
     expect(JSON.stringify(parsed)).toContain("留底测试"); // 事件原文在内
+  });
+
+  it("全空消息批次 → 留痕丢弃不进消化（specs/003 评审修正：行协议前缀不得救活空批）", async () => {
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' }); // 若守卫失效，这里会被垃圾批次消耗
+    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    await emit(
+      app,
+      groupEvent({
+        groupId: "g1",
+        messageId: "m1",
+        text: "",
+        time: 1790595828,
+        message: [{ type: "face", data: { id: "1" } }], // 无可展开段 → 正文空
+      }),
+    );
+    sweepNow();
+    await new Promise((r) => setTimeout(r, 50)); // 若误投递，异步消化会落档——给它时间暴露
+    expect(repo.listRawInputsByState(db, "digested")).toHaveLength(0);
+    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
   });
 });
 
