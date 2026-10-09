@@ -52,7 +52,7 @@ export const rawInputs = sqliteTable("raw_inputs", {
   sourceIdentity: text("source_identity").notNull(), // JSON 串（弹性字典，D-84）
   receivedAt: text("received_at").notNull(),
   eventTime: text("event_time"),
-  digestState: text("digest_state").notNull().default("pending"), // pending | digested | failed
+  digestState: text("digest_state").notNull().default("pending"), // pending | digesting | digested | failed
   raw: text("raw"), // 信源原始载荷 JSON 留底（D-84；shared RawInput 类型不含它——归档字段，仅 DB）
 });
 

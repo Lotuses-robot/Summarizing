@@ -56,27 +56,38 @@ export async function digestRawInput(
     const { details } = executeChanges(db, raw, accepted, by);
 
     for (const r of rejected) {
-      // 再失败 → 放弃该项并留痕（不静默）
-      repo.appendPipelineEvent(db, {
-        rawInputId: raw.id,
-        action: "fence_reject",
-        detail: `围栏拒收并放弃：${r.reason}`,
-        payload: r.item,
-        by,
-      });
+      // 再失败 → 放弃该项并留痕（不静默）。
+      // ⚠️ 留痕尽力而为：此处已在 executeChanges 提交（digested）之后——审计写失败若窜进
+      // 外层 catch 会把已消化批次错标 failed → 重试双落库（七轮评审）；stderr 留痕替代。
+      try {
+        repo.appendPipelineEvent(db, {
+          rawInputId: raw.id,
+          action: "fence_reject",
+          detail: `围栏拒收并放弃：${r.reason}`,
+          payload: r.item,
+          by,
+        });
+      } catch (auditErr) {
+        process.stderr.write(`[digest] fence_reject 留痕失败（尽力而为）：${errText(auditErr)}\n`);
+      }
     }
 
     const note =
       accepted.length === 0
         ? "评估后未产生变更（零变更合法）"
         : `应用 ${accepted.length} 项变更：${details.join("；")}`;
-    repo.appendPipelineEvent(db, {
-      rawInputId: raw.id,
-      action: "digest_done",
-      detail: note + (rejected.length > 0 ? `（围栏拒收 ${rejected.length} 项）` : ""),
-      payload: { applied: details },
-      by,
-    });
+    // 同上：digest_done 留痕尽力而为——绝不让审计失败污染已提交的消化结果（七轮评审）
+    try {
+      repo.appendPipelineEvent(db, {
+        rawInputId: raw.id,
+        action: "digest_done",
+        detail: note + (rejected.length > 0 ? `（围栏拒收 ${rejected.length} 项）` : ""),
+        payload: { applied: details },
+        by,
+      });
+    } catch (auditErr) {
+      process.stderr.write(`[digest] digest_done 留痕失败（尽力而为）：${errText(auditErr)}\n`);
+    }
     // 「置已消化」已并入 executeChanges 的事务（S2 评审：堵住提交后崩溃→重试双写的窗口）
     return { state: "digested", note, appliedCount: accepted.length };
   } catch (err) {
@@ -132,8 +143,13 @@ export function kickDigest(
   from: string,
   log?: (msg: string) => void,
 ): void {
-  // 发射即置「消化中」（同步、确定性）——与 pending（排队）区分，specs/004 FR-005
-  repo.setDigestState(db, raw.id, "digesting");
+  // 发射即置「消化中」（同步、确定性）——与 pending（排队）区分，specs/004 FR-005。
+  // 尽力而为：库异常时照常发射（状态短暂滞留 pending，stderr 留痕）——fire-and-forget 语义不变（七轮评审）。
+  try {
+    repo.setDigestState(db, raw.id, "digesting");
+  } catch (stateErr) {
+    process.stderr.write(`[digest] digesting 置位失败（尽力而为）：${errText(stateErr)}\n`);
+  }
   void digestRawInput(db, llm, tools, modelTag, raw).catch((err) =>
     (log ?? ((msg: string) => process.stderr.write(`${msg}\n`)))(
       `[digest] 兜底泄漏（${from}）：${errText(err)}`,
@@ -173,16 +189,18 @@ async function elicitChangeList(
   raw: RawInput,
 ): Promise<ChangeList> {
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
+  let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const turn = await llm.chat({ system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS });
     if (turn.toolCalls.length > 0) {
+      traced += 1;
       try {
         repo.appendPipelineEvent(db, {
           rawInputId: raw.id,
           action: "digest_trace",
-          detail: `第 ${round + 1} 轮：${turn.toolCalls.map((t) => t.name).join("、")}`,
+          detail: `第 ${traced} 轮：${turn.toolCalls.map((t) => t.name).join("、")}`,
           payload: {
-            round,
+            round: traced,
             thought: (turn.content ?? "").slice(0, 500),
             tools: turn.toolCalls.map((t) => t.name),
           },

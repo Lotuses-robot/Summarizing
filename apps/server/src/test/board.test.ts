@@ -444,7 +444,7 @@ describe("失败批次重试（D-71）", () => {
 
     const res = await app.inject({ method: "POST", url: `/api/raw/${raw.id}/retry` });
     expect(res.statusCode).toBe(202);
-    expect(res.json<{ digestState: string }>().digestState).toBe("pending");
+    expect(res.json<{ digestState: string }>().digestState).toBe("digesting"); // 回执读库内现值（七轮评审）
 
     // 异步消化：FakeLlm 即返，等待状态稳定
     await vi.waitFor(

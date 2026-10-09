@@ -172,9 +172,10 @@ describe("SourceContext（信源视角）", () => {
     const res = await app.inject({ method: "POST", url: "/api/sources/testsrc/emit-and-report" });
     expect(res.statusCode).toBe(200);
     const body = z.object({ ok: z.literal(true), id: z.string() }).parse(res.json());
-    // 返回值里的 id 是真实落档的批次 id（消化可能已完成或失败，故三态合查）
+    // 返回值里的 id 是真实落档的批次 id（消化可能已完成或失败，故四态合查）
     const all = [
       ...repo.listRawInputsByState(db, "pending"),
+      ...repo.listRawInputsByState(db, "digesting"),
       ...repo.listRawInputsByState(db, "digested"),
       ...repo.listRawInputsByState(db, "failed"),
     ];

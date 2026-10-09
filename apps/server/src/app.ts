@@ -152,7 +152,9 @@ export function makeApp(deps: AppDeps) {
     const raw = ingestBatch(deps.db, deps.llmRef, tools, parsed.data, "ingest-api", (msg) =>
       req.log.error(msg),
     );
-    return reply.code(202).send({ id: raw.id, digestState: raw.digestState });
+    // kickDigest 已同步置 digesting——回执读库内现值，不报发射前快照（七轮评审）
+    const digestState = repo.getRawInput(deps.db, raw.id)?.digestState ?? raw.digestState;
+    return reply.code(202).send({ id: raw.id, digestState });
   });
 
   app.get("/api/board", async () => buildBoard(deps.db));
@@ -190,7 +192,11 @@ export function makeApp(deps: AppDeps) {
         ? reply.code(404).send({ error: "批次不存在" })
         : reply.code(409).send({ error: "只有「未处理」批次可以重试" });
     }
-    return reply.code(202).send({ id, digestState: "pending" });
+    // kickDigest 已同步置 digesting——回执读库内现值，不报发射前快照（七轮评审）
+    return reply.code(202).send({
+      id,
+      digestState: repo.getRawInput(deps.db, id)?.digestState ?? "digesting",
+    });
   });
 
   registerItemRoutes(app, { db: deps.db });

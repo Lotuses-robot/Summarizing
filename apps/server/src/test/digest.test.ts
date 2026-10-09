@@ -826,10 +826,10 @@ describe("流水数据层（specs/004）", () => {
     const traces = repo.listPipelineEvents(db, raw.id).filter((e) => e.action === "digest_trace");
     expect(traces).toHaveLength(2);
     expect(traces[0]?.payload).toMatchObject({
-      round: 0,
+      round: 1,
       tools: ["search_items"],
       thought: "我先查查看",
     });
-    expect(traces[1]?.payload).toMatchObject({ round: 1, tools: ["get_item"] });
+    expect(traces[1]?.payload).toMatchObject({ round: 2, tools: ["get_item"] });
   });
 });

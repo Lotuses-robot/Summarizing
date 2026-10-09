@@ -243,7 +243,7 @@ export function getRawInput(db: DbOrTx, id: string): RawInput | null {
   return row ? rowToRawInput(row) : null;
 }
 
-/** 更新消化状态：pending → digested / failed（failed = 「未处理」可见降级，01§5.3）。 */
+/** 更新消化状态：pending → digesting（kickDigest 发射即置）/ digested / failed（failed = 「未处理」可见降级，01§5.3）。 */
 export function setDigestState(db: DbOrTx, id: string, state: RawInput["digestState"]): void {
   db.update(s.rawInputs).set({ digestState: state }).where(eq(s.rawInputs.id, id)).run();
 }
