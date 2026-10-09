@@ -33,19 +33,18 @@ function bestEffortLog(msg: string): void {
   }
 }
 
-/** 尽力而为流水留痕：appendPipelineEvent 失败只记 stderr（含批次 id），绝不拖垮消化主流程。
- *  调用点必须位于「不得拖垮消化」的位置（specs/004 FR-006；提交后位置的依据见各处注释）。 */
+/** 尽力而为流水留痕：appendPipelineEvent 失败只记 stderr（含批次 id 与 action），绝不拖垮
+ *  消化主流程。label 参数已收敛——日志前缀直接取 event.action（九轮评审：防两处字符串漂移）。 */
 function appendPipelineEventBestEffort(
   db: Db,
   rawId: string,
   event: { action: string; detail: string; payload?: unknown },
   by: Provenance,
-  label: string,
 ): void {
   try {
     repo.appendPipelineEvent(db, { rawInputId: rawId, ...event, by });
   } catch (err) {
-    bestEffortLog(`[digest] ${label} 留痕失败（raw=${rawId}，尽力而为）：${errText(err)}`);
+    bestEffortLog(`[digest] ${event.action} 留痕失败（raw=${rawId}，尽力而为）：${errText(err)}`);
   }
 }
 
@@ -67,33 +66,50 @@ export async function digestRawInput(
   try {
     const list = await elicitChangeList(db, llm, tools, modelTag, raw);
 
-    let { accepted, rejected } = runFence(db, raw, list);
+    const { accepted, rejected } = runFence(db, raw, list);
     if (rejected.length > 0) {
       // 拒收项报错回给 agent0，可修正清单再提交一次（01§4.10④）。
       // 修正轮本身失败（如网关抖动）不得拖垮已通过围栏的项——降级为「放弃拒收项并留痕」。
-      const repaired = await requestRepair(llm, rejected).catch(() => null);
+      // 修复调用失败本身也记 stderr（九轮评审：网关故障 ≠ 模型不修复，须可分辨）。
+      const repaired = await requestRepair(llm, rejected).catch((err) => {
+        bestEffortLog(`[digest] 修复轮调用失败（raw=${raw.id}）：${errText(err)}`);
+        return null;
+      });
       if (repaired !== null) {
         const second = runFence(db, raw, repaired);
-        accepted = [...accepted, ...second.accepted];
-        rejected = second.rejected;
+        // 修复轮常按「其余项保持原样」回吐全量清单——按 JSON 相等去重，防 create_item 双落库
+        // （九轮评审）；其新增拒收同样留痕（九轮评审：被拒过就要有行可查）。
+        const seenKeys = new Set([
+          ...accepted.map((a) => JSON.stringify(a)),
+          ...rejected.map((r) => JSON.stringify(r.item)),
+        ]);
+        for (const r of second.rejected) {
+          const key = JSON.stringify(r.item);
+          if (seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          rejected.push(r);
+        }
+        for (const a of second.accepted) {
+          const key = JSON.stringify(a);
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            accepted.push(a);
+          }
+        }
       }
     }
 
-    // 拒收项留痕放在 executeChanges **之前**（八轮评审）：此时写失败会落进外层 catch（批次标
-    // failed、可重试），不会出现「提交后丢拒收记录」的静默窗口——digest_done 的「（围栏拒收 N 项）」
-    // 才有对应的 fence_reject 行可查。
+    // 拒收项留痕放在 executeChanges **之前**（八轮评审）：此时写失败会抛进外层 catch（批次标
+    // failed、可重试）——**直呼 repo，不走尽力而为助手**（助手吞错会让「失败可重试」
+    // 的承诺结构性不可达，九轮评审）；fence_reject 行也因此先于 digest_done 落库可查。
     for (const r of rejected) {
-      appendPipelineEventBestEffort(
-        db,
-        raw.id,
-        {
-          action: "fence_reject",
-          detail: `围栏拒收并放弃：${r.reason}`,
-          payload: r.item,
-        },
+      repo.appendPipelineEvent(db, {
+        rawInputId: raw.id,
+        action: "fence_reject",
+        detail: `围栏拒收并放弃：${r.reason}`,
+        payload: r.item,
         by,
-        "fence_reject",
-      );
+      });
     }
 
     const { details } = executeChanges(db, raw, accepted, by);
@@ -101,9 +117,11 @@ export async function digestRawInput(
     const note =
       accepted.length === 0
         ? "评估后未产生变更（零变更合法）"
-        : `应用 ${accepted.length} 项变更：${details.join("；")}`;
+        : `应用 ${details.length} 项变更：${details.join("；")}`;
     // digest_done 留痕尽力而为——此处已在 executeChanges 提交（digested）之后，审计写失败
     // 绝不允许窜进外层 catch 把已消化批次错标 failed → 重试双落库（七轮评审）。
+    // 计数用 details.length（执行器实写数）而非 accepted.length——空 setElements 会被执行器
+    // 静默跳过，按 accepted 计数会虚报（九轮评审）。
     appendPipelineEventBestEffort(
       db,
       raw.id,
@@ -113,10 +131,9 @@ export async function digestRawInput(
         payload: { applied: details },
       },
       by,
-      "digest_done",
     );
     // 「置已消化」已并入 executeChanges 的事务（S2 评审：堵住提交后崩溃→重试双写的窗口）
-    return { state: "digested", note, appliedCount: accepted.length };
+    return { state: "digested", note, appliedCount: details.length };
   } catch (err) {
     // AI 挂了 ≠ 数据没了：原文已在库，标「未处理」且可见（01§5.3）。
     // 兜底写入自身再包一层尽力而为——「永不 reject」是本函数对全部调用方的契约（S2 simplify 轮收回各调用点护栏）
@@ -199,13 +216,19 @@ export function sweepOrphanPending(db: Db): void {
     ...repo.listRawInputsByState(db, "digesting"),
   ];
   for (const raw of orphans) {
-    repo.setDigestState(db, raw.id, "failed");
-    repo.appendPipelineEvent(db, {
-      rawInputId: raw.id,
-      action: "startup_sweep",
-      detail: "启动清扫：上次进程中断，本批未消化完——已标「未处理」，可重试",
-      by: { actor: "系统", model: null },
-    });
+    // 逐条尽力而为：单条写失败不弃剩余孤儿、不炸启动（孤儿困在 pending/digesting =
+    // 「不可见不可救 = 真丢失」——本函数存在的意义就是防它，八轮评审）
+    try {
+      repo.setDigestState(db, raw.id, "failed");
+      repo.appendPipelineEvent(db, {
+        rawInputId: raw.id,
+        action: "startup_sweep",
+        detail: "启动清扫：上次进程中断，本批未消化完——已标「未处理」，可重试",
+        by: { actor: "系统", model: null },
+      });
+    } catch (err) {
+      bestEffortLog(`[digest] 启动清扫单条失败（raw=${raw.id}）：${errText(err)}`);
+    }
   }
 }
 
