@@ -149,7 +149,7 @@ describe("agent0 消化管线", () => {
     // 九轮评审：第一轮的拒收即使修复成功也留痕（被拒过就要有行可查——不静默）
     const rejects = repo.listPipelineEvents(db, raw.id).filter((n) => n.action === "fence_reject");
     expect(rejects).toHaveLength(1);
-    expect(rejects[0]?.detail).toContain("围栏拒收并放弃");
+    expect(rejects[0]?.detail).toContain("围栏拒收");
   });
 
   it("④ 修复仍失败 → 放弃该项并留痕", async () => {

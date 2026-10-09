@@ -75,7 +75,19 @@ export async function digestRawInput(
         bestEffortLog(`[digest] 修复轮调用失败（raw=${raw.id}）：${errText(err)}`);
         return null;
       });
-      if (repaired !== null) {
+      if (repaired === null) {
+        // 修复轮跑过且失败——落流水与「从未尝试」可分辨（十轮评审）
+        appendPipelineEventBestEffort(
+          db,
+          raw.id,
+          {
+            action: "repair_round",
+            detail: "修复轮调用失败（网关/解析失败），拒收项维持原判",
+            payload: { rejected: rejected.length },
+          },
+          by,
+        );
+      } else {
         const second = runFence(db, raw, repaired);
         // 修复轮常按「其余项保持原样」回吐全量清单——按 JSON 相等去重，防 create_item 双落库
         // （九轮评审）；其新增拒收同样留痕（九轮评审：被拒过就要有行可查）。
@@ -83,30 +95,43 @@ export async function digestRawInput(
           ...accepted.map((a) => JSON.stringify(a)),
           ...rejected.map((r) => JSON.stringify(r.item)),
         ]);
+        let fixed = 0;
+        for (const a of second.accepted) {
+          const key = JSON.stringify(a);
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            accepted.push(a);
+            fixed += 1;
+          }
+        }
         for (const r of second.rejected) {
           const key = JSON.stringify(r.item);
           if (seenKeys.has(key)) continue;
           seenKeys.add(key);
           rejected.push(r);
         }
-        for (const a of second.accepted) {
-          const key = JSON.stringify(a);
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            accepted.push(a);
-          }
-        }
+        appendPipelineEventBestEffort(
+          db,
+          raw.id,
+          {
+            action: "repair_round",
+            detail: `修复轮：修正 ${fixed} 项，仍拒收 ${second.rejected.length} 项`,
+            payload: { fixed, stillRejected: second.rejected.length },
+          },
+          by,
+        );
       }
     }
 
     // 拒收项留痕放在 executeChanges **之前**（八轮评审）：此时写失败会抛进外层 catch（批次标
     // failed、可重试）——**直呼 repo，不走尽力而为助手**（助手吞错会让「失败可重试」
     // 的承诺结构性不可达，九轮评审）；fence_reject 行也因此先于 digest_done 落库可查。
+    // detail 不写「并放弃」——修复轮可能救回，最终裁决以 repair_round 流水为准（十轮评审）。
     for (const r of rejected) {
       repo.appendPipelineEvent(db, {
         rawInputId: raw.id,
         action: "fence_reject",
-        detail: `围栏拒收并放弃：${r.reason}`,
+        detail: `围栏拒收：${r.reason}`,
         payload: r.item,
         by,
       });
@@ -114,8 +139,10 @@ export async function digestRawInput(
 
     const { details } = executeChanges(db, raw, accepted, by);
 
+    // 谓词与计数同源（details.length）——执行器会静默跳过空 setElements 的项，
+    // 按 accepted 计数会虚报「应用 N 项」（九轮评审）。
     const note =
-      accepted.length === 0
+      details.length === 0
         ? "评估后未产生变更（零变更合法）"
         : `应用 ${details.length} 项变更：${details.join("；")}`;
     // digest_done 留痕尽力而为——此处已在 executeChanges 提交（digested）之后，审计写失败
@@ -143,7 +170,8 @@ export async function digestRawInput(
       repo.appendPipelineEvent(db, {
         rawInputId: raw.id,
         action: "digest_failed",
-        detail: `AI 处理失败，标记「未处理」：${detail}`,
+        // 「处理失败」而非「AI 处理失败」——本地库错混在异常里时，「AI」归因会误导排障（十轮评审）
+        detail: `处理失败，标记「未处理」：${detail}`,
         by: { actor: "系统", model: null },
       });
     } catch (auditErr) {

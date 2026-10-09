@@ -144,7 +144,7 @@ describe("存疑信息库（D-85）", () => {
     const result = await digestRawInput(db, llm, makeAgentTools(db), "test-model", raw);
     expect(result.state).toBe("digested"); // 拒收项被丢弃，批次仍消化
     expect(result.appliedCount).toBe(0); // 坏目标未落库
-    // 消化留痕：围栏拒收并放弃（不静默）
+    // 消化留痕：围栏拒收（不静默）
     expect(repo.listPipelineEvents(db, raw.id).some((n) => n.detail.includes("拒收"))).toBe(true);
   });
 
