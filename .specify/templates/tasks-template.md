@@ -13,6 +13,13 @@ description: "Task list template for feature implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
+## Phase 0: 影响面与脏形态（必填——宪法「边界加固三规矩」的结构性强制）
+
+> 本阶段由 plan.md 的「影响面清单」生成；边界字段/签名/枚举值类改动**必须先完成本阶段再写实现**。
+
+- [ ] T000 [P] 对每个要改的符号跑 `codegraph explore "<符号名>"`（或 serena `find_referencing_symbols`），把全部消费点并入 plan.md 的影响面清单
+- [ ] T001 [P] 边界字段（schema/协议/输入口/守卫函数）列**脏形态枚举表**：null / 数字 / 空串 / 大小写 / 多行 / 缺席 / 超长——先写脏输入测试（预期 FAIL），再写实现
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)

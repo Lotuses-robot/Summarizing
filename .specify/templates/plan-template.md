@@ -103,6 +103,15 @@ ios/ or android/
 **Structure Decision**: [Document the selected structure and reference the real
 directories captured above]
 
+## 影响面清单（必填——改值形状/函数签名/枚举值前生成）
+
+> 用 `codegraph explore "<符号名>"`（或引用查找工具）列出**全部消费者**，逐项列入同步表。
+> 本节为宪法「边界加固三规矩」的结构性强制：没有影响面清单不得进入实现。
+
+| 变更的符号/值/枚举 | 全部消费点（file:line） | 本轮同步动作 |
+|-------------------|----------------------|-------------|
+| （示例）`DigestState` 枚举 | board / chatRaws / 00 契约 / 01 §x / schema 注释 / setDigestState JSDoc | 逐项改 |
+
 ## Complexity Tracking
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
