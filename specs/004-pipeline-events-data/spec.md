@@ -27,7 +27,7 @@
 
 ### User Story 2 - 消化「处理中」可见 (Priority: P1)
 
-批次进站被发射消化后，`digest_state` 立即变为 `digesting`（区别于排队中的 `pending`）；进程中断留下的 `digesting` 孤儿在下次启动时与 `pending` 一样被清扫为 `failed`（横幅可见、可重试）。
+批次进站被发射消化后，`digest_state` 立即变为 `digesting`（区别于排队中的 `pending`；置位为**尽力而为**——库异常时照常发射、状态滞留 `pending` 并 stderr 留痕，七轮评审）；进程中断留下的 `digesting` 孤儿在下次启动时与 `pending` 一样被清扫为 `failed`（横幅可见、可重试）。
 
 **Why this priority**: 「正在处理 vs 还没轮到」不可见是用户走查痛点②的一半。
 
@@ -35,7 +35,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 一条 pending 批次，**When** kickDigest 发射，**Then** 状态立即为 `digesting`（同步、确定性）。
+1. **Given** 一条 pending 批次，**When** kickDigest 发射，**Then** 状态为 `digesting`（同步置位；库异常时降级滞留 `pending` 并留痕——七轮评审）。
 2. **Given** 库中有一条 `digesting` 孤儿，**When** 启动清扫，**Then** 置 `failed` 并写 `startup_sweep` 流水。
 
 ---
@@ -50,12 +50,13 @@ agent0 消化的工具循环每轮落一条 `digest_trace` 流水：`payload = {
 
 **Acceptance Scenarios**:
 
-1. **Given** 两轮工具循环后产出变更清单，**When** 消化完成，**Then** `pipeline_events` 恰有两条 `digest_trace`（round 0/1）。
+1. **Given** 两轮工具循环后产出变更清单，**When** 消化完成，**Then** `pipeline_events` 恰有两条 `digest_trace`（round 1/2，1-based 连续序号——清单解析失败的重试轮不产生 trace，写失败不占号）。
 2. **Given** 轨迹写入抛错（人为破坏），**When** 消化继续，**Then** 消化正常完成、stderr 有痕。
 
 ### Edge Cases
 
 - 重试批次（failed→pending→发射）：`digesting` 照常置上，不再有双跑窗口（`setDigestStateIf` 原子前置已保证）。
+- 置位为尽力而为：库异常时照常发射、状态滞留 pending 并 stderr 留痕（FR-005 降级路径，七轮评审）。
 - 既有库（含 `replay_nodes` 旧表）：开发版无存量用户——`npm run db:reset` 重建，不做迁移。
 - `listPipelineEvents` 读取时 `by` 列按 D-88 迁移后的结构化 JSON 解析为 Provenance。
 
@@ -67,7 +68,7 @@ agent0 消化的工具循环每轮落一条 `digest_trace` 流水：`payload = {
 - **FR-002**: repo 函数 `appendRawAudit→appendPipelineEvent`、`listRawAudit→listPipelineEvents`；后者升级为返回完整 `PipelineEvent[]`（zod 解析，含 by/payload）。
 - **FR-003**: shared 增 `PipelineEventSchema`（id/action/detail/payload/at/by:Provenance；payload 用 `z.unknown()`——自由形状原则 3）。
 - **FR-004**: `chitchat_discard` action MUST 收敛为 `digest_done`（detail 含「寒暄」字样），`chitchatAudit` 函数与断言同步。
-- **FR-005**: `DigestState` 增 `"digesting"`；`kickDigest` 发射时同步置 `digesting`；`sweepOrphanPending` MUST 同时清扫 `pending` 与 `digesting` 孤儿。
+- **FR-005**: `DigestState` 增 `"digesting"`；`kickDigest` 发射时同步置 `digesting`（**尽力而为**——库异常时照常发射、状态滞留 pending 并 stderr 留痕，返回置位结果供回执，七轮评审）；`sweepOrphanPending` MUST 同时清扫 `pending` 与 `digesting` 孤儿。
 - **FR-006**: 工具循环每轮 MUST 落一条 `digest_trace`（payload `{round, thought≤500字, tools}`）；`elicitChangeList` 以参数接 db（**禁入 ToolContext**）；轨迹写入失败 MUST 只记 stderr 不影响消化。
 
 ### Key Entities

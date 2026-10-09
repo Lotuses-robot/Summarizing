@@ -1,4 +1,4 @@
-import type { IngestRequest, RawInput } from "@summarizing/shared";
+import type { DigestState, IngestRequest, RawInput } from "@summarizing/shared";
 import type { TaggedLlm } from "../shared/llm";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
@@ -13,7 +13,8 @@ import type { AgentTools } from "../agent0/tools";
 export type IngestBatch = IngestRequest & { raw?: unknown };
 
 /** 执行一次进站：先落盘（含接收时刻），后异步交给 agent0（失败标「未处理」，01§5.3）。
- *  llm 逐请求取当前客户端——热切换后 modelTag 依旧值进署名的旧坑在这里堵住。返回落档批次。 */
+ *  llm 逐请求取当前客户端——热切换后 modelTag 依旧值进署名的旧坑在这里堵住。
+ *  返回落档批次与消化置位结果（specs/004 八轮评审：回执用置位结果而非发射前快照）。 */
 export function ingestBatch(
   db: Db,
   llmRef: { current: TaggedLlm },
@@ -21,9 +22,9 @@ export function ingestBatch(
   payload: IngestBatch,
   from: string,
   log?: (msg: string) => void,
-): RawInput {
+): { raw: RawInput; digestState: DigestState } {
   const raw = repo.insertRawInput(db, { ...payload, receivedAt: nowLocalWallClock() });
   const client = llmRef.current;
-  kickDigest(db, client, tools, client.modelTag, raw, from, log);
-  return raw;
+  const digestState = kickDigest(db, client, tools, client.modelTag, raw, from, log);
+  return { raw, digestState };
 }

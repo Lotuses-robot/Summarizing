@@ -77,7 +77,7 @@ function makeSourceContext(
       try {
         // 适配器组装的批次在边界过同一份 schema——信源 bug 在此响亮表达（降级可观测），不静默落库
         const parsed = IngestRequestSchema.parse(batch);
-        const raw = ingestBatch(
+        const { raw } = ingestBatch(
           deps.db,
           deps.llmRef,
           tools,
@@ -149,11 +149,15 @@ export function makeApp(deps: AppDeps) {
       return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
     }
     // 进站装配唯一出处（application/ingest.ts）：先落盘后异步消化
-    const raw = ingestBatch(deps.db, deps.llmRef, tools, parsed.data, "ingest-api", (msg) =>
-      req.log.error(msg),
+    const { raw, digestState } = ingestBatch(
+      deps.db,
+      deps.llmRef,
+      tools,
+      parsed.data,
+      "ingest-api",
+      (msg) => req.log.error(msg),
     );
-    // kickDigest 已同步置 digesting——回执读库内现值，不报发射前快照（七轮评审）
-    const digestState = repo.getRawInput(deps.db, raw.id)?.digestState ?? raw.digestState;
+    // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
     return reply.code(202).send({ id: raw.id, digestState });
   });
 
@@ -192,11 +196,8 @@ export function makeApp(deps: AppDeps) {
         ? reply.code(404).send({ error: "批次不存在" })
         : reply.code(409).send({ error: "只有「未处理」批次可以重试" });
     }
-    // kickDigest 已同步置 digesting——回执读库内现值，不报发射前快照（七轮评审）
-    return reply.code(202).send({
-      id,
-      digestState: repo.getRawInput(deps.db, id)?.digestState ?? "digesting",
-    });
+    // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
+    return reply.code(202).send({ id, digestState: result.digestState });
   });
 
   registerItemRoutes(app, { db: deps.db });

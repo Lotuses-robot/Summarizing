@@ -6,6 +6,7 @@ import {
   SearchRecentRawsArgsSchema,
   SearchUncertainArgsSchema,
   type ChangeList,
+  type DigestState,
   type Provenance,
   type RawInput,
 } from "@summarizing/shared";
@@ -22,6 +23,31 @@ import { executeChanges } from "../executor/executor";
 // → ④ 行为围栏（拒收回喂一次，再失败放弃留痕）→ ⑤ 逐项落笔 → ⑥ 事后可查。
 
 const MAX_TOOL_ROUNDS = 8;
+
+/** 兜底日志：stderr 自身不可写时静默——catch 块内的最后一级，绝不允许「留痕失败」再抛（八轮评审）。 */
+function bestEffortLog(msg: string): void {
+  try {
+    process.stderr.write(`${msg}\n`);
+  } catch {
+    // stderr 已死——无处可写
+  }
+}
+
+/** 尽力而为流水留痕：appendPipelineEvent 失败只记 stderr（含批次 id），绝不拖垮消化主流程。
+ *  调用点必须位于「不得拖垮消化」的位置（specs/004 FR-006；提交后位置的依据见各处注释）。 */
+function appendPipelineEventBestEffort(
+  db: Db,
+  rawId: string,
+  event: { action: string; detail: string; payload?: unknown },
+  by: Provenance,
+  label: string,
+): void {
+  try {
+    repo.appendPipelineEvent(db, { rawInputId: rawId, ...event, by });
+  } catch (err) {
+    bestEffortLog(`[digest] ${label} 留痕失败（raw=${rawId}，尽力而为）：${errText(err)}`);
+  }
+}
 
 export interface DigestResult {
   state: "digested" | "failed";
@@ -53,41 +79,42 @@ export async function digestRawInput(
       }
     }
 
-    const { details } = executeChanges(db, raw, accepted, by);
-
+    // 拒收项留痕放在 executeChanges **之前**（八轮评审）：此时写失败会落进外层 catch（批次标
+    // failed、可重试），不会出现「提交后丢拒收记录」的静默窗口——digest_done 的「（围栏拒收 N 项）」
+    // 才有对应的 fence_reject 行可查。
     for (const r of rejected) {
-      // 再失败 → 放弃该项并留痕（不静默）。
-      // ⚠️ 留痕尽力而为：此处已在 executeChanges 提交（digested）之后——审计写失败若窜进
-      // 外层 catch 会把已消化批次错标 failed → 重试双落库（七轮评审）；stderr 留痕替代。
-      try {
-        repo.appendPipelineEvent(db, {
-          rawInputId: raw.id,
+      appendPipelineEventBestEffort(
+        db,
+        raw.id,
+        {
           action: "fence_reject",
           detail: `围栏拒收并放弃：${r.reason}`,
           payload: r.item,
-          by,
-        });
-      } catch (auditErr) {
-        process.stderr.write(`[digest] fence_reject 留痕失败（尽力而为）：${errText(auditErr)}\n`);
-      }
+        },
+        by,
+        "fence_reject",
+      );
     }
+
+    const { details } = executeChanges(db, raw, accepted, by);
 
     const note =
       accepted.length === 0
         ? "评估后未产生变更（零变更合法）"
         : `应用 ${accepted.length} 项变更：${details.join("；")}`;
-    // 同上：digest_done 留痕尽力而为——绝不让审计失败污染已提交的消化结果（七轮评审）
-    try {
-      repo.appendPipelineEvent(db, {
-        rawInputId: raw.id,
+    // digest_done 留痕尽力而为——此处已在 executeChanges 提交（digested）之后，审计写失败
+    // 绝不允许窜进外层 catch 把已消化批次错标 failed → 重试双落库（七轮评审）。
+    appendPipelineEventBestEffort(
+      db,
+      raw.id,
+      {
         action: "digest_done",
         detail: note + (rejected.length > 0 ? `（围栏拒收 ${rejected.length} 项）` : ""),
         payload: { applied: details },
-        by,
-      });
-    } catch (auditErr) {
-      process.stderr.write(`[digest] digest_done 留痕失败（尽力而为）：${errText(auditErr)}\n`);
-    }
+      },
+      by,
+      "digest_done",
+    );
     // 「置已消化」已并入 executeChanges 的事务（S2 评审：堵住提交后崩溃→重试双写的窗口）
     return { state: "digested", note, appliedCount: accepted.length };
   } catch (err) {
@@ -103,18 +130,19 @@ export async function digestRawInput(
         by: { actor: "系统", model: null },
       });
     } catch (auditErr) {
-      process.stderr.write(`[digest] 失败留痕自身抛错（尽力而为）：${errText(auditErr)}\n`);
+      bestEffortLog(`[digest] 失败留痕自身抛错（尽力而为）：${errText(auditErr)}`);
     }
     return { state: "failed", note: detail, appliedCount: 0 };
   }
 }
 
-export type RetryResult = { ok: true } | { ok: false; reason: "not_found" | "not_failed" };
+export type RetryResult =
+  { ok: true; digestState: DigestState } | { ok: false; reason: "not_found" | "not_failed" };
 
 /** 重试一条失败批次（D-71）：failed→pending 原子跃迁后重走完整消化管线（异步，即返）。
- *  仅 failed 可重试——已消化重试会重复落库（变更非幂等）；pending 可能仍在途，防双跑。
+ *  仅 failed 可重试——已消化重试会重复落库（变更非幂等）；pending/digesting 可能仍在途，防双跑。
  *  「失败批次可从头重跑」依赖执行器整批回滚语义——该论证放在这里：这次状态跃迁归本函数所有，
- *  将来任何新调用方（CLI/批量口）走这里都不会绕过不变量。 */
+ *  将来任何新调用方（CLI/批量口）走这里都不会绕过不变量。返回置位结果供回执（specs/004 八轮评审）。 */
 export function retryRawInput(
   db: Db,
   llm: LlmClient,
@@ -127,13 +155,15 @@ export function retryRawInput(
   if (!repo.setDigestStateIf(db, id, "failed", "pending")) {
     return { ok: false, reason: "not_failed" };
   }
-  kickDigest(db, llm, tools, modelTag, raw, "retry");
-  return { ok: true };
+  const digestState = kickDigest(db, llm, tools, modelTag, raw, "retry");
+  return { ok: true, digestState };
 }
 
 /** fire-and-forget 消化的唯一发射口：digestRawInput 承诺永不 reject（失败留痕尽力而为），
  *  这里再兜一层防「兜底自身抛错」变 unhandled rejection；from 标记发射来源供排障。
- *  log 可选注入结构化日志器（HTTP 入口传 fastify 的 req.log 保留请求上下文），缺省写 stderr。 */
+ *  log 可选注入结构化日志器（HTTP 入口传 fastify 的 req.log 保留请求上下文），缺省写 stderr。
+ *  返回 digesting 置位结果——"digesting"（成功）| "pending"（置位失败但照常发射，七轮评审降级）；
+ *  回执 MUST 用它而非发射前快照（specs/004 八轮评审：不报与库不符的状态）。 */
 export function kickDigest(
   db: Db,
   llm: LlmClient,
@@ -142,19 +172,20 @@ export function kickDigest(
   raw: RawInput,
   from: string,
   log?: (msg: string) => void,
-): void {
-  // 发射即置「消化中」（同步、确定性）——与 pending（排队）区分，specs/004 FR-005。
-  // 尽力而为：库异常时照常发射（状态短暂滞留 pending，stderr 留痕）——fire-and-forget 语义不变（七轮评审）。
+): "digesting" | "pending" {
+  // 发射即置「消化中」——尽力而为：库异常时滞留 pending 照常发射（stderr 留痕；七轮评审），
+  // 置位结果如实返回供回执（specs/004 八轮评审：不报与库不符的快照）。
+  let bumped: "digesting" | "pending" = "pending";
   try {
     repo.setDigestState(db, raw.id, "digesting");
+    bumped = "digesting";
   } catch (stateErr) {
-    process.stderr.write(`[digest] digesting 置位失败（尽力而为）：${errText(stateErr)}\n`);
+    bestEffortLog(`[digest] digesting 置位失败（raw=${raw.id}，尽力而为）：${errText(stateErr)}`);
   }
   void digestRawInput(db, llm, tools, modelTag, raw).catch((err) =>
-    (log ?? ((msg: string) => process.stderr.write(`${msg}\n`)))(
-      `[digest] 兜底泄漏（${from}）：${errText(err)}`,
-    ),
+    (log ?? bestEffortLog)(`[digest] 兜底泄漏（${from}）：${errText(err)}`),
   );
+  return bumped;
 }
 
 /** 启动清扫（L11 + specs/004 FR-005）：消化是进程内异步——进程死后 pending/digesting 永滞，
@@ -207,8 +238,11 @@ async function elicitChangeList(
           by: { actor: "agent0", model: modelTag },
         });
       } catch (traceErr) {
-        // 轨迹是附属品：写失败绝不拖垮消化（specs/004 FR-006）
-        process.stderr.write(`[digest] 轨迹写入失败（尽力而为）：${errText(traceErr)}\n`);
+        // 写失败不占号（traced 回退）——成功者的序号保持连续；绝不拖垮消化（八轮评审）
+        traced -= 1;
+        bestEffortLog(
+          `[digest] digest_trace 留痕失败（raw=${raw.id}，尽力而为）：${errText(traceErr)}`,
+        );
       }
       messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
       const ctx = { sourceIdentity: raw.sourceIdentity, eventTime: raw.eventTime };
