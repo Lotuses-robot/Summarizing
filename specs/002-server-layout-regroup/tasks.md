@@ -12,11 +12,11 @@
 
 ## Phase 2: import 矩阵
 
-- [x] T002 [P] `shared/err.ts` 新建（errText 迁出）；`agent0/digest.ts` 删原定义并 import
+- [x] T002 [P] errText 迁出 digest.ts（初版 shared/err.ts，/simplify 轮终上移 packages/shared）；`agent0/digest.ts` 删原定义并 import
 - [x] T003 [P] `executor/{fence,executor}.ts` 相对 import `../../` → `../`（storage/shared）
 - [x] T004 `agent0/{digest,sweep}.ts` 的 `./fence`/`./executor` → `../executor/*`
-- [x] T005 [P] `application/{chat,ingest}.ts` 的 `./agent0/*` → `../agent0/*`；chat 的 errText 改 `../shared/err`
-- [x] T006 [P] `app.ts`（agent0 路径 + errText→shared/err）、`index.ts`、`routes/{settings,uncertain}.ts`
+- [x] T005 [P] `application/{chat,ingest}.ts` 的 `./agent0/*` → `../agent0/*`；chat 的 errText 改 @summarizing/shared
+- [x] T006 [P] `app.ts`（agent0 路径 + errText→@summarizing/shared）、`index.ts`、`routes/{settings,uncertain}.ts`
 - [x] T007 [P] 五个测试文件 import 更新（board/chat/digest/fence/repo/uncertain.test）
 
 ## Phase 3: 文档与标记

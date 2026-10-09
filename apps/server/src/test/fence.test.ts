@@ -237,4 +237,39 @@ describe("围栏：引文逐字校验（第 6 轮审查）", () => {
     expect(repaired.rejected).toHaveLength(0);
     expect(repaired.accepted).toHaveLength(1);
   });
+
+  it("行协议收紧：跨消息拼引文被拒（前缀插入非空白——那种引文本就不是单条消息的逐字，specs/003 三轮评审）", () => {
+    const db = makeDb(":memory:");
+    const raw = repo.insertRawInput(db, {
+      content: "[10:00] 小明: 通知：作业\n[10:00] 小明: 截止10月8日",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "群" },
+      receivedAt: "2026-09-28T10:00:00",
+      eventTime: null,
+    });
+    const list: ChangeList = {
+      changes: [
+        {
+          action: "create_item",
+          elements: [
+            // 单条消息内的引文：仍是子串，过
+            { label: "name", text: "作业", note: null, quotes: ["通知：作业"] },
+            // 跨两条消息拼的引文：行前缀隔开，拒（squeeze 只去空白，去不掉 [10:00] 小明: ）
+            {
+              label: "ddl",
+              text: "2026-10-08T23:59:59",
+              note: null,
+              quotes: ["通知：作业\n截止10月8日"],
+            },
+          ],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+    };
+    const { accepted, rejected } = runFence(db, raw, list);
+    expect(accepted).toHaveLength(0); // create_item 任一元素引文不合法 → 整项拒
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toContain("引文不是原文逐字");
+  });
 });

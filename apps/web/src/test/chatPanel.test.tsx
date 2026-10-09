@@ -6,6 +6,18 @@ import { ChatPanel } from "../components/chat/ChatPanel";
 import "@testing-library/jest-dom/vitest";
 import { fetchUrl, jsonResponse } from "./helpers/http";
 
+/** D-89 回填用例与滚动 US2 用例共用的两轮历史夹具（单处维护，防漂移）。 */
+const HISTORY_TURNS = [
+  { role: "user", content: "上次说的作业是什么", at: "2026-09-29T10:00:00" },
+  { role: "assistant", content: "英语作业，9 月 30 号交。", at: "2026-09-29T10:00:01" },
+];
+
+/** 文件级统一清理（两个 describe 共用——拆两份就得同步维护）。 */
+afterEach(async () => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
 /** 受控 fetch 替身：记录请求体；fail=true 时模拟网络故障。
  *  /api/chat/history 按 URL 分流（回填请求），其余走 chat 应答。 */
 function stubChat(
@@ -30,11 +42,6 @@ function stubChat(
 }
 
 describe("ChatPanel（对话面板，05§四）", () => {
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
-
   it("回复渲染气泡 + 工具轨迹 chips + 事项 chips；点事项 chip 深链", async () => {
     const onFocus = vi.fn();
     stubChat({
@@ -128,10 +135,7 @@ describe("ChatPanel（对话面板，05§四）", () => {
     const { bodies } = stubChat(
       { reply: "接上。", actions: [], references: [] },
       {
-        history: [
-          { role: "user", content: "上次说的作业是什么", at: "2026-09-29T10:00:00" },
-          { role: "assistant", content: "英语作业，9 月 30 号交。", at: "2026-09-29T10:00:01" },
-        ],
+        history: HISTORY_TURNS,
       },
     );
     render(
@@ -227,11 +231,6 @@ describe("ChatPanel（对话面板，05§四）", () => {
 });
 
 describe("ChatPanel 滚动锚定（specs/001-chat-scroll-anchor）", () => {
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-  });
-
   /** 拿到消息滚动容器并把滚动度量设成可控值（happy-dom 无布局引擎，度量默认全 0；
    *  其 scrollTop setter 还会按内部度量钳制——一并接管为普通数据属性才可写）。 */
   function stubLogMetrics(scrollHeight: number, clientHeight: number): HTMLElement {
@@ -254,10 +253,7 @@ describe("ChatPanel 滚动锚定（specs/001-chat-scroll-anchor）", () => {
     stubChat(
       { reply: "接上。", actions: [], references: [] },
       {
-        history: [
-          { role: "user", content: "上次说的作业是什么", at: "2026-09-29T10:00:00" },
-          { role: "assistant", content: "英语作业，9 月 30 号交。", at: "2026-09-29T10:00:01" },
-        ],
+        history: HISTORY_TURNS,
       },
     );
     renderPanel();

@@ -49,7 +49,7 @@
 - **FR-001**: `src/features/agent0` MUST 迁为 `src/agent0`（digest/prompt/tools/sweep）。
 - **FR-002**: `fence.ts` 与 `executor.ts` MUST 迁为 `src/executor/`，双方引用方 import 同步。
 - **FR-003**: 其余 `features/` 文件（ingest/board/chat）MUST 迁为 `src/application/`。
-- **FR-004**: `errText` MUST 迁至 `src/shared/err.ts`（app/chat/settings 多处使用，与消化无关），原导出删除。
+- **FR-004**: `errText` MUST 迁出 digest.ts（app/chat/settings 多处使用，与消化无关），原导出删除。~~迁至 `src/shared/err.ts`~~ **/simplify 轮最终上移 `packages/shared/src/index.ts` 通用工具区**（web/server 双侧消费，relativeDueText 先例）。
 - **FR-005**: `chat.ts`（内含未拆前台 agent）与 `sweep.ts`（第二执行者任务）MUST 注释标记观察项。
 - **FR-006**: `docs/07` 中指向 `features/chat.ts` 的现行引用 MUST 更新；`docs/02` 历史记载不动。
 - **FR-007**: 全部相对 import MUST 同步更新，无 `features/` 残留（src 与 scripts 内）。

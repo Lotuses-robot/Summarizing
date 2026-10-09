@@ -59,9 +59,9 @@ function readWhitelist(ctx: SourceContext): Record<string, string> | null {
 
 /** 从事件取发信人显示名（群名片 > 昵称 > user_id）。 */
 function senderName(ev: NcEvent): string {
-  /** 取第一个非空串（空串也跳过——?? 只挡 null/undefined）。 */
-  const first = (v: string | undefined): string | null =>
-    v !== undefined && v.trim() !== "" ? v : null;
+  /** 取第一个非空串（null/空串都跳过——nc 变体会给可选字段发 null，三轮评审）。 */
+  const first = (v: string | null | undefined): string | null =>
+    typeof v === "string" && v.trim() !== "" ? v : null;
   return (
     first(ev.sender?.card) ??
     first(ev.sender?.nickname) ??

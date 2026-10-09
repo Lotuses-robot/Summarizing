@@ -50,7 +50,7 @@ apps/server/src/
 ├── agent0/            # ← features/agent0（digest/prompt/tools/sweep 留此）
 ├── executor/          # ← agent0/{fence,executor}.ts（变更写通道）
 ├── application/       # ← features/{ingest,board,chat}.ts
-├── shared/err.ts      # ← agent0/digest.ts 的 errText 迁出
+├── packages/shared    # ← agent0/digest.ts 的 errText 最终居此（通用工具区；/simplify 轮上移）
 └── （routes/ sources/ storage/ 不动）
 ```
 

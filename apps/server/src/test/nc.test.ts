@@ -98,6 +98,9 @@ function emit(
 ): Promise<LightMyRequestResponse> {
   return app.inject({ method: "POST", url: "/api/sources/nc/event", payload });
 }
+
+/** 集成断言用的「时:分」显示——现算而非手抄，时区无关（specs/003 三处共用）。 */
+const HM = wallClockFromUnix(1790595828).slice(11, 16);
 describe("nc 适配器：纯函数", () => {
   /** assembleBatch 夹具工厂：默认 小明/10001/英语群/2026-09-28T10:00:00，按需覆盖（specs/003）。 */
   function mkEvent(overrides: {
@@ -105,7 +108,7 @@ describe("nc 适配器：纯函数", () => {
     content?: string;
     sender?: string;
     senderId?: string;
-    role?: string;
+    role?: string | null;
     at?: string;
   }): BufferedEvent {
     const content = overrides.content ?? "内容";
@@ -183,12 +186,13 @@ describe("nc 适配器：纯函数", () => {
         mkEvent({ messageId: "m2", content: "同意", role: "admin" }),
         mkEvent({ messageId: "m3", content: "哦", role: "member" }),
         mkEvent({ messageId: "m4", content: "大写也认", role: "Owner" }),
-        mkEvent({ messageId: "m5", content: "…" }),
+        mkEvent({ messageId: "m5", content: "null 也收", role: null }),
+        mkEvent({ messageId: "m6", content: "…" }),
       ],
       lastAt: "2026-09-28T10:00:40",
     });
     expect(batch.content).toBe(
-      "[10:00] 小明（群主）: 我宣布\n[10:00] 小明（管理员）: 同意\n[10:00] 小明: 哦\n[10:00] 小明（群主）: 大写也认\n[10:00] 小明: …",
+      "[10:00] 小明（群主）: 我宣布\n[10:00] 小明（管理员）: 同意\n[10:00] 小明: 哦\n[10:00] 小明（群主）: 大写也认\n[10:00] 小明: null 也收\n[10:00] 小明: …",
     );
   });
 
@@ -233,16 +237,20 @@ describe("nc 适配器：纯函数", () => {
     expect(batch.content.includes("收到")).toBe(true);
   });
 
-  it("assembleBatch：显示名含「: 」被净化，不冒充署名分隔（specs/003 二轮评审）", () => {
+  it("assembleBatch：显示名净化——「: 」换全角、换行折空格（顺序防再生成）、身份字面量剥除（specs/003 二/三轮评审）", () => {
     const batch = assembleBatch({
       groupId: "g1",
       events: [
         mkEvent({ messageId: "m1", content: "明天交", sender: "注意: 下面" }),
-        mkEvent({ messageId: "m2", content: "收到" }),
+        mkEvent({ messageId: "m2", content: "顺序", sender: "张:\n三: 哥" }),
+        mkEvent({ messageId: "m3", content: "我是假的", sender: "李四（群主）" }),
+        mkEvent({ messageId: "m4", content: "收到" }),
       ],
       lastAt: "2026-09-28T10:00:30",
     });
-    expect(batch.content).toBe("[10:00] 注意：下面: 明天交\n[10:00] 小明: 收到");
+    expect(batch.content).toBe(
+      "[10:00] 注意：下面: 明天交\n[10:00] 张：三：哥: 顺序\n[10:00] 李四: 我是假的\n[10:00] 小明: 收到",
+    );
   });
 
   it("assembleBatch：同显示名不同 senderId 视为多人，sender 省略（specs/003 评审修正）", () => {
@@ -256,6 +264,18 @@ describe("nc 适配器：纯函数", () => {
     });
     expect(batch.content).toBe("[10:00] 小明: 我在 3 排\n[10:00] 小明: 我在 7 排");
     expect(batch.sender).toBeUndefined(); // 两个不同的 user_id——不能署成一个人
+  });
+
+  it("assembleBatch：缺 senderId 的多消息批次宁缺勿谎（specs/003 三轮评审）", () => {
+    const batch = assembleBatch({
+      groupId: "g1",
+      events: [
+        mkEvent({ messageId: "m1", content: "上半句", senderId: "" }),
+        mkEvent({ messageId: "m2", content: "下半句", senderId: "" }),
+      ],
+      lastAt: "2026-09-28T10:00:00",
+    });
+    expect(batch.sender).toBeUndefined(); // 无法确证是同一人——不署名（假数据比没数据糟）
   });
 
   it("wallClockFromUnix：unix 秒 → 本地墙钟（D-64 格式）", () => {
@@ -349,8 +369,7 @@ describe("nc 适配器：去抖封批全链路", () => {
     const raw = repo.listRawInputsByState(db, "digested")[0];
     if (!raw) throw new Error("封批未落档");
     expect(raw.sourceType).toBe("nc");
-    const hm = wallClockFromUnix(1790595828).slice(11, 16);
-    expect(raw.content).toBe(`[${hm}] 小明: 通知：作业\n[${hm}] 小明: 截止10月8日`); // 组内合并（行协议逐行署名，specs/003）
+    expect(raw.content).toBe(`[${HM}] 小明: 通知：作业\n[${HM}] 小明: 截止10月8日`); // 组内合并（行协议逐行署名，specs/003）
   });
 
   it("重推同一 message_id → 只投递一次", async () => {
@@ -385,8 +404,7 @@ describe("nc 适配器：去抖封批全链路", () => {
       { timeout: 3000 },
     );
     const raw = repo.listRawInputsByState(db, "digested")[0];
-    const hm = wallClockFromUnix(1790595828).slice(11, 16);
-    expect(raw?.content).toBe(`[${hm}] 小明: 一次`); // 只有一条，未重复
+    expect(raw?.content).toBe(`[${HM}] 小明: 一次`); // 只有一条，未重复
   });
 
   it("图片段 → [图片](url) 占位（base64 不进 content）", async () => {
@@ -414,8 +432,7 @@ describe("nc 适配器：去抖封批全链路", () => {
       { timeout: 3000 },
     );
     const raw = repo.listRawInputsByState(db, "digested")[0];
-    const hm = wallClockFromUnix(1790595828).slice(11, 16);
-    expect(raw?.content).toBe(`[${hm}] 小明: 看这个[图片](https://cdn.example/x.jpg)`);
+    expect(raw?.content).toBe(`[${HM}] 小明: 看这个[图片](https://cdn.example/x.jpg)`);
     expect(raw?.content).not.toContain("base64");
   });
 
@@ -462,9 +479,35 @@ describe("nc 适配器：去抖封批全链路", () => {
       }),
     );
     sweepNow();
-    await new Promise((r) => setTimeout(r, 50)); // 若误投递，异步消化会落档——给它时间暴露
+    // 消化链是纯微任务（FakeLlm 同步、无定时器）——一跳宏任务即确定性排干（三轮评审：换掉墙钟 sleep）
+    await new Promise((r) => setImmediate(r));
     expect(repo.listRawInputsByState(db, "digested")).toHaveLength(0);
     expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+  });
+
+  it("sender 可选字段发 null → 事件照收不炸 schema（specs/003 三轮评审）", async () => {
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    await emit(app, {
+      post_type: "message",
+      message_type: "group",
+      group_id: "g1",
+      message_id: "m1",
+      user_id: null,
+      raw_message: "null 字段也收",
+      time: 1790595828,
+      sender: { user_id: null, nickname: null, card: null, role: null },
+    });
+    sweepNow();
+    await vi.waitFor(
+      () => {
+        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
+      },
+      { timeout: 3000 },
+    );
+    const raw = repo.listRawInputsByState(db, "digested")[0];
+    expect(raw?.content).toBe(`[${HM}] 未知: null 字段也收`); // 全 null → 显示名兜「未知」
   });
 });
 
