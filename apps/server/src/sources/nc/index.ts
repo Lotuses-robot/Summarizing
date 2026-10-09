@@ -166,7 +166,11 @@ export function makeNcAdapter(): SourceAdapter {
           senderId: ev.sender?.user_id ?? ev.user_id ?? "",
           role: ev.sender?.role,
           groupName,
-          at: wallClockFromUnix(ev.time),
+          // 机械时刻（去抖/行前缀用）——桥接发 null 时按接收时刻；真伪由 trueTime 区分（01§5.3 禁兜底进 eventTime）
+          at: wallClockFromUnix(
+            typeof ev.time === "number" ? ev.time : Math.floor(Date.now() / 1000),
+          ),
+          trueTime: typeof ev.time === "number",
           raw: ev,
         };
         const existing = buffers.get(ev.group_id);

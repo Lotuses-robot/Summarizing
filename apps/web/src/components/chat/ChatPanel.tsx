@@ -136,6 +136,9 @@ export function ChatPanel({
     setBusy(true);
     setMsgs((m) => [...m, { role: "user", text: message }]);
     stickRef.current = true; // 发送是用户主动作——无条件回到最新（specs/001 FR-001，哪怕之前上翻）
+    // 同步快照滚底（不赖 effect）：发送后迟到的惯性 scroll 事件会把 stick 翻回 false 并跳过 effect（四轮评审竞态）
+    const logEl = logRef.current;
+    if (logEl !== null) logEl.scrollTop = logEl.scrollHeight;
     setDraft("");
     const savedMentions = mentions;
     setMentions([]);

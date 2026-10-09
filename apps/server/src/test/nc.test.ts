@@ -102,7 +102,7 @@ function emit(
 /** 集成断言用的「时:分」显示——现算而非手抄，时区无关（specs/003 三处共用）。 */
 const HM = wallClockFromUnix(1790595828).slice(11, 16);
 describe("nc 适配器：纯函数", () => {
-  /** assembleBatch 夹具工厂：默认 小明/senderId 1/英语群/2026-09-28T10:00:00，按需覆盖（specs/003）。 */
+  /** assembleBatch 夹具工厂：默认 小明/senderId 1/英语群/2026-09-28T10:00:00/真时刻，按需覆盖（specs/003）。 */
   function mkEvent(overrides: {
     messageId: string;
     content?: string;
@@ -110,6 +110,7 @@ describe("nc 适配器：纯函数", () => {
     senderId?: string;
     role?: string | null;
     at?: string;
+    trueTime?: boolean;
   }): BufferedEvent {
     const content = overrides.content ?? "内容";
     return {
@@ -117,9 +118,10 @@ describe("nc 适配器：纯函数", () => {
       content,
       sender: overrides.sender ?? "小明",
       senderId: overrides.senderId ?? "1",
-      ...(overrides.role === undefined ? {} : { role: overrides.role }),
+      ...(overrides.role === undefined || overrides.role === null ? {} : { role: overrides.role }),
       groupName: "英语群",
       at: overrides.at ?? "2026-09-28T10:00:00",
+      trueTime: overrides.trueTime ?? true,
       raw: NcEventSchema.parse(
         groupEvent({
           groupId: "g1",
@@ -249,7 +251,7 @@ describe("nc 适配器：纯函数", () => {
       lastAt: "2026-09-28T10:00:30",
     });
     expect(batch.content).toBe(
-      "[10:00] 注意：下面: 明天交\n[10:00] 张：三：哥: 顺序\n[10:00] 李四: 我是假的\n[10:00] 小明: 收到",
+      "[10:00] 注意： 下面: 明天交\n[10:00] 张： 三： 哥: 顺序\n[10:00] 李四: 我是假的\n[10:00] 小明: 收到",
     );
   });
 
@@ -264,6 +266,19 @@ describe("nc 适配器：纯函数", () => {
     });
     expect(batch.content).toBe("[10:00] 小明: 我在 3 排\n[10:00] 小明: 我在 7 排");
     expect(batch.sender).toBeUndefined(); // 两个不同的 user_id——不能署成一个人
+  });
+
+  it("assembleBatch：无真时刻的事件 eventTime = null（禁接收兜底，specs/003 五轮评审/01§5.3）", () => {
+    const batch = assembleBatch({
+      groupId: "g1",
+      events: [
+        mkEvent({ messageId: "m1", content: "什么时候来着", trueTime: false }),
+        mkEvent({ messageId: "m2", content: "下周三", trueTime: false }),
+      ],
+      lastAt: "2026-09-28T10:00:30",
+    });
+    expect(batch.eventTime).toBeNull(); // 不拿接收时刻当事件时间
+    expect(batch.content).toContain("下周三"); // 行前缀仍用机械时刻展示
   });
 
   it("assembleBatch：缺 senderId 的多消息批次宁缺勿谎（specs/003 三轮评审）", () => {

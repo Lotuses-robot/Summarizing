@@ -14,16 +14,22 @@ export type NcSegment = z.infer<typeof NcSegmentSchema>;
 /** nc 上报的群消息事件（取用到的字段；message 段数组显式声明以免类型断言，其余未知字段放过）。
  *  ⚠️ 凡 nc 变体可能发 null 的宽松字段一律 nullish（NTQQ 系桥接实测会发 null）——严格形状会让
  *  整条事件 safeParse 失败 → 204 静默丢（三轮评审；role 为本轮新增字段，nickname/card/user_id
- *  为同款顺修）。 */
+ *  为同款顺修）。
+ *  ⚠️ time 缺失/null → 存 **null** 而非接收时刻——「事件时间用接收时间兜底」是 01§5.3 红线
+ *  （五轮评审）；机械用途（去抖/行前缀）由 index.ts 另取接收时刻，真伪由 BufferedEvent.trueTime 区分。 */
+
+/** 宽松 id 形状：string/number/null/缺席 → string | undefined（数字转字符串，null 归缺席；四轮评审收敛四份梯子）。 */
+const IdLikeSchema = z
+  .union([z.string(), z.number(), z.null()])
+  .optional()
+  .transform((v) => (v === null || v === undefined ? undefined : String(v)));
+
 export const NcEventSchema = z.object({
   post_type: z.literal("message"),
   message_type: z.literal("group"), // 私聊不收（D-84 Q-F）
   group_id: z.union([z.string(), z.number()]).transform(String),
   message_id: z.union([z.string(), z.number()]).transform(String),
-  user_id: z
-    .union([z.string(), z.number(), z.null()])
-    .optional()
-    .transform((v) => (v === null || v === undefined ? undefined : String(v))),
+  user_id: IdLikeSchema,
   raw_message: z
     .string()
     .nullish()
@@ -31,29 +37,18 @@ export const NcEventSchema = z.object({
   time: z
     .number()
     .nullish()
-    .transform((v) => (typeof v === "number" ? v : Math.floor(Date.now() / 1000))), // null 时按接收时刻（unix 秒）
-  self_id: z
-    .union([z.string(), z.number(), z.null()])
-    .optional()
-    .transform((v) => (v === null || v === undefined ? undefined : String(v))),
+    .transform((v) => (typeof v === "number" ? v : null)),
+  self_id: IdLikeSchema,
   message: z
     .array(NcSegmentSchema)
     .nullish()
     .transform((v) => v ?? undefined), // 段结构（图片/文本/at…）；纯文本事件可能缺席
   sender: z
     .object({
-      user_id: z
-        .union([z.string(), z.number(), z.null()])
-        .optional()
-        .transform((v) => (v === null || v === undefined ? undefined : String(v))),
+      user_id: IdLikeSchema,
       nickname: z.string().nullish(),
       card: z.string().nullish(), // 群名片（有则比 nickname 更贴合群内身份）
-      // 群角色（specs/003）：宽松收 string/数字且容 null——nc 变体会发 null/数字/大小写漂移，
-      // 数字转字符串、归一与显示在 protocolLine。
-      role: z
-        .union([z.string(), z.number(), z.null()])
-        .nullish()
-        .transform((v) => (v === null || v === undefined ? undefined : String(v))),
+      role: IdLikeSchema, // 群角色（specs/003）：宽松收 string/数字且容 null——归一与显示在 protocolLine
     })
     .optional(),
 });
@@ -66,9 +61,10 @@ export interface BufferedEvent {
   content: string; // 单条消息文本（图片段已在 filter 阶段转 [图片] 占位）
   sender: string; // 发信人显示名（群名片 > 昵称 > user_id）
   senderId: string;
-  role?: string | null; // 群角色原文（owner/admin/member；nc 变体可能发 null/漂移值——显示时归一，未知不显示）
+  role?: string; // 群角色原文（owner/admin/member；nc 变体可能发漂移值——显示时归一，未知不显示）
   groupName: string; // 白名单里的群备注名（入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
-  at: string; // 消息自带时刻（本地墙钟）
+  at: string; // 机械时刻（消息自带时刻；桥接发 null 时按接收时刻）——只用于去抖与行前缀
+  trueTime: boolean; // at 是否消息自带真时刻——false 时 eventTime 必须置 null（01§5.3 禁接收兜底）
   raw: NcEvent; // 原始事件留底
 }
 
@@ -83,7 +79,7 @@ export interface SealedBatch {
   groupId: string;
   content: string;
   hasContent: boolean; // 批内是否有任何非空正文——空批守卫的依据（行前缀会让 content 恒非空，specs/003 评审）
-  eventTime: string; // 组内首条消息时刻（事项的相对日期按它锚定）
+  eventTime: string | null; // 批内首条消息的**真**时刻；任一为机械时刻（桥接发 null）即整批置 null——禁接收兜底（01§5.3）
   raw: NcEvent[]; // 原事件数组留底
   sender?: string; // 批内唯一发送者才写；多人批次省略——身份由行协议逐行承载（D-91）
 }
@@ -116,12 +112,13 @@ const dateOf = (at: string): string => at.split("T")[0] ?? "";
 /** 群身份括注的单点出处：protocolLine 据此追加、safeSpeakerName 据此剥除——两处永不漂移（四轮评审）。 */
 const ROLE_LABELS: Record<string, string> = { owner: "（群主）", admin: "（管理员）" };
 
-/** 显示名净化（只影响协议前缀，正文不动）：换行先折、半角「: 」换全角——顺序反了会重新造出
- *  「: 」（三轮评审）；再剥 ROLE_LABELS 身份括注字面量，防昵称冒充身份括注（三轮评审）。 */
+/** 显示名净化（只影响协议前缀，正文不动）：换行先折、**全部**半角冒号换全角——名字内不再含
+ *  结构分隔符（五轮评审：裸「:」/结尾「：」同样致歧义）；再剥 ROLE_LABELS 身份括注字面量，
+ *  防昵称冒充身份括注（三轮评审）；尾部冒号剥掉防「名字：: 正文」双分隔。 */
 function safeSpeakerName(rawName: string): string {
-  let name = rawName.replaceAll("\n", " ").replaceAll(": ", "：");
+  let name = rawName.replaceAll("\n", " ").replaceAll(":", "：");
   for (const label of Object.values(ROLE_LABELS)) name = name.replaceAll(label, "");
-  return name;
+  return name.replace(/[：:]+$/, "");
 }
 
 /** 一条缓冲事件 → 行协议行：`[时刻] 发送者（身份）: 正文`。
@@ -154,8 +151,11 @@ export function assembleBatch(buf: GroupBuffer): SealedBatch {
     groupId: buf.groupId,
     content: buf.events.map((e) => protocolLine(e, sameDay)).join("\n"),
     hasContent: buf.events.some((e) => e.content.trim() !== ""),
-    eventTime: first.at,
+    // 事件时间只认真时刻：批内混入机械时刻（桥接发 null 的消息）→ 整批置 null，禁接收兜底（01§5.3）
+    eventTime: first.trueTime ? first.at : null,
     raw: buf.events.map((e) => e.raw),
-    sender: trustworthy && speakers.size === 1 ? first.sender : undefined,
+    // 显示名兜「未知」= 根本不知道谁发的——「未知」不署名（宁缺勿谎，五轮评审）
+    sender:
+      trustworthy && speakers.size === 1 && first.sender !== "未知" ? first.sender : undefined,
   };
 }
