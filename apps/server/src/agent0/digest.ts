@@ -67,6 +67,18 @@ export async function digestRawInput(
     const list = await elicitChangeList(db, llm, tools, modelTag, raw);
 
     const { accepted, rejected } = runFence(db, raw, list);
+    // 拒收项留痕先于修复轮（十轮评审定案：先拒、后修，时序即因果）；写失败抛进外层 catch
+    // （批次标 failed、可重试）——直呼 repo 不走尽力而为助手（吞错会让「失败可重试」不可达）。
+    // detail 不写「并放弃」——修复轮可能救回，最终裁决以 repair_round 流水为准。
+    for (const r of rejected) {
+      repo.appendPipelineEvent(db, {
+        rawInputId: raw.id,
+        action: "fence_reject",
+        detail: `围栏拒收：${r.reason}`,
+        payload: r.item,
+        by,
+      });
+    }
     if (rejected.length > 0) {
       // 拒收项报错回给 agent0，可修正清单再提交一次（01§4.10④）。
       // 修正轮本身失败（如网关抖动）不得拖垮已通过围栏的项——降级为「放弃拒收项并留痕」。
@@ -121,20 +133,6 @@ export async function digestRawInput(
           by,
         );
       }
-    }
-
-    // 拒收项留痕放在 executeChanges **之前**（八轮评审）：此时写失败会抛进外层 catch（批次标
-    // failed、可重试）——**直呼 repo，不走尽力而为助手**（助手吞错会让「失败可重试」
-    // 的承诺结构性不可达，九轮评审）；fence_reject 行也因此先于 digest_done 落库可查。
-    // detail 不写「并放弃」——修复轮可能救回，最终裁决以 repair_round 流水为准（十轮评审）。
-    for (const r of rejected) {
-      repo.appendPipelineEvent(db, {
-        rawInputId: raw.id,
-        action: "fence_reject",
-        detail: `围栏拒收：${r.reason}`,
-        payload: r.item,
-        by,
-      });
     }
 
     const { details } = executeChanges(db, raw, accepted, by);
