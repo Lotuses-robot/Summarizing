@@ -225,3 +225,82 @@ describe("ChatPanel（对话面板，05§四）", () => {
     expect(screen.getByText("有两件：")).toBeInTheDocument();
   });
 });
+
+describe("ChatPanel 滚动锚定（specs/001-chat-scroll-anchor）", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  /** 拿到消息滚动容器并把滚动度量设成可控值（happy-dom 无布局引擎，度量默认全 0；
+   *  其 scrollTop setter 还会按内部度量钳制——一并接管为普通数据属性才可写）。 */
+  function stubLogMetrics(scrollHeight: number, clientHeight: number): HTMLElement {
+    const el = document.querySelector<HTMLElement>("[data-chat-log]");
+    if (el === null) throw new Error("找不到 data-chat-log 容器");
+    Object.defineProperty(el, "scrollTop", { value: 0, writable: true, configurable: true });
+    Object.defineProperty(el, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(el, "clientHeight", { value: clientHeight, configurable: true });
+    return el;
+  }
+
+  /** 挂一个无候选事项的空面板（滚动测试不关心 @ 候选）。 */
+  function renderPanel(): void {
+    render(
+      <ChatPanel items={[]} onActivity={() => {}} onRequestFocus={() => {}} onClose={() => {}} />,
+    );
+  }
+
+  it("US2：历史回填后列表停在底部（SC-002）", async () => {
+    stubChat(
+      { reply: "接上。", actions: [], references: [] },
+      {
+        history: [
+          { role: "user", content: "上次说的作业是什么", at: "2026-09-29T10:00:00" },
+          { role: "assistant", content: "英语作业，9 月 30 号交。", at: "2026-09-29T10:00:01" },
+        ],
+      },
+    );
+    renderPanel();
+    const log = stubLogMetrics(1000, 400);
+    await screen.findByText("英语作业，9 月 30 号交。");
+    await waitFor(() => expect(log.scrollTop).toBe(1000)); // 回填后钉在底（非顶部）
+  });
+
+  it("US1：发送与回复到达后仍跟随底部（SC-001）", async () => {
+    stubChat({ reply: "好。", actions: [], references: [] });
+    renderPanel();
+    const log = stubLogMetrics(800, 400);
+    await waitFor(() => expect(log.scrollTop).toBe(800)); // 初始即在底
+    // 模拟消息追加使内容变长
+    Object.defineProperty(log, "scrollHeight", { value: 1200, configurable: true });
+    fireEvent.change(screen.getByPlaceholderText(/问一句/), { target: { value: "问题" } });
+    fireEvent.click(screen.getByText("发送"));
+    await screen.findByText("好。");
+    expect(log.scrollTop).toBe(1200); // 发送与回复两次追加都跟随到了新底部
+  });
+
+  it("US3：上翻后回复不拽回；滚回底部恢复跟随（SC-003）", async () => {
+    stubChat({ reply: "迟到的回复。", actions: [], references: [] });
+    renderPanel();
+    const log = stubLogMetrics(2000, 400);
+    const input = screen.getByPlaceholderText(/问一句/);
+    fireEvent.change(input, { target: { value: "问题" } });
+    fireEvent.click(screen.getByText("发送"));
+    await screen.findByText("问题"); // 发送时在底（FR-001）
+    // 用户上翻离开底部
+    log.scrollTop = 100;
+    fireEvent.scroll(log);
+    // 回复到达：内容增长但视口不动
+    Object.defineProperty(log, "scrollHeight", { value: 2400, configurable: true });
+    await screen.findByText("迟到的回复。");
+    expect(log.scrollTop).toBe(100); // 位移 0，没被拽回
+    // 用户手动滚回底部 → 恢复跟随
+    log.scrollTop = 2000; // 2400 - 400 = 底
+    fireEvent.scroll(log);
+    stubChat({ reply: "好的。", actions: [], references: [] });
+    fireEvent.change(input, { target: { value: "再来" } });
+    fireEvent.click(screen.getByText("发送"));
+    await screen.findByText("好的。");
+    expect(log.scrollTop).toBe(2400); // 恢复跟随
+  });
+});

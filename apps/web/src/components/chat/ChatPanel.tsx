@@ -10,6 +10,7 @@ import { api } from "../../api";
 import { cn } from "../../lib/cn";
 import { pushEscLayer } from "../../lib/escLayer";
 import { Markdown } from "../../lib/markdown";
+import { isNearBottom } from "../../lib/scrollAnchor";
 
 type Msg = {
   role: "user" | "front";
@@ -42,6 +43,24 @@ export function ChatPanel({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // 滚动锚定（specs/001）：容器 ref + 「是否跟随最新」开关。
+  // 初始真——打开/回填即看最新；用户上翻离开底部后由 onScroll 翻假（FR-003），滚回底部再翻回真。
+  const logRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
+
+  /** onScroll：按当前位置刷新「是否跟随最新」（近底容差内视为仍在底，specs/001 FR-003）。 */
+  const syncStick = (): void => {
+    const el = logRef.current;
+    if (el === null) return;
+    stickRef.current = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
+  };
+
+  // 消息集变化后：仍在底部（或刚发送）→ 钉到最新；用户上翻浏览则不打扰（specs/001 US3）。
+  useEffect(() => {
+    const el = logRef.current;
+    if (el === null || !stickRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [msgs]);
 
   // 面板与 @ 下拉各挂一层 Esc（05§六）：后注册先退——下拉关完才轮到收面板
   useEffect(() => pushEscLayer(() => onCloseRef.current()), []);
@@ -116,6 +135,7 @@ export function ChatPanel({
     if (message === "" || busy) return;
     setBusy(true);
     setMsgs((m) => [...m, { role: "user", text: message }]);
+    stickRef.current = true; // 发送是用户主动作——无条件回到最新（specs/001 FR-001，哪怕之前上翻）
     setDraft("");
     const savedMentions = mentions;
     setMentions([]);
@@ -181,7 +201,12 @@ export function ChatPanel({
           关闭
         </button>
       </div>
-      <div className="flex-1 space-y-2 overflow-y-auto p-3 text-sm">
+      <div
+        ref={logRef}
+        className="flex-1 space-y-2 overflow-y-auto p-3 text-sm"
+        data-chat-log
+        onScroll={syncStick}
+      >
         {msgs.length === 0 && (
           <p className="text-xs text-ink-muted">
             对前台说话：提问、丢资料、补充信息都行（@ 可提及看板事项）——它自己判断怎么处理。

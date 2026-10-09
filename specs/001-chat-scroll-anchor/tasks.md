@@ -28,7 +28,7 @@ apps/web/src/test/chatPanel.test.tsx          ← 测试
 
 **Purpose**: 无项目级脚手架需求（既有项目）。
 
-- [ ] T001 通读 `apps/web/src/components/chat/ChatPanel.tsx` 与 `apps/web/src/test/chatPanel.test.tsx`，确认消息区容器与既有测试替身（`helpers/http.ts` 喂真实 api.ts）的用法
+- [x] T001 通读 `apps/web/src/components/chat/ChatPanel.tsx` 与 `apps/web/src/test/chatPanel.test.tsx`，确认消息区容器与既有测试替身（`helpers/http.ts` 喂真实 api.ts）的用法
 
 ---
 
@@ -38,9 +38,9 @@ apps/web/src/test/chatPanel.test.tsx          ← 测试
 
 **⚠️ 无此阶段，三个故事都无法实现。**
 
-- [ ] T002 [US-shared] 在 `ChatPanel.tsx` 消息区容器（`flex-1 ... overflow-y-auto` 的 div）挂 `ref`，并在组件内加一个 `stickToBottom` 的 ref（记录「当前是否跟随最新」）
-- [ ] T003 [US-shared] 加滚动处理函数（带 JSDoc：说明「近底容差」的意图与依据）——判定容器是否在底部附近（容差数十 px），据此更新 `stickToBottom`；函数**必须被真实挂载**（容器 `onScroll`），不得写成无人调用的工具（宪法 IV）
-- [ ] T004 [US-shared] 加「滚到底」的执行（`scrollTop = scrollHeight`），供跟随场景调用
+- [x] T002 [US-shared] 在 `ChatPanel.tsx` 消息区容器（`flex-1 ... overflow-y-auto` 的 div）挂 `ref`，并在组件内加一个 `stickToBottom` 的 ref（记录「当前是否跟随最新」）
+- [x] T003 [US-shared] 加滚动处理函数（带 JSDoc：说明「近底容差」的意图与依据）——判定容器是否在底部附近（容差数十 px），据此更新 `stickToBottom`；函数**必须被真实挂载**（容器 `onScroll`），不得写成无人调用的工具（宪法 IV）
+- [x] T004 [US-shared] 加「滚到底」的执行（`scrollTop = scrollHeight`），供跟随场景调用
 
 **Checkpoint**: 地基就绪，三个故事可分别实现。
 
@@ -52,8 +52,8 @@ apps/web/src/test/chatPanel.test.tsx          ← 测试
 
 **Independent Test**: 渲染面板 → 发送一条 → 断言列表底部可见该消息。
 
-- [ ] T005 [P] [US1] 测试先行：在 `chatPanel.test.tsx` 加「发送后停在底部」断言（渲染含历史的面板 → 发送 → 断言新消息可见 / 容器 scrollTop 在底部），先确认其 FAIL
-- [ ] T006 [US1] 实现：`send()` 追加用户消息、以及收到回复追加后，若 `stickToBottom` 为真则滚到底（在设置消息的 `useEffect` 中处理，覆盖两处追加）
+- [x] T005 [P] [US1] 测试先行：在 `chatPanel.test.tsx` 加「发送后停在底部」断言（渲染含历史的面板 → 发送 → 断言新消息可见 / 容器 scrollTop 在底部），先确认其 FAIL
+- [x] T006 [US1] 实现：`send()` 追加用户消息、以及收到回复追加后，若 `stickToBottom` 为真则滚到底（在设置消息的 `useEffect` 中处理，覆盖两处追加）
 
 **Checkpoint**: US1 独立可用（发完能看到）。
 
@@ -65,8 +65,8 @@ apps/web/src/test/chatPanel.test.tsx          ← 测试
 
 **Independent Test**: 有历史时挂载面板 → 断言回填后停在底部。
 
-- [ ] T007 [P] [US2] 测试先行：加「历史回填后停在底部」断言，先确认 FAIL
-- [ ] T008 [US2] 实现：历史回填 effect 落地消息后，首次滚动到底（初始挂载即 `stickToBottom = true`）
+- [x] T007 [P] [US2] 测试先行：加「历史回填后停在底部」断言，先确认 FAIL
+- [x] T008 [US2] 实现：历史回填 effect 落地消息后，首次滚动到底（初始挂载即 `stickToBottom = true`）
 
 **Checkpoint**: US1 + US2 均可用（打开/发送都看到最新）。
 
@@ -78,8 +78,8 @@ apps/web/src/test/chatPanel.test.tsx          ← 测试
 
 **Independent Test**: 造可滚动内容 → 上翻到中部 → 触发新消息 → 断言视口未跳。
 
-- [ ] T009 [P] [US3] 测试先行：加「上翻后新消息不拽回」+「滚回底部恢复跟随」两条断言，先确认 FAIL
-- [ ] T010 [US3] 实现：新消息到达时按 `stickToBottom` 决定是否跟随（false 则不动）；`onScroll` 在用户滚回底部时把 `stickToBottom` 置回 true
+- [x] T009 [P] [US3] 测试先行：加「上翻后新消息不拽回」+「滚回底部恢复跟随」两条断言，先确认 FAIL
+- [x] T010 [US3] 实现：新消息到达时按 `stickToBottom` 决定是否跟随（false 则不动）；`onScroll` 在用户滚回底部时把 `stickToBottom` 置回 true
 
 **Checkpoint**: 三故事全功能。
 
@@ -87,9 +87,9 @@ apps/web/src/test/chatPanel.test.tsx          ← 测试
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T011 边界核对（spec Edge Cases）：内容不足无滚动条时无异常；草稿与输入焦点不因滚动丢失；空状态提示不触发滚动
-- [ ] T012 运行 `npm run check`（tsc + eslint + vitest）与 `npm run build -w @summarizing/web`，全绿
-- [ ] T013 人工走查：真实启动 `npm run dev`，在浏览器验证发消息停在底部、刷新停底、上翻不被拽
+- [x] T011 边界核对（spec Edge Cases）：内容不足无滚动条时无异常；草稿与输入焦点不因滚动丢失；空状态提示不触发滚动
+- [x] T012 运行 `npm run check`（tsc + eslint + vitest）与 `npm run build -w @summarizing/web`，全绿
+- [x] T013 人工走查：真实启动 `npm run dev`，在浏览器验证发消息停在底部、刷新停底、上翻不被拽
 
 ---
 

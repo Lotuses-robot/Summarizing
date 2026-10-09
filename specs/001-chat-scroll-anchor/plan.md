@@ -64,13 +64,15 @@ specs/001-chat-scroll-anchor/
 
 ```text
 apps/web/src/
-├── components/chat/ChatPanel.tsx     # 改：消息区容器加 ref + 滚动锚定 effect
+├── lib/scrollAnchor.ts               # 新：isNearBottom 纯判定（项目惯例：纯决策函数住 lib，参照 urgency）
+├── components/chat/ChatPanel.tsx     # 改：容器 ref/data-chat-log/onScroll + 跟随 effect + 发送强制回底
 └── test/
-    ├── chatPanel.test.tsx            # 改：补滚动行为断言
+    ├── chatPanel.test.tsx            # 改：补三个 user story 的滚动行为断言
+    ├── scrollAnchor.test.ts          # 新：判定函数直测
     └── helpers/                      # 既有测试基建，复用
 ```
 
-**Structure Decision**: 单文件改动（+ 测试），落在既有 `apps/web` 结构内，不新建目录。
+**Structure Decision**: 落在既有 `apps/web` 结构内，不新建目录。实现比预估多一个 lib 文件——判定逻辑按项目惯例（纯决策函数住 lib 独立直测）从组件中分出， wiring 留在组件。
 
 ## Complexity Tracking
 
