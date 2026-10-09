@@ -2,6 +2,7 @@ import {
   AiSettingsSchema,
   AiSettingsViewSchema,
   AiTestResultSchema,
+  errText,
   type AiSettings,
   type AiSettingsView,
 } from "@summarizing/shared";
@@ -13,7 +14,6 @@ import path from "node:path";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import { envFromAiSettings, makeOpenAiLlm, type TaggedLlm } from "../shared/llm";
-import { errText } from "../shared/err";
 
 // settings 资源路由（05§五 / D-81）：AI 设置的读改清 + 测试连接 + 数据备份下载。
 // 原则「用户偏好进设置，系统策略进代码」——这张表只放用户偏好。

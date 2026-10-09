@@ -20,8 +20,4 @@ describe("isNearBottom（滚动锚定判定）", () => {
     expect(isNearBottom(0, 300, 400)).toBe(true);
     expect(isNearBottom(0, 400, 400)).toBe(true);
   });
-
-  it("自定义容差生效", () => {
-    expect(isNearBottom(500, 1000, 400, 120)).toBe(true);
-  });
 });

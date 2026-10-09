@@ -58,6 +58,7 @@ export interface GroupBuffer {
 export interface SealedBatch {
   groupId: string;
   content: string;
+  hasContent: boolean; // 批内是否有任何非空正文——空批守卫的依据（行前缀会让 content 恒非空，specs/003 评审）
   eventTime: string; // 组内首条消息时刻（事项的相对日期按它锚定）
   raw: NcEvent[]; // 原事件数组留底
   sender?: string; // 批内唯一发送者才写；多人批次省略——身份由行协议逐行承载（D-91）
@@ -103,8 +104,7 @@ function protocolLine(e: BufferedEvent, sameDay: boolean): string {
 /** 把一批事件合并成行协议批次内容（每条一行；组内首条时刻为 eventTime；specs/003 D-91）。 */
 export function assembleBatch(buf: GroupBuffer): SealedBatch {
   const first = buf.events[0];
-  const last = buf.events.at(-1);
-  if (!first || !last) throw new Error(`组 ${buf.groupId} 缓冲为空，不应封批`);
+  if (!first) throw new Error(`组 ${buf.groupId} 缓冲为空，不应封批`);
   const firstDate = first.at.split("T")[0] ?? "";
   const sameDay = buf.events.every((e) => (e.at.split("T")[0] ?? "") === firstDate);
   // 发话人按 senderId 去重（显示名会撞——两人同名时 sender 仍不得说谎，specs/003 评审修正）；
@@ -113,6 +113,7 @@ export function assembleBatch(buf: GroupBuffer): SealedBatch {
   return {
     groupId: buf.groupId,
     content: buf.events.map((e) => protocolLine(e, sameDay)).join("\n"),
+    hasContent: buf.events.some((e) => e.content.trim() !== ""),
     eventTime: first.at,
     raw: buf.events.map((e) => e.raw),
     sender: speakers.size === 1 ? first.sender : undefined,

@@ -1,4 +1,5 @@
 import {
+  errText,
   GetItemArgsSchema,
   SearchKbArgsSchema,
   SearchItemsArgsSchema,
@@ -11,7 +12,6 @@ import {
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient } from "../shared/llm";
-import { errText } from "../shared/err";
 import { describeRejections, parseChangeList, runFence } from "../executor/fence";
 import { DIGEST_SYSTEM_PROMPT } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
@@ -224,7 +224,7 @@ async function runTool(
     }
   } catch (err) {
     // 工具报错回给模型让它自己调整，而不是中断整个循环
-    return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+    return JSON.stringify({ error: errText(err) });
   }
 }
 

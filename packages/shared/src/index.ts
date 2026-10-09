@@ -593,3 +593,11 @@ export const SourceSummarySchema = z.object({
   settings: z.array(SettingFieldSchema),
 });
 export type SourceSummary = z.infer<typeof SourceSummarySchema>;
+
+// ──────────────── 通用工具（跨 web/server 两端共用）────────────────
+
+/** err → 人话单行（Error.message / String 兜底）。web 设置面与 server 日志/回喂共用；
+ *  曾三份各写（web lib / server digest / server 内联），2026-10-09 /simplify 轮收敛到此。 */
+export function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

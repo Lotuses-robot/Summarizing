@@ -10,9 +10,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { AiSettings, AiSettingsView, AiTestResult } from "@summarizing/shared";
+import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
-import { errText } from "../../lib/err";
 import { PALETTES } from "../../lib/appearance";
 import { pushEscLayer } from "../../lib/escLayer";
 import { Card, Row, Segmented, StatusSlot, useStatus } from "./primitives";

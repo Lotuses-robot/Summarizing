@@ -1,4 +1,5 @@
 import {
+  errText,
   CHAT_HISTORY_MAX_ITEMS,
   GetItemArgsSchema,
   itemName,
@@ -13,7 +14,6 @@ import * as repo from "../storage/repo";
 import { buildBoard } from "./board";
 import { describeSweep, sweepUncertainLibrary } from "../agent0/sweep";
 import { kickDigest } from "../agent0/digest";
-import { errText } from "../shared/err";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { ChatMsg, LlmClient, ToolCall, ToolDef } from "../shared/llm";
 

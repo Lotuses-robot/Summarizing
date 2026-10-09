@@ -101,8 +101,8 @@ export function makeNcAdapter(): SourceAdapter {
   const sealGroup = (ctx: SourceContext, buf: GroupBuffer): void => {
     const batch = assembleBatch(buf);
     // 全空消息（raw_message 为空且无可展开段）= 无信息量，留痕后丢弃（留缓冲只会无限重试）。
-    // ⚠️ 判「消息正文全空」而非组批后 content——行协议前缀会把全空批次衬成非空（specs/003 评审修正）。
-    if (batch.content.trim() === "" || buf.events.every((e) => e.content.trim() === "")) {
+    // hasContent 由协议层给出——行前缀会让 content 恒非空，「有没有信息量」只有它知道（specs/003 评审）。
+    if (!batch.hasContent) {
       ctx.log.warn(`群 ${buf.groupId} 的批次内容为空，丢弃（${buf.events.length} 条）`);
       for (const e of buf.events) rememberId(e.messageId);
       buffers.delete(buf.groupId);

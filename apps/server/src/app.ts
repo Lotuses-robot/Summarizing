@@ -1,12 +1,16 @@
 import Fastify from "fastify";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { ChatRequestSchema, IngestRequestSchema, SettingFieldSchema } from "@summarizing/shared";
+import {
+  ChatRequestSchema,
+  errText,
+  IngestRequestSchema,
+  SettingFieldSchema,
+} from "@summarizing/shared";
 import type { Db } from "./storage/db";
 import * as repo from "./storage/repo";
 import { nowLocalWallClock } from "./shared/time";
 import { retryRawInput } from "./agent0/digest";
-import { errText } from "./shared/err";
 import { sweepUncertainLibrary } from "./agent0/sweep";
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { ingestBatch } from "./application/ingest";

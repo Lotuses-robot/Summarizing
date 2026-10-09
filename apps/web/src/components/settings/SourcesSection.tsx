@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { SettingField, SourceSummary } from "@summarizing/shared";
+import { errText } from "@summarizing/shared";
 import { api } from "../../api";
-import { errText } from "../../lib/err";
 import { Card, Panel, Row, StatusSlot, useStatus } from "./primitives";
 
 /** record 值判据：非 null、非数组的对象（键值地图形状）。 */

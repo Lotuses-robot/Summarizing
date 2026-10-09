@@ -5,7 +5,13 @@ import { makeApp, exitAfter, gracefulClose, registerSources, type AppDeps } from
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { makeNcAdapter, SWEEP_INTERVAL_MS } from "../sources/nc";
-import { assembleBatch, dueGroups, NcEventSchema, type GroupBuffer } from "../sources/nc/types";
+import {
+  assembleBatch,
+  dueGroups,
+  NcEventSchema,
+  type BufferedEvent,
+  type GroupBuffer,
+} from "../sources/nc/types";
 import { wallClockFromUnix } from "../shared/time";
 import { FakeLlm } from "./helpers/fakeLlm";
 
@@ -93,6 +99,36 @@ function emit(
   return app.inject({ method: "POST", url: "/api/sources/nc/event", payload });
 }
 describe("nc 适配器：纯函数", () => {
+  /** assembleBatch 夹具工厂：默认 小明/10001/英语群/2026-09-28T10:00:00，按需覆盖（specs/003）。 */
+  function mkEvent(overrides: {
+    messageId: string;
+    content?: string;
+    sender?: string;
+    senderId?: string;
+    role?: string;
+    at?: string;
+  }): BufferedEvent {
+    const content = overrides.content ?? "内容";
+    return {
+      messageId: overrides.messageId,
+      content,
+      sender: overrides.sender ?? "小明",
+      senderId: overrides.senderId ?? "1",
+      ...(overrides.role === undefined ? {} : { role: overrides.role }),
+      groupName: "英语群",
+      at: overrides.at ?? "2026-09-28T10:00:00",
+      raw: NcEventSchema.parse(
+        groupEvent({
+          groupId: "g1",
+          messageId: overrides.messageId,
+          text: content,
+          time: 1,
+          sender: overrides.sender,
+        }),
+      ),
+    };
+  }
+
   it("dueGroups：静默 ≥ 窗口的组才命中（去抖语义，从组内最后一条起算）", () => {
     const buffers = new Map<string, GroupBuffer>([
       ["g1", { groupId: "g1", events: [], lastAt: "2026-09-28T10:00:00" }], // 距今 4 分钟
@@ -103,21 +139,12 @@ describe("nc 适配器：纯函数", () => {
   });
 
   it("assembleBatch：行协议逐行署名，eventTime = 首条时刻（specs/003）", () => {
-    /** 造一条缓冲事件（占位 raw 从事件 schema 解析）。 */
-    const mk = (id: string, at: string, content: string) => ({
-      messageId: id,
-      content,
-      sender: "小明",
-      senderId: "1",
-      groupName: "英语群",
-      at,
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
-      ),
-    });
     const batch = assembleBatch({
       groupId: "g1",
-      events: [mk("m1", "2026-09-28T10:00:00", "通知"), mk("m2", "2026-09-28T10:00:30", "细节")],
+      events: [
+        mkEvent({ messageId: "m1", at: "2026-09-28T10:00:00", content: "通知" }),
+        mkEvent({ messageId: "m2", at: "2026-09-28T10:00:30", content: "细节" }),
+      ],
       lastAt: "2026-09-28T10:00:30",
     });
     expect(batch.content).toBe("[10:00] 小明: 通知\n[10:00] 小明: 细节");
@@ -127,24 +154,18 @@ describe("nc 适配器：纯函数", () => {
   });
 
   it("assembleBatch：多人批次逐行各归其主，sender 键省略（specs/003 US1/US2）", () => {
-    /** 造一条缓冲事件（发信人与 senderId 可指定）。 */
-    const mk = (id: string, at: string, content: string, sender: string, senderId: string) => ({
-      messageId: id,
-      content,
-      sender,
-      senderId,
-      groupName: "英语群",
-      at,
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1, sender }),
-      ),
-    });
     const batch = assembleBatch({
       groupId: "g1",
       events: [
-        mk("m1", "2026-09-28T10:00:00", "谁看到通知了", "小明", "10001"),
-        mk("m2", "2026-09-28T10:00:20", "在我这", "小红", "10002"),
-        mk("m3", "2026-09-28T10:00:40", "放学来拿", "小明", "10001"),
+        mkEvent({ messageId: "m1", at: "2026-09-28T10:00:00", content: "谁看到通知了" }),
+        mkEvent({
+          messageId: "m2",
+          at: "2026-09-28T10:00:20",
+          content: "在我这",
+          sender: "小红",
+          senderId: "10002",
+        }),
+        mkEvent({ messageId: "m3", at: "2026-09-28T10:00:40", content: "放学来拿" }),
       ],
       lastAt: "2026-09-28T10:00:40",
     });
@@ -155,53 +176,28 @@ describe("nc 适配器：纯函数", () => {
   });
 
   it("assembleBatch：群身份括注只认 owner/admin（大小写归一）；member 与缺席无噪声（specs/003 US3+评审）", () => {
-    /** 造一条缓冲事件（角色可指定——任意字符串，nc 变体漂移不丢消息）。 */
-    const mk = (id: string, at: string, content: string, role?: string) => ({
-      messageId: id,
-      content,
-      sender: "老王",
-      senderId: "1",
-      groupName: "英语群",
-      at,
-      role,
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
-      ),
-    });
     const batch = assembleBatch({
       groupId: "g1",
       events: [
-        mk("m1", "2026-09-28T10:00:00", "我宣布", "owner"),
-        mk("m2", "2026-09-28T10:00:10", "同意", "admin"),
-        mk("m3", "2026-09-28T10:00:20", "哦", "member"),
-        mk("m4", "2026-09-28T10:00:30", "大写也认", "Owner"),
-        mk("m5", "2026-09-28T10:00:40", "…"),
+        mkEvent({ messageId: "m1", content: "我宣布", role: "owner" }),
+        mkEvent({ messageId: "m2", content: "同意", role: "admin" }),
+        mkEvent({ messageId: "m3", content: "哦", role: "member" }),
+        mkEvent({ messageId: "m4", content: "大写也认", role: "Owner" }),
+        mkEvent({ messageId: "m5", content: "…" }),
       ],
       lastAt: "2026-09-28T10:00:40",
     });
     expect(batch.content).toBe(
-      "[10:00] 老王（群主）: 我宣布\n[10:00] 老王（管理员）: 同意\n[10:00] 老王: 哦\n[10:00] 老王（群主）: 大写也认\n[10:00] 老王: …",
+      "[10:00] 小明（群主）: 我宣布\n[10:00] 小明（管理员）: 同意\n[10:00] 小明: 哦\n[10:00] 小明（群主）: 大写也认\n[10:00] 小明: …",
     );
   });
 
   it("assembleBatch：多行消息续行缩进，正文引文仍可命中（specs/003 评审修正）", () => {
-    /** 造一条缓冲事件（占位 raw）。 */
-    const mk = (id: string, at: string, content: string) => ({
-      messageId: id,
-      content,
-      sender: "小明",
-      senderId: "1",
-      groupName: "英语群",
-      at,
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
-      ),
-    });
     const batch = assembleBatch({
       groupId: "g1",
       events: [
-        mk("m1", "2026-09-28T10:00:00", "作业要求：\n1. 先写作文\n2. 下周交"),
-        mk("m2", "2026-09-28T10:00:30", "收到"),
+        mkEvent({ messageId: "m1", content: "作业要求：\n1. 先写作文\n2. 下周交" }),
+        mkEvent({ messageId: "m2", content: "收到" }),
       ],
       lastAt: "2026-09-28T10:00:30",
     });
@@ -213,23 +209,11 @@ describe("nc 适配器：纯函数", () => {
   });
 
   it("assembleBatch：跨天批次时刻升级为 [MM-DD HH:mm]（specs/003 Edge）", () => {
-    /** 造一条缓冲事件（占位 raw）。 */
-    const mk = (id: string, at: string, content: string) => ({
-      messageId: id,
-      content,
-      sender: "小明",
-      senderId: "1",
-      groupName: "英语群",
-      at,
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
-      ),
-    });
     const batch = assembleBatch({
       groupId: "g1",
       events: [
-        mk("m1", "2026-09-28T23:59:00", "睡前最后一句"),
-        mk("m2", "2026-09-29T00:01:00", "补充"),
+        mkEvent({ messageId: "m1", at: "2026-09-28T23:59:00", content: "睡前最后一句" }),
+        mkEvent({ messageId: "m2", at: "2026-09-29T00:01:00", content: "补充" }),
       ],
       lastAt: "2026-09-29T00:01:00",
     });
@@ -237,28 +221,29 @@ describe("nc 适配器：纯函数", () => {
   });
 
   it("assembleBatch：消息正文是 content 的连续子串（引文逐字校验兼容，specs/003 SC-002）", () => {
-    /** 造一条缓冲事件（占位 raw）。 */
-    const mk = (id: string, at: string, content: string) => ({
-      messageId: id,
-      content,
-      sender: "小明",
-      senderId: "1",
-      groupName: "英语群",
-      at,
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
-      ),
-    });
     const batch = assembleBatch({
       groupId: "g1",
       events: [
-        mk("m1", "2026-09-28T10:00:00", "英语作业下周三交"),
-        mk("m2", "2026-09-28T10:00:30", "收到"),
+        mkEvent({ messageId: "m1", content: "英语作业下周三交" }),
+        mkEvent({ messageId: "m2", content: "收到" }),
       ],
       lastAt: "2026-09-28T10:00:30",
     });
     expect(batch.content.includes("英语作业下周三交")).toBe(true);
     expect(batch.content.includes("收到")).toBe(true);
+  });
+
+  it("assembleBatch：同显示名不同 senderId 视为多人，sender 省略（specs/003 评审修正）", () => {
+    const batch = assembleBatch({
+      groupId: "g1",
+      events: [
+        mkEvent({ messageId: "m1", senderId: "10001", content: "我在 3 排" }),
+        mkEvent({ messageId: "m2", senderId: "10002", content: "我在 7 排" }),
+      ],
+      lastAt: "2026-09-28T10:00:00",
+    });
+    expect(batch.content).toBe("[10:00] 小明: 我在 3 排\n[10:00] 小明: 我在 7 排");
+    expect(batch.sender).toBeUndefined(); // 两个不同的 user_id——不能署成一个人
   });
 
   it("wallClockFromUnix：unix 秒 → 本地墙钟（D-64 格式）", () => {
@@ -420,28 +405,6 @@ describe("nc 适配器：去抖封批全链路", () => {
     const hm = wallClockFromUnix(1790595828).slice(11, 16);
     expect(raw?.content).toBe(`[${hm}] 小明: 看这个[图片](https://cdn.example/x.jpg)`);
     expect(raw?.content).not.toContain("base64");
-  });
-
-  it("assembleBatch：同显示名不同 senderId 视为多人，sender 省略（specs/003 评审修正）", () => {
-    /** 造一条缓冲事件（senderId 可指定——显示名撞车时按 id 分辨）。 */
-    const mk = (id: string, senderId: string, content: string) => ({
-      messageId: id,
-      content,
-      sender: "小明",
-      senderId,
-      groupName: "英语群",
-      at: "2026-09-28T10:00:00",
-      raw: NcEventSchema.parse(
-        groupEvent({ groupId: "g1", messageId: id, text: content, time: 1 }),
-      ),
-    });
-    const batch = assembleBatch({
-      groupId: "g1",
-      events: [mk("m1", "10001", "我在 3 排"), mk("m2", "10002", "我在 7 排")],
-      lastAt: "2026-09-28T10:00:00",
-    });
-    expect(batch.content).toBe("[10:00] 小明: 我在 3 排\n[10:00] 小明: 我在 7 排");
-    expect(batch.sender).toBeUndefined(); // 两个不同的 user_id——不能署成一个人
   });
 
   it("raw 归档列：nc 原事件数组落库（D-84 §3.2 原始载荷留底——曾断线：适配器不传 raw）", async () => {
