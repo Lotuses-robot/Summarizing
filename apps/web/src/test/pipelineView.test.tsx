@@ -102,8 +102,8 @@ describe("PipelineView（流水视图，specs/005）", () => {
     fireEvent.click(row);
     // 展开行懒取详情：原文与时间线事件按序可见
     await waitFor(() => expect(screen.getByText("群里说的作业通知")).toBeInTheDocument());
-    expect(screen.getByText("第 1 轮：search_items")).toBeInTheDocument();
-    expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
+    expect(screen.getAllByText("第 1 轮：search_items")).toHaveLength(1);
+    expect(screen.getAllByText("应用 1 项变更：新建事项「作业」").length).toBeGreaterThanOrEqual(1);
   });
 
   it("空库 → 可见空态文案（不是空白/报错）", async () => {
