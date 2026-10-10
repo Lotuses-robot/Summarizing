@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { itemDueDate, type Item, type RawInput } from "@summarizing/shared";
+import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
 import { makeApp } from "../app";
 import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
 import { executeChanges } from "../executor/executor";
@@ -190,7 +190,8 @@ describe("agent0 消化管线", () => {
   it("⑥ 工具循环超轮数上限 → failed 留痕", async () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm();
-    for (let i = 0; i < 9; i++) {
+    // 上限 + 1 轮工具调用：撞上限而非其他原因（常量调整后此处仍表达同一意图）
+    for (let i = 0; i < DIGEST_MAX_ROUNDS + 1; i++) {
       llm.push({
         content: null,
         toolCalls: [{ id: `t${i}`, name: "search_items", argsJson: '{"query":"x"}' }],
@@ -200,6 +201,13 @@ describe("agent0 消化管线", () => {
     const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
     expect(result.state).toBe("failed");
     expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
+    // 失败原因须是「超轮数」——否则常量上调时本用例会滑去覆盖别的失败路径而无声
+    const events = repo.listPipelineEvents(db, raw.id);
+    expect(
+      events.some(
+        (e) => e.action === "digest_failed" && e.detail.includes(`超过 ${DIGEST_MAX_ROUNDS} 轮`),
+      ),
+    ).toBe(true);
   });
 
   it("⑦ LLM 调用失败 → 标「未处理」，原文仍在", async () => {

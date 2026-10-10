@@ -134,6 +134,41 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     );
   });
 
+  it("先成功查询、后谎称已录入 → 声称扫描兜底真录入（读工具掩护的同型事故）", async () => {
+    const db = makeDb(":memory:");
+    seedBoard(db);
+    const llm = new FakeLlm();
+    // 事故的掩护形态：模型成功调了一次只读查询（actions 非空），随后未 ingest 却回话声称已录入
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "search_items", argsJson: JSON.stringify({ query: "开会" }) }],
+    });
+    llm.push({ content: "收到，原话已录入——系统会跟前面那条合并处理。" });
+    llm.push({ content: '{"changes":[]}' }); // 兜底 kickDigest 的消化清单
+
+    const result = await handleChat(db, llm, MODEL, "修改一下开会是十一点", []);
+
+    // 两条轨迹都在：查询照旧 + 兜底补录（对用户可见，不是暗改）
+    expect(result.actions.map((a) => a.tool)).toEqual(["search_items", "ingest"]);
+    const raws = chatRaws(db);
+    expect(raws).toHaveLength(1);
+    expect(raws[0]?.content).toBe("修改一下开会是十一点"); // 逐字
+  });
+
+  it("声称变体「已经记下来了」同样被兜底（二轮复查语料——中缀漏报修复）", async () => {
+    const db = makeDb(":memory:");
+    seedBoard(db);
+    const llm = new FakeLlm();
+    llm.push({ content: null, toolCalls: [{ id: "t1", name: "get_board", argsJson: "{}" }] });
+    llm.push({ content: "收到，已经记下来了。" });
+    llm.push({ content: '{"changes":[]}' }); // 兜底 kickDigest 的消化清单
+
+    const result = await handleChat(db, llm, MODEL, "周三前交物理实验报告", []);
+
+    expect(result.actions.map((a) => a.tool)).toEqual(["get_board", "ingest"]);
+    expect(chatRaws(db)).toHaveLength(1);
+  });
+
   it("log_chitchat：纯寒暄留痕不进消化", async () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm();
@@ -352,12 +387,35 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("零工具回话 → HTTP 入口同样兜底录入（响应含 ingest 轨迹，04 验收：真实入口断言所见）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({ content: "收到，原话已录入——系统会处理。" });
+    llm.push({ content: '{"changes":[]}' });
+    const app = makeApp({ db, llmRef: { current: llm } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/chat",
+      payload: { message: "帮我记一下明天交电费" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ actions: { tool: string; note: string }[] }>();
+    expect(body.actions).toEqual([{ tool: "ingest", note: "已录入，消化中" }]);
+    const raws = chatRaws(db);
+    expect(raws).toHaveLength(1);
+    expect(raws[0]?.content).toBe("帮我记一下明天交电费");
+  });
+
   it("mentions 随请求上传：HTTP 入口透传给前台（注入断言在 handleChat 直调用例）", async () => {
     const db = makeDb(":memory:");
     const itemId = seedBoard(db);
     const llm = new FakeLlm();
+    // 真实形态：@ 提及 → 先 get_item 核实再回话（零工具回话会触发兜底录入——2026-10-10 守卫）
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "get_item", argsJson: JSON.stringify({ id: itemId }) }],
+    });
     llm.push({ content: "好的。" });
-    llm.push({ content: '{"changes":[]}' }); // 零工具回话触发兜底录入 → 喂消化清单防异步空队列
     const app = makeApp({ db, llmRef: { current: llm } });
     const res = await app.inject({
       method: "POST",

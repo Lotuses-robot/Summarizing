@@ -4,6 +4,8 @@
 
 **Status**: 补记（implemented 先于本档——C2 与轮 C1 同批实施；本档如实记录已落地结构，后续迭代以它为基线）
 
+> **注（2026-10-10 走查，D-95）**：视图形态已被推翻重定（单一时间线 + 常驻大状态卡 + 轮询自适应 3s/10s）——本档的**读口/数据层结构仍为准**；视图行为以 02 台账 D-95 为准。
+
 **Input**: Feature specification from `/specs/005-pipeline-read-api/spec.md`
 
 ## Summary

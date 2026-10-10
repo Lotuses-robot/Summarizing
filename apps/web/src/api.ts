@@ -147,7 +147,7 @@ export const api = {
   pipelineRuns: (limit = 50): Promise<{ runs: PipelineRun[] }> =>
     fetch(`/api/pipeline/runs?limit=${limit}`).then((r) => to<{ runs: PipelineRun[] }>(r)),
 
-  /** 单批详情：原文 + 全部流水事件（按 action 分频道渲染）。 */
+  /** 单批详情：原文 + 全部流水事件（视图按单一时间线渲染，最新在上）。 */
   pipelineRun: (id: string): Promise<PipelineRunDetail> =>
     fetch(`/api/pipeline/runs/${id}`).then((r) => to<PipelineRunDetail>(r)),
 };

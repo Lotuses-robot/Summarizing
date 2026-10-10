@@ -35,7 +35,7 @@ function eventDot(action: string): string {
   return "bg-zinc-400";
 }
 
-/** 单批详情：原文 + 纯时间线（事件按发生顺序排列，节点色区分类型）。 */
+/** 单批详情：原文 + 纯时间线（最新在上——与状态卡轨迹同向；节点色区分类型）。 */
 function RunDetail({ id }: { id: string }) {
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +80,7 @@ function RunDetail({ id }: { id: string }) {
                 className={cn("h-2 w-2 shrink-0 rounded-full", eventDot(e.action))}
                 title={e.action}
               />
-              {i < events.length - 1 && (
-                <span className="w-px flex-1 bg-line" data-testid="timeline-spine" />
-              )}
+              {i < events.length - 1 && <span className="w-px flex-1 bg-line" />}
             </div>
             <div className="min-w-0 flex-1 pb-3">
               <p className="text-xs leading-relaxed">{e.detail}</p>
@@ -158,7 +156,7 @@ function HeroCard({
   );
 }
 
-/** 消化中卡：黄色转圈（用户定的状态语义）+ 大 H1「消化中」+ 已跑耗时 + 流动条 + 渐隐轨迹。 */
+/** 消化中卡：黄色转圈（用户定的状态语义）+ 大 H1「消化中」+ 已跑耗时 + 轮次进度条 + 渐隐轨迹。 */
 function DigestingCard({
   run,
   events,
@@ -173,9 +171,13 @@ function DigestingCard({
   const elapsedSec = Math.max(0, Math.floor((now - new Date(run.receivedAt).getTime()) / 1000));
   // 最近 3 条事件倒序（最新在上，旧的向下渐隐——「滚动栏 + 残影」）
   const recent = events.slice(-3).reverse();
-  // 轮次进度：digest_trace 一条 = 完成一轮（真实事件驱动；上限 = 服务端硬约束）
-  const rounds = events.filter((e) => e.action === "digest_trace").length;
-  const roundPct = Math.min(100, Math.round((rounds / DIGEST_MAX_ROUNDS) * 100));
+  // 轮次进度：digest_trace 一条 = 完成一轮（真实事件驱动；上限 = 服务端硬约束）。
+  // 计数含失败重试前的旧 attempt（D-93④ 已接受：跨次不分组）——展示按上限封顶。
+  const rounds = Math.min(
+    events.filter((e) => e.action === "digest_trace").length,
+    DIGEST_MAX_ROUNDS,
+  );
+  const roundPct = Math.round((rounds / DIGEST_MAX_ROUNDS) * 100);
   return (
     <HeroCard
       shell="border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/20 dark:border-amber-500/20 dark:from-amber-500/10 dark:to-transparent"
@@ -224,7 +226,8 @@ function DigestingCard({
   );
 }
 
-/** 完成闪示卡（走查 2026-10-10）：digesting→digested 的那次轮询置顶 3s——绿勾弹出 + 卡片淡入。 */
+/** 完成闪示卡（走查 2026-10-10；二轮评审放宽触发线）：任何非 digested → digested 的跃迁（含失败重试）
+ *  置顶 3s，同轮多批各一张——绿勾弹出 + 卡片淡入。 */
 function DoneCard({ run }: { run: PipelineRun }) {
   return (
     <HeroCard
@@ -289,14 +292,16 @@ function StatusCard({
   runs: PipelineRun[];
   traces: Record<string, PipelineRunDetail["events"]>;
   now: number;
-  flash: PipelineRun | null;
+  flash: PipelineRun[];
 }) {
   const digesting = runs.filter((r) => r.digestState === "digesting");
   const pendingCount = runs.filter((r) => r.digestState === "pending").length;
   const latest = runs[0];
   return (
     <div className="mb-5 space-y-3">
-      {flash !== null && <DoneCard run={flash} />}
+      {flash.map((run) => (
+        <DoneCard key={run.id} run={run} />
+      ))}
       {digesting.map((run) => (
         <DigestingCard
           key={run.id}
@@ -306,7 +311,7 @@ function StatusCard({
           pendingCount={pendingCount}
         />
       ))}
-      {flash === null && digesting.length === 0 && <IdleCard latest={latest} />}
+      {flash.length === 0 && digesting.length === 0 && <IdleCard latest={latest} />}
     </div>
   );
 }
@@ -320,8 +325,9 @@ export function PipelineView() {
   const [now, setNow] = useState(() => Date.now());
   // 消化中批次的实时轨迹（runs 列表不含事件详情——单独拉 detail 喂状态卡）
   const [traces, setTraces] = useState<Record<string, PipelineRunDetail["events"]>>({});
-  // 完成闪示（走查 2026-10-10）：digesting→digested 的那次轮询置「已完成」卡 3 秒
-  const [flash, setFlash] = useState<PipelineRun | null>(null);
+  // 完成闪示（走查 2026-10-10；二轮评审放宽触发线）：非 digested→digested 的跃迁置「已完成」卡
+  // 3 秒（同轮多批多张，计时自最后一次完成）
+  const [flash, setFlash] = useState<PipelineRun[]>([]);
   const prevStates = useRef(new Map<string, PipelineRun["digestState"]>());
   const baselined = useRef(false); // 首轮只建底（历史批次不许闪）
   const openedAt = useRef(Date.now());
@@ -331,26 +337,26 @@ export function PipelineView() {
     api
       .pipelineRuns(50)
       .then((r) => {
-        // 完成后闪示，两类：①上次轮询见它在消化 → 现在完成；②页开后新到的批次一轮就完成
-        // （没赶上 digesting 的快消化——2s 松弛吸收 receivedAt 秒级截断）
+        // 完成后闪示，两类：①上次轮询见过它且当时非 digested（消化中/失败重试路径）→ 现在完成；
+        //   收全所有命中——同轮多批完成不能只闪第一个（二轮评审 F1）。
+        // ②页开后新到的批次一轮就完成（没赶上 digesting 的快消化——2s 松弛吸收 receivedAt 秒级截断）
         const prev = prevStates.current;
         const isBaseline = !baselined.current;
-        const justDone = r.runs.find(
-          (run) =>
-            run.digestState === "digested" &&
-            (prev.get(run.id) === "digesting" ||
-              (!isBaseline &&
-                !prev.has(run.id) &&
-                Date.parse(run.receivedAt) >= openedAt.current - 2000)),
-        );
+        const justDone = r.runs.filter((run) => {
+          if (run.digestState !== "digested") return false;
+          const was = prev.get(run.id);
+          if (was !== undefined) return was !== "digested";
+          return !isBaseline && Date.parse(run.receivedAt) >= openedAt.current - 2000;
+        });
         prevStates.current = new Map(r.runs.map((run) => [run.id, run.digestState]));
         baselined.current = true;
         setRuns(r.runs);
         setError(null);
-        if (justDone) {
-          setFlash(justDone);
+        if (justDone.length > 0) {
+          // 并入现有闪示（同批次不重复叠）；计时从最后一次完成起算
+          setFlash((cur) => [...cur, ...justDone.filter((nd) => !cur.some((c) => c.id === nd.id))]);
           if (flashTimer.current !== null) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setFlash(null), 3000);
+          flashTimer.current = setTimeout(() => setFlash([]), 3000);
         }
         // 拉每个消化中批次的轨迹（失败静默——轨迹是锦上添花，不阻塞列表）
         for (const run of r.runs.filter((x) => x.digestState === "digesting")) {

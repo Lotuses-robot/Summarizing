@@ -22,7 +22,7 @@ function Banner({ text }: { text: string }) {
   );
 }
 
-/** 应用外壳（05§一 布局）：最左活动栏（主视图切换）+ 顶部整栏筛选 + 主区（看板/存疑库审核）+ 右侧停靠对话面板。
+/** 应用外壳（05§一 布局）：最左活动栏（主视图切换）+ 顶部整栏筛选 + 主区（看板/存疑库审核/流水）+ 右侧停靠对话面板。
  *  录入统一走对话输入（投递条已砍）；未选标签收在筛选栏下方的「标签」栏（默认折叠）。 */
 export default function App() {
   const [board, setBoard] = useState<BoardView | null>(null);

@@ -50,6 +50,27 @@ const DETAIL_EVENTS = [
   },
 ];
 
+/** 本地墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）——供「刚完成/页开后到达」用例构造。 */
+function localNowStr(): string {
+  return new Date().toLocaleString("sv-SE").replace(" ", "T");
+}
+
+/** 详情请求的空替身：给真实形状（列表 payload 不再被 `detail.events ?? []` 容错吸收——评审 F8 卫生）。 */
+function emptyDetail(): Response {
+  return jsonResponse({
+    raw: {
+      id: "r-empty",
+      content: "（空）",
+      sourceType: "chat",
+      sourceIdentity: { sourceLabel: "测试" },
+      receivedAt: "2026-09-28T00:00:00",
+      eventTime: null,
+      digestState: "digesting",
+    },
+    events: [],
+  });
+}
+
 /** 受控 fetch 替身：台账按 URL 分流；详情按 id 返回固定事件。 */
 function stubApi(): void {
   vi.stubGlobal(
@@ -88,7 +109,7 @@ function stubApi(): void {
               {
                 id: "e3",
                 action: "digest_trace",
-                detail: "第 1 轮：list_recent_items",
+                detail: "第 1 轮：search_items",
                 payload: null,
                 at: "2026-09-28T11:00:05",
                 by: { actor: "agent0", model: "test" },
@@ -99,6 +120,22 @@ function stubApi(): void {
                 detail: "第 2 轮：get_item",
                 payload: null,
                 at: "2026-09-28T11:00:08",
+                by: { actor: "agent0", model: "test" },
+              },
+              {
+                id: "e5",
+                action: "digest_trace",
+                detail: "第 3 轮：search_uncertain",
+                payload: null,
+                at: "2026-09-28T11:00:11",
+                by: { actor: "agent0", model: "test" },
+              },
+              {
+                id: "e6",
+                action: "digest_trace",
+                detail: "第 4 轮：search_recent_raws",
+                payload: null,
+                at: "2026-09-28T11:00:14",
                 by: { actor: "agent0", model: "test" },
               },
             ],
@@ -125,18 +162,20 @@ describe("PipelineView（流水视图，specs/005）", () => {
     await waitFor(() => expect(screen.getByText("已消化")).toBeInTheDocument());
     // 标题旁批次数
     expect(screen.getByText("2 个批次")).toBeInTheDocument();
-    // 「消化中」出现两处：置顶状态卡 + 列表行——用 getAllByText
-    expect(screen.getAllByText("消化中").length).toBeGreaterThan(0);
+    // 「消化中」恰好两处：状态卡大 H1 + 列表行（计数确定——H1 被删此断言必红）
+    expect(screen.getAllByText("消化中")).toHaveLength(2);
     expect(screen.getByText("英语课官方群")).toBeInTheDocument();
     expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
     // 置顶状态卡：已跑耗时 + 轮次进度（真实事件驱动，非纯装饰）
     expect(screen.getByText(/已跑 \d+s/)).toBeInTheDocument();
-    expect(screen.getByText(/第 2\/8 轮/)).toBeInTheDocument(); // 详情里 2 条 digest_trace
+    expect(screen.getByText(/第 4\/8 轮/)).toBeInTheDocument(); // 详情里 4 条 digest_trace
     // 渐隐轨迹：最新活动全亮，上一轮更淡（越旧越透明——「滚动栏 + 残影」）
-    const newest = await screen.findByText("第 2 轮：get_item");
-    const older = screen.getByText("第 1 轮：list_recent_items");
+    const newest = await screen.findByText("第 4 轮：search_recent_raws");
+    const older = screen.getByText("第 3 轮：search_uncertain");
     expect(newest.style.opacity).toBe("1");
     expect(Number(older.style.opacity)).toBeLessThan(1);
+    // 残影上限 3 条：更旧的第 1 轮不上轨迹
+    expect(screen.queryByText("第 1 轮：search_items")).not.toBeInTheDocument();
   });
 
   it("展开行 → 详情：原文 + 时间线最新在上（走查 2026-10-10 修订）", async () => {
@@ -156,33 +195,109 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(order).toEqual(["应用 1 项变更：新建事项「作业」", "第 1 轮：search_items"]);
   });
 
-  it("完成闪示：消化中 → 已完成（3 秒后回落空闲），走查 2026-10-10", async () => {
-    let phase: "digesting" | "digested" = "digesting";
-    // 同一批次的状态跃迁（digesting→digested 才触发闪示）
-    const digestingRun = { ...RUNS[1], digestState: "digesting", summary: null };
+  it(
+    "完成闪示：消化中 → 已完成（3 秒后回落空闲），走查 2026-10-10",
+    { timeout: 10_000 },
+    async () => {
+      let phase: "digesting" | "digested" = "digesting";
+      // 同一批次的状态跃迁（digesting→digested 才触发闪示）
+      const digestingRun = { ...RUNS[1], digestState: "digesting", summary: null };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL): Promise<Response> => {
+          const url = fetchUrl(input);
+          if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
+          if (url.includes("/api/pipeline/runs")) {
+            return Promise.resolve(
+              jsonResponse({ runs: phase === "digesting" ? [digestingRun] : [RUNS[1]] }),
+            );
+          }
+          return Promise.resolve(jsonResponse({}));
+        }),
+      );
+      render(<PipelineView />);
+      await waitFor(() => expect(screen.getAllByText("消化中").length).toBeGreaterThan(0));
+
+      phase = "digested";
+      fireEvent.click(screen.getByTitle("刷新")); // 手动轮询到完成态
+      expect(await screen.findByText("已完成")).toBeInTheDocument();
+      // 3 秒规格的下限：1 秒后仍在（防被悄悄缩短成眨眼闪）
+      await new Promise((r) => setTimeout(r, 1000));
+      expect(screen.getByText("已完成")).toBeInTheDocument();
+      // 随后消失，回落空闲卡（最近一批已消化）
+      await waitFor(() => expect(screen.queryByText("已完成")).not.toBeInTheDocument(), {
+        timeout: 6000,
+      });
+      expect(screen.getByText("空闲")).toBeInTheDocument();
+    },
+  );
+
+  it(
+    "同轮询两批同时完成 → 两张已完成卡（不只闪第一个，评审 F1）",
+    { timeout: 10_000 },
+    async () => {
+      let done = false;
+      const before = [RUNS[0], { ...RUNS[1], digestState: "digesting", summary: null }];
+      const after = [{ ...RUNS[0], digestState: "digested" }, RUNS[1]];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL): Promise<Response> => {
+          const url = fetchUrl(input);
+          if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
+          if (url.includes("/api/pipeline/runs")) {
+            return Promise.resolve(jsonResponse({ runs: done ? after : before }));
+          }
+          return Promise.resolve(jsonResponse({}));
+        }),
+      );
+      render(<PipelineView />);
+      await waitFor(() => expect(screen.getAllByText("消化中").length).toBeGreaterThanOrEqual(2));
+
+      done = true;
+      fireEvent.click(screen.getByTitle("刷新"));
+      await waitFor(() => expect(screen.getAllByText("已完成")).toHaveLength(2));
+    },
+  );
+
+  it("首轮建底：挂载时就有「刚完成」批次 → 不闪（历史不许闪，评审 F4）", async () => {
+    const recentRun = { ...RUNS[1], receivedAt: localNowStr() };
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL): Promise<Response> => {
         const url = fetchUrl(input);
         if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(
-            jsonResponse({ runs: phase === "digesting" ? [digestingRun] : [RUNS[1]] }),
-          );
+          return Promise.resolve(jsonResponse({ runs: [recentRun] }));
         }
         return Promise.resolve(jsonResponse({}));
       }),
     );
     render(<PipelineView />);
-    await waitFor(() => expect(screen.getAllByText("消化中").length).toBeGreaterThan(0));
+    // 同一次提交渲染空闲卡与（若有）闪示卡——空闲在即闪示无
+    expect(await screen.findByText(/最近一批已消化——/)).toBeInTheDocument();
+    expect(screen.queryByText("已完成")).not.toBeInTheDocument();
+  });
 
-    phase = "digested";
-    fireEvent.click(screen.getByTitle("刷新")); // 手动轮询到完成态
-    expect(await screen.findByText("已完成")).toBeInTheDocument();
-    // 3 秒后闪示消失，回落空闲卡（最近一批已消化）
-    await waitFor(() => expect(screen.queryByText("已完成")).not.toBeInTheDocument(), {
-      timeout: 6000,
-    });
-    expect(screen.getByText("空闲")).toBeInTheDocument();
+  it("页开后到达的旧批次（完成态）→ 不闪（新近窗口只认「刚完成」，评审 F4）", async () => {
+    let arrived = false;
+    const oldRun = { ...RUNS[1], receivedAt: "2026-09-01T10:00:00" }; // 明显旧数据
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/pipeline/runs")) {
+          return Promise.resolve(jsonResponse({ runs: arrived ? [oldRun] : [] }));
+        }
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<PipelineView />);
+    await waitFor(() => expect(screen.getByText("空闲")).toBeInTheDocument()); // 基线建底（空库）
+
+    arrived = true;
+    fireEvent.click(screen.getByTitle("刷新"));
+    // 列表已吃进这条（批次数更新说明本轮已处理），但它不闪
+    await waitFor(() => expect(screen.getByText("1 个批次")).toBeInTheDocument());
+    expect(screen.queryByText("已完成")).not.toBeInTheDocument();
   });
 
   it("常驻状态卡：无在途时也在——空闲 + 最近一批结局", async () => {
@@ -202,19 +317,16 @@ describe("PipelineView（流水视图，specs/005）", () => {
   });
 
   it("快消化闪示：页开后新到的批次一轮就完成（没赶上 digesting 轮询）也闪", async () => {
-    // 本地墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）
-    const d = new Date();
-    /** 两位补零。 */
-    const p = (n: number) => String(n).padStart(2, "0");
-    const localNow = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-    const recentRun = { ...RUNS[1], receivedAt: localNow };
     let arrived = false;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL): Promise<Response> => {
         const url = fetchUrl(input);
         if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(jsonResponse({ runs: arrived ? [recentRun] : [] }));
+          // receivedAt 在请求时刻生成（页开后「刚完成」——评审 F3：消除渲染前构造的时间竞态）
+          return Promise.resolve(
+            jsonResponse({ runs: arrived ? [{ ...RUNS[1], receivedAt: localNowStr() }] : [] }),
+          );
         }
         return Promise.resolve(jsonResponse({}));
       }),
@@ -225,6 +337,75 @@ describe("PipelineView（流水视图，specs/005）", () => {
     arrived = true;
     fireEvent.click(screen.getByTitle("刷新"));
     expect(await screen.findByText("已完成")).toBeInTheDocument();
+  });
+
+  it("失败重试极快完成：见过的 failed 批直接变 digested → 也闪（二轮评审 F2 盲区）", async () => {
+    let phase: "failed" | "digested" = "failed";
+    const failedRun = {
+      ...RUNS[1],
+      digestState: "failed",
+      summary: "处理失败，标记「未处理」：测试",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
+        if (url.includes("/api/pipeline/runs")) {
+          return Promise.resolve(
+            jsonResponse({ runs: phase === "failed" ? [failedRun] : [RUNS[1]] }),
+          );
+        }
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<PipelineView />);
+    // 基线先见到 failed 态（列表行精确「未处理」；空闲卡红叉同帧渲染）
+    await waitFor(() => expect(screen.getByText("未处理")).toBeInTheDocument());
+
+    phase = "digested"; // 模拟重试后在下一个轮询间隔内整批完成（没赶上 digesting 观测）
+    fireEvent.click(screen.getByTitle("刷新"));
+    expect(await screen.findByText("已完成")).toBeInTheDocument();
+  });
+
+  it("轮数封顶：跨重试累计超上限也只显「第 8/8 轮」（二轮评审 F1 盲区）", async () => {
+    const traces = Array.from({ length: 9 }, (_, i) => ({
+      id: `x${i}`,
+      action: "digest_trace",
+      detail: `第 ${i + 1} 轮：search_items`,
+      payload: null,
+      at: `2026-09-28T12:${String(10 + i).padStart(2, "0")}:00`,
+      by: { actor: "agent0", model: "test" },
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/pipeline/runs/r-digesting")) {
+          return Promise.resolve(
+            jsonResponse({
+              raw: {
+                id: "r-digesting",
+                content: "社团群消息",
+                sourceType: "nc",
+                sourceIdentity: { sourceLabel: "社团群" },
+                receivedAt: "2026-09-28T11:00:00",
+                eventTime: null,
+                digestState: "digesting",
+              },
+              events: traces,
+            }),
+          );
+        }
+        if (url.includes("/api/pipeline/runs")) {
+          return Promise.resolve(jsonResponse({ runs: [RUNS[0]] }));
+        }
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<PipelineView />);
+    expect(await screen.findByText(/第 8\/8 轮/)).toBeInTheDocument();
+    expect(screen.queryByText(/第 9\/8 轮/)).not.toBeInTheDocument();
   });
 
   it("空库 → 状态卡空闲 + 可见空态文案（不是空白/报错）", async () => {

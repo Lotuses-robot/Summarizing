@@ -92,6 +92,16 @@ function pickReferences(state: ChatTurnState): { id: string; title: string }[] {
   return [...state.refTitles.entries()].slice(0, 8).map(([id, title]) => ({ id, title }));
 }
 
+/** 回复中的「已录入」类声称（2026-10-10 事故复发的读工具掩护形态：无其他可判信号，只能扫措辞）。
+ *  二轮复查扩样：「已经/帮你/为你/成功+动词」是中文自然完成态（实测「已经记下来了」漏报）——
+ *  有界通配 4 字内中缀；假阳性（如「已找到相关记录」）仅多录一条批次，D-14 允许。 */
+const RECORDED_CLAIM_RE = /已[^。！？!?\n]{0,4}(?:录入|记录|存档|记下)|记下(?:来)?了/;
+
+/** 回复是否声称已录入——仅在未 ingest 时用于兜底判定（声称 ≠ 事实，代码不让它背离）。 */
+function claimsRecorded(reply: string): boolean {
+  return RECORDED_CLAIM_RE.test(reply);
+}
+
 /** 前台主流程（D-78）：多轮工具循环后给出回复；LLM 挂/超轮数时兜底，已录入过绝不重复录入（消化非幂等）。
  *  mentions = 用户在输入框 @ 提及的事项（2026-09-27）——注入给模型做指代消解，id 由前端看板保证真实。 */
 export async function handleChat(
@@ -109,11 +119,12 @@ export async function handleChat(
   let result: ChatResult;
   try {
     const reply = await converse(db, llm, modelTag, message, history, tools, state, mentions);
-    // 零工具调用兜底（2026-10-10 事故）：三选一纪律（查/录/留痕）= 每轮至少一个工具调用。
-    // 一轮全不调 = 回话无凭据——实证：模型回复称「原话已录入」而库里没有 raw_input（静默丢消息）。
+    // 兜底录入（2026-10-10 事故；二轮评审收口）：①本轮无**成功**工具调用 = 回话无凭据；
+    // ②未 ingest 却声称已录入——实证的同型事故：先成功查询做了掩护、再谎称「原话已录入」。
     // 按 D-14「宁可误录入」真录一次：声称与事实对齐，绝不静默。
-    if (state.actions.length === 0) {
-      process.stderr.write(`[chat] 模型零工具调用，按兜底录入：${message.slice(0, 60)}\n`);
+    if (!state.ingested && (state.actions.length === 0 || claimsRecorded(reply))) {
+      const why = state.actions.length === 0 ? "本轮无成功工具调用" : "回复声称已录入";
+      process.stderr.write(`[chat] ${why}，按兜底录入：${message.slice(0, 60)}\n`);
       fallbackIngest(db, llm, modelTag, tools, message);
       state.actions.push({ tool: "ingest", note: "已录入，消化中" });
     }
@@ -335,5 +346,5 @@ const FRONT_DESK_SYSTEM_PROMPT = `你是「前台」——用户的信息管家 
 
 用户可能用指代（"就是刚才那条"）——结合对话历史理解；不确定就先查证再回答。
 
-措辞禁令：禁止"你还有 N 件事没看"；禁止"建议你关注…"式主动推荐；无依据时明说没有——「我不知道」是功能；有据与无据分开陈述。
+措辞禁令：禁止"你还有 N 件事没看"；禁止"建议你关注…"式主动推荐；无依据时明说没有——「我不知道」是功能；有据与无据分开陈述。**只有本轮真的调了 ingest 才可以说"已录入/已记录/记下了"——没调就绝不说**。
 回复简短、像聊天，不要把工具返回的原始 JSON 贴给用户。`;
