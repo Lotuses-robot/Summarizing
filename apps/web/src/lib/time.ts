@@ -6,7 +6,7 @@ export function fmtShortTime(iso: string): string {
 }
 
 /** 同款短格式带秒「MM-DD HH:mm:ss」——审计面（流水详情时间线）专用：
- *  digest_trace 事件常相隔数秒，分钟精度在时间线上分不开（合并前审查 2026-10-10）。 */
+ *  digest_trace 事件常相隔数秒，分钟精度在时间线上分不开（走查批次 2026-10-10）。 */
 export function fmtTimeSec(iso: string): string {
   return `${fmtShortTime(iso)}:${String(new Date(iso).getSeconds()).padStart(2, "0")}`;
 }

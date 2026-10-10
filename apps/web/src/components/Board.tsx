@@ -98,7 +98,7 @@ function Row({
   // 相对人话时间（Todoist 式）：非法日期退回短格式——不编造
   const dueRelative = dueText === null ? null : relativeDueText(dueText, new Date());
   // 越临近越强调（用户 2026-09-27 二轮：立方浓淡曲线，lib/urgency 唯一出处）——
-  // 7h≈83% / 2d≈22% / 4.5d≈0.1%，临期急剧加深、远期几乎隐形；过期行另有红色描边语义，不参与渐变
+  // 7h≈83% / 2d≈22% / 4.5d≈0.1%，临期急剧加深、远期几乎隐形；过期行另有淡红底语义（去框留底），不参与渐变
   const urgency = item.status === "todo" && !row.overdue ? urgencyStrength(dueTs, Date.now()) : 0;
   // 已完成淡出（同款立方曲线）——锚定完成时刻（completedAt）：刚完成最浓，越久淡得越快
   const doneFade =
