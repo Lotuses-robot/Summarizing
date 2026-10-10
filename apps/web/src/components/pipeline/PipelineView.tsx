@@ -85,12 +85,15 @@ function RunDetail({ id }: { id: string }) {
   );
 }
 
-/** 流水视图：置顶实时消化状态卡（渐隐轨迹 + 思考动画）+ 极简批次列表。 */
+/** 流水视图：置顶实时消化状态卡（渐隐轨迹 + 思考动画）+ 极简批次列表。
+ *  轮询频率自适应：有消化中批次 3s，空闲 10s（消化是异步的，快轮询让轨迹实时浮出）。 */
 export function PipelineView() {
   const [runs, setRuns] = useState<PipelineRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // 消化中批次的实时轨迹（runs 列表不含事件详情——单独拉 detail 喂状态卡）
+  const [traces, setTraces] = useState<Record<string, PipelineRunDetail["events"]>>({});
 
   const load = useCallback(() => {
     api
@@ -98,22 +101,35 @@ export function PipelineView() {
       .then((r) => {
         setRuns(r.runs);
         setError(null);
+        // 拉每个消化中批次的轨迹（失败静默——轨迹是锦上添花，不阻塞列表）
+        for (const run of r.runs.filter((x) => x.digestState === "digesting")) {
+          api
+            .pipelineRun(run.id)
+            .then((detail) => {
+              setTraces((cur) => ({ ...cur, [run.id]: detail.events ?? [] }));
+            })
+            .catch(() => {
+              // 轨迹拉取失败：状态卡退化为无轨迹（列表本身照常可用）
+            });
+        }
       })
       .catch((err) => setError(String(err)));
   }, []);
 
+  const hasDigesting = runs?.some((r) => r.digestState === "digesting") ?? false;
+
   useEffect(() => {
     load();
-    const timer = setInterval(load, 10_000);
+    const timer = setInterval(load, hasDigesting ? 3_000 : 10_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, hasDigesting]);
 
   // 耗时计时器：有 digesting 批次时每秒跳一次（纯前端视觉，不触发刷新）
   useEffect(() => {
-    if (!runs?.some((r) => r.digestState === "digesting")) return;
+    if (!hasDigesting) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [runs]);
+  }, [hasDigesting]);
 
   const digestingRuns = runs?.filter((r) => r.digestState === "digesting") ?? [];
 
@@ -127,6 +143,8 @@ export function PipelineView() {
               0,
               Math.floor((now - new Date(run.receivedAt).getTime()) / 1000),
             );
+            // 最近 3 条事件倒序（最新在上，旧的向下渐隐——「滚动栏 + 残影」）
+            const recent = (traces[run.id] ?? []).slice(-3).reverse();
             return (
               <div
                 key={run.id}
@@ -149,6 +167,20 @@ export function PipelineView() {
                     style={{ animationDuration: "1.5s" }}
                   />
                 </div>
+                {/* 实时轨迹：最新一条最亮，越旧越淡（残影） */}
+                {recent.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {recent.map((e, i) => (
+                      <p
+                        key={e.id}
+                        className="truncate text-[11px] text-amber-800 dark:text-amber-300"
+                        style={{ opacity: i === 0 ? 1 : i === 1 ? 0.45 : 0.25 }}
+                      >
+                        {e.detail}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

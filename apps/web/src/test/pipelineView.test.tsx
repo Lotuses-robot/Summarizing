@@ -71,6 +71,39 @@ function stubApi(): void {
           }),
         );
       }
+      if (url.includes("/api/pipeline/runs/r-digesting")) {
+        return Promise.resolve(
+          jsonResponse({
+            raw: {
+              id: "r-digesting",
+              content: "社团群消息",
+              sourceType: "nc",
+              sourceIdentity: { sourceLabel: "社团群" },
+              receivedAt: "2026-09-28T11:00:00",
+              eventTime: null,
+              digestState: "digesting",
+            },
+            events: [
+              {
+                id: "e3",
+                action: "digest_trace",
+                detail: "第 1 轮：list_recent_items",
+                payload: null,
+                at: "2026-09-28T11:00:05",
+                by: { actor: "agent0", model: "test" },
+              },
+              {
+                id: "e4",
+                action: "digest_trace",
+                detail: "第 2 轮：get_item",
+                payload: null,
+                at: "2026-09-28T11:00:08",
+                by: { actor: "agent0", model: "test" },
+              },
+            ],
+          }),
+        );
+      }
       if (url.includes("/api/pipeline/runs")) {
         return Promise.resolve(jsonResponse({ runs: RUNS }));
       }
@@ -95,6 +128,11 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
     // 置顶状态卡：已跑耗时
     expect(screen.getByText(/已跑 \d+s/)).toBeInTheDocument();
+    // 渐隐轨迹：最新活动全亮，上一轮更淡（越旧越透明——「滚动栏 + 残影」）
+    const newest = await screen.findByText("第 2 轮：get_item");
+    const older = screen.getByText("第 1 轮：list_recent_items");
+    expect(newest.style.opacity).toBe("1");
+    expect(Number(older.style.opacity)).toBeLessThan(1);
   });
 
   it("展开行 → 详情：原文 + 时间线事件按序渲染", async () => {
