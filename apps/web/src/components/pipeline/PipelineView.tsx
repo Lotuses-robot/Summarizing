@@ -4,24 +4,21 @@ import type { PipelineRun, PipelineRunDetail } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
 
-/** 消化状态徽章的展示文案与配色——透明度底色在亮暗模式下都柔和（避免淡色底在暗色模式变亮斑）。 */
-function stateBadge(state: PipelineRun["digestState"]): { text: string; pill: string } {
+/** 消化状态 → 色点 + 文字。 */
+function stateInfo(state: PipelineRun["digestState"]): { dot: string; text: string } {
   switch (state) {
     case "digesting":
-      return { text: "消化中", pill: "text-amber-600 dark:text-amber-400 bg-amber-500/10" };
+      return { dot: "bg-amber-500 animate-pulse", text: "消化中" };
     case "digested":
-      return {
-        text: "已消化",
-        pill: "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10",
-      };
+      return { dot: "bg-emerald-500", text: "已消化" };
     case "failed":
-      return { text: "未处理", pill: "text-red-600 dark:text-red-400 bg-red-500/10" };
+      return { dot: "bg-red-500", text: "未处理" };
     case "pending":
-      return { text: "排队中", pill: "text-zinc-500 dark:text-zinc-400 bg-zinc-500/10" };
+      return { dot: "bg-zinc-400", text: "排队中" };
   }
 }
 
-/** 流水事件节点色——一眼分清类型（查询/拒收/修复/完成）。 */
+/** 流水事件节点色。 */
 function eventDot(action: string): string {
   if (action === "digest_done" || action === "complete_item") return "bg-emerald-500";
   if (action === "digest_failed") return "bg-red-500";
@@ -52,54 +49,43 @@ function RunDetail({ id }: { id: string }) {
   }, [id]);
 
   if (error !== null) {
-    return <p className="px-3 py-2 text-xs text-danger">详情加载失败：{error}</p>;
+    return <p className="px-4 py-2 text-xs text-danger">详情加载失败：{error}</p>;
   }
   if (detail === null) {
-    return <p className="px-3 py-2 text-xs text-ink-muted">详情加载中…</p>;
+    return <p className="px-4 py-2 text-xs text-ink-muted">详情加载中…</p>;
   }
 
   return (
-    <div className="space-y-3 border-t border-line px-3 py-3">
+    <div className="space-y-3 px-4 pb-3 pt-2">
       <section>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-muted/60">
-          原文
-        </p>
         <p className="whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">
           {detail.raw.content}
         </p>
       </section>
-      <section>
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-ink-muted/60">
-          流水
-        </p>
-        <div className="space-y-0">
-          {detail.events.map((e, i) => (
-            <div key={e.id} className="flex gap-3">
-              {/* 时间轴节点列：色点 + 连接线 */}
-              <div className="flex flex-col items-center pt-1">
-                <span
-                  className={cn("h-2 w-2 shrink-0 rounded-full", eventDot(e.action))}
-                  title={e.action}
-                />
-                {i < detail.events.length - 1 && (
-                  <span className="w-px flex-1 bg-line" data-testid="timeline-spine" />
-                )}
-              </div>
-              {/* 事件内容 */}
-              <div className="min-w-0 flex-1 pb-3">
-                <p className="text-xs leading-relaxed">{e.detail}</p>
-                <p className="mt-0.5 text-[10px] text-ink-muted/60">{e.at}</p>
-              </div>
+      <div className="space-y-0">
+        {detail.events.map((e, i) => (
+          <div key={e.id} className="flex gap-3">
+            <div className="flex flex-col items-center pt-1">
+              <span
+                className={cn("h-2 w-2 shrink-0 rounded-full", eventDot(e.action))}
+                title={e.action}
+              />
+              {i < detail.events.length - 1 && (
+                <span className="w-px flex-1 bg-line" data-testid="timeline-spine" />
+              )}
             </div>
-          ))}
-        </div>
-      </section>
+            <div className="min-w-0 flex-1 pb-3">
+              <p className="text-xs leading-relaxed">{e.detail}</p>
+              <p className="mt-0.5 text-[10px] text-ink-muted/60">{e.at}</p>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-/** 流水视图（specs/005）：进站台账 + 单批详情时间线——「一条信息从进站到成事项」全程可查。
- *  打开期间 10s 轮询：消化是异步的，进度自己浮出来（无需手动刷新）。 */
+/** 流水视图：置顶实时消化状态卡 + 极简批次列表（无边框无卡片——纯行 + 间距）。 */
 export function PipelineView() {
   const [runs, setRuns] = useState<PipelineRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,75 +107,76 @@ export function PipelineView() {
     return () => clearInterval(timer);
   }, [load]);
 
+  /** 置顶消化状态卡只展示正在消化的批次。 */
+  const digestingRuns = runs?.filter((r) => r.digestState === "digesting") ?? [];
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-4">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">流水</h2>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            一条信息从进站到成事项的全程——消化中会自动浮出进度
-          </p>
+      {/* ── 置顶实时消化状态卡（仅在有消化中批次时出现）── */}
+      {digestingRuns.length > 0 && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3.5 dark:border-amber-500/20 dark:bg-amber-500/5">
+          {digestingRuns.map((run) => (
+            <div key={run.id}>
+              <div className="flex items-center gap-2.5">
+                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                  消化中
+                </span>
+                <span className="text-xs font-medium">{run.sourceLabel}</span>
+              </div>
+              {/* 不确定进度条——消化中持续流动 */}
+              <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
+                <div
+                  className="h-full w-1/3 animate-pulse rounded-full bg-amber-400"
+                  style={{ animationDuration: "1.5s" }}
+                />
+              </div>
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* ── 标题 + 刷新 ── */}
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold">流水</h2>
         <button
           title="刷新"
           onClick={load}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
         >
-          <RefreshCw size={15} />
+          <RefreshCw size={14} />
         </button>
       </div>
 
-      {error !== null && (
-        <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-500/20 dark:bg-red-500/5 dark:text-red-400">
-          流水加载失败：{error}
+      {error !== null && <p className="mb-2 text-xs text-danger">流水加载失败：{error}</p>}
+      {runs !== null && runs.length === 0 && (
+        <p className="py-6 text-center text-xs text-ink-muted">
+          还没有批次——去对话或群里丢点信息。
         </p>
       )}
-      {runs !== null && runs.length === 0 && (
-        <div className="flex flex-col items-center gap-1 py-8 text-center">
-          <p className="text-sm text-ink-muted">还没有批次</p>
-          <p className="text-xs text-ink-muted/60">去对话或群里丢点信息，这里就会出现它的一生。</p>
-        </div>
-      )}
 
-      <div className="space-y-3">
+      {/* ── 极简批次列表（无边框，纯行 + 间距）── */}
+      <div className="divide-y divide-line/40">
         {runs?.map((run) => {
-          const badge = stateBadge(run.digestState);
+          const info = stateInfo(run.digestState);
           const open = openId === run.id;
           return (
-            <div
-              key={run.id}
-              className={cn(
-                "rounded-xl border bg-surface shadow-sm transition-colors",
-                open ? "border-accent/30" : "border-line hover:border-line/80",
-              )}
-            >
-              {/* 台账行：状态徽章 + 来源 + 时间——两行布局（第一行元数据、第二行摘要） */}
+            <div key={run.id}>
               <button
                 onClick={() => setOpenId(open ? null : run.id)}
-                className="w-full px-3.5 pt-2.5 pb-2 text-left"
+                className="flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors hover:bg-canvas"
               >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.5 text-[10px] font-medium leading-4",
-                      badge.pill,
-                    )}
-                  >
-                    {badge.text}
-                  </span>
-                  <span className="text-xs font-medium">{run.sourceLabel}</span>
-                  <span className="ml-auto shrink-0 text-[10px] text-ink-muted/70">
-                    {run.receivedAt.slice(5, 16).replace("T", " ")}
-                  </span>
-                </div>
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", info.dot)} />
+                <span className="text-xs font-medium">{run.sourceLabel}</span>
                 {run.summary !== null && (
-                  <p className="mt-1 truncate text-xs leading-relaxed text-ink-muted">
+                  <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
                     {run.summary}
-                  </p>
+                  </span>
                 )}
-                <p className="mt-0.5 text-[10px] text-ink-muted/50">{run.eventCount} 条流水</p>
+                <span className="ml-auto shrink-0 text-[10px] text-ink-muted/50">
+                  {run.receivedAt.slice(5, 16).replace("T", " ")}
+                </span>
               </button>
-              {/* 展开详情 */}
               {open && <RunDetail id={run.id} />}
             </div>
           );
