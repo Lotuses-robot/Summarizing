@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -63,22 +63,24 @@ function RunDetail({ id }: { id: string }) {
     return <p className="px-4 py-2 text-xs text-ink-muted">详情加载中…</p>;
   }
 
+  // 最新在上（走查 2026-10-10：与状态卡轨迹同向——越往下越旧）
+  const events = [...detail.events].reverse();
   return (
-    <div className="mx-1 mb-2 space-y-3 rounded-lg bg-surface px-3.5 pb-3 pt-3">
+    <div data-testid="run-detail" className="rounded-b-lg bg-surface px-4 pb-3.5 pt-2">
       <section>
         <p className="whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">
           {detail.raw.content}
         </p>
       </section>
-      <div className="space-y-0">
-        {detail.events.map((e, i) => (
+      <div className="mt-3 space-y-0">
+        {events.map((e, i) => (
           <div key={e.id} className="flex gap-3">
             <div className="flex flex-col items-center pt-1">
               <span
                 className={cn("h-2 w-2 shrink-0 rounded-full", eventDot(e.action))}
                 title={e.action}
               />
-              {i < detail.events.length - 1 && (
+              {i < events.length - 1 && (
                 <span className="w-px flex-1 bg-line" data-testid="timeline-spine" />
               )}
             </div>
@@ -98,7 +100,7 @@ function fmtTime(s: string): string {
   return s.slice(5, 16).replace("T", " ");
 }
 
-/** 空闲态卡的图标与文案（仅在没有消化中批次时调用：说清「空闲」+ 最近一批结局）。 */
+/** 空闲态卡的图标与文案（仅在没有消化中批次与完成闪示时调用：说清「空闲」+ 最近一批结局）。 */
 function idleCard(latest: PipelineRun | undefined): {
   icon: ReactNode;
   title: string;
@@ -107,7 +109,7 @@ function idleCard(latest: PipelineRun | undefined): {
 } {
   if (latest === undefined) {
     return {
-      icon: <Circle size={14} className="shrink-0 text-ink-muted/50" />,
+      icon: <Circle size={20} className="shrink-0 text-ink-muted/50" />,
       title: "空闲",
       sub: "等待第一条信息。",
       tone: "text-ink-muted",
@@ -115,7 +117,7 @@ function idleCard(latest: PipelineRun | undefined): {
   }
   if (latest.digestState === "pending") {
     return {
-      icon: <Clock size={14} className="shrink-0 text-ink-muted" />,
+      icon: <Clock size={20} className="shrink-0 text-ink-muted" />,
       title: "排队中",
       sub: "等待开始消化……",
       tone: "text-ink-muted",
@@ -124,110 +126,182 @@ function idleCard(latest: PipelineRun | undefined): {
   if (latest.digestState === "failed") {
     // 失败不许在卡上消失（01§8.3 静默红线）：红叉 + 措辞直说未处理
     return {
-      icon: <XCircle size={14} className="shrink-0 text-red-500" />,
+      icon: <XCircle size={20} className="shrink-0 text-red-500" />,
       title: "空闲",
       sub: `最近一批未处理：${latest.sourceLabel}`,
       tone: "text-danger",
     };
   }
   return {
-    icon: <CheckCircle2 size={14} className="shrink-0 text-emerald-500" />,
+    icon: <CheckCircle2 size={20} className="shrink-0 text-emerald-500" />,
     title: "空闲",
     sub: latest.summary !== null ? `最近一批已消化——${latest.summary}` : "最近一批已消化。",
     tone: "text-ink-muted",
   };
 }
 
-/** 常驻状态卡（2026-10-10 走查）：agent0 现在在干什么——
- *  消化中：琥珀卡（转圈 + 来源 + 已跑耗时 + 流动条 + 渐隐轨迹）；无在途：空闲/排队卡（图标标最近一批结局）。 */
+/** 大状态卡骨架（走查 2026-10-10）：顶栏元信息 + 大 H1 状态字 + 详情区——三种形态共用。 */
+function HeroCard({
+  shell,
+  meta,
+  children,
+}: {
+  shell: string; // 卡壳配色（琥珀=消化中 / 翠绿=完成闪示 / 面板色=空闲）
+  meta: ReactNode; // 顶栏：图标 + 来源 + 右侧计时
+  children: ReactNode; // 大 H1 + 详情区
+}) {
+  return (
+    <div className={cn("rounded-2xl px-5 py-5", shell)}>
+      <div className="flex items-center gap-2.5">{meta}</div>
+      {children}
+    </div>
+  );
+}
+
+/** 消化中卡：黄色转圈（用户定的状态语义）+ 大 H1「消化中」+ 已跑耗时 + 流动条 + 渐隐轨迹。 */
+function DigestingCard({
+  run,
+  events,
+  now,
+  pendingCount,
+}: {
+  run: PipelineRun;
+  events: PipelineRunDetail["events"];
+  now: number;
+  pendingCount: number;
+}) {
+  const elapsedSec = Math.max(0, Math.floor((now - new Date(run.receivedAt).getTime()) / 1000));
+  // 最近 3 条事件倒序（最新在上，旧的向下渐隐——「滚动栏 + 残影」）
+  const recent = events.slice(-3).reverse();
+  return (
+    <HeroCard
+      shell="border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/20 dark:border-amber-500/20 dark:from-amber-500/10 dark:to-transparent"
+      meta={
+        <>
+          <Loader2 size={16} className="shrink-0 animate-spin text-amber-500" />
+          <span className="text-xs font-medium text-amber-700/90 dark:text-amber-400/90">
+            {run.sourceLabel}
+          </span>
+          <span className="ml-auto text-xs tabular-nums text-ink-muted/70">已跑 {elapsedSec}s</span>
+        </>
+      }
+    >
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-amber-900 dark:text-amber-200">
+        消化中
+      </p>
+      {/* 不确定进度条——流动感 */}
+      <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-amber-200/50 dark:bg-amber-500/10">
+        <div
+          className="h-full w-1/3 animate-pulse rounded-full bg-amber-400"
+          style={{ animationDuration: "1.5s" }}
+        />
+      </div>
+      {/* 实时轨迹：最新一条最亮，越旧越淡（残影） */}
+      {recent.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {recent.map((e, i) => (
+            <p
+              key={e.id}
+              className="truncate text-xs text-amber-800 dark:text-amber-300"
+              style={{ opacity: i === 0 ? 1 : i === 1 ? 0.45 : 0.25 }}
+            >
+              {e.detail}
+            </p>
+          ))}
+        </div>
+      )}
+      {pendingCount > 0 && (
+        <p className="mt-2 text-[10px] text-amber-700/70 dark:text-amber-400/60">
+          另有 {pendingCount} 个批次排队中
+        </p>
+      )}
+    </HeroCard>
+  );
+}
+
+/** 完成闪示卡（走查 2026-10-10）：digesting→digested 的那次轮询置顶 1s——绿勾弹出 + 卡片淡入。 */
+function DoneCard({ run }: { run: PipelineRun }) {
+  return (
+    <HeroCard
+      shell="flash-in border border-emerald-200 bg-gradient-to-b from-emerald-50/80 to-emerald-50/20 dark:border-emerald-500/20 dark:from-emerald-500/10 dark:to-transparent"
+      meta={
+        <>
+          <span className="text-xs font-medium text-emerald-700/90 dark:text-emerald-400/90">
+            {run.sourceLabel}
+          </span>
+          <span className="ml-auto text-xs tabular-nums text-ink-muted/70">
+            {fmtTime(run.receivedAt)}
+          </span>
+        </>
+      }
+    >
+      <div className="mt-3 flex items-center gap-3">
+        <CheckCircle2 size={30} className="pop-in shrink-0 text-emerald-500" />
+        <p className="text-3xl font-semibold tracking-tight text-emerald-900 dark:text-emerald-200">
+          已完成
+        </p>
+      </div>
+      <p className="mt-1 truncate text-sm text-emerald-800/90 dark:text-emerald-300/90">
+        {run.summary ?? "已消化"}
+      </p>
+    </HeroCard>
+  );
+}
+
+/** 空闲卡：大 H1「空闲/排队中」+ 最近一批结局（绿勾/红叉/灰圈靠卡片左侧图符表达）。 */
+function IdleCard({ latest }: { latest: PipelineRun | undefined }) {
+  const idle = idleCard(latest);
+  return (
+    <HeroCard
+      shell="border border-line/60 bg-surface"
+      meta={
+        <>
+          {latest !== undefined && (
+            <span className="text-xs font-medium text-ink-muted/80">{latest.sourceLabel}</span>
+          )}
+          <span className="ml-auto text-xs tabular-nums text-ink-muted/60">
+            {latest !== undefined ? fmtTime(latest.receivedAt) : ""}
+          </span>
+        </>
+      }
+    >
+      <div className="mt-3 flex items-center gap-3">
+        {idle.icon}
+        <p className="text-3xl font-semibold tracking-tight">{idle.title}</p>
+      </div>
+      <p className={cn("mt-1 truncate text-sm", idle.tone)}>{idle.sub}</p>
+    </HeroCard>
+  );
+}
+
+/** 常驻状态卡编排：完成闪示 → 消化中卡（可多张）→ 空闲卡。优先级从上到下。 */
 function StatusCard({
   runs,
   traces,
   now,
+  flash,
 }: {
   runs: PipelineRun[];
   traces: Record<string, PipelineRunDetail["events"]>;
   now: number;
+  flash: PipelineRun | null;
 }) {
   const digesting = runs.filter((r) => r.digestState === "digesting");
   const pendingCount = runs.filter((r) => r.digestState === "pending").length;
   const latest = runs[0];
-
-  if (digesting.length > 0) {
-    return (
-      <div className="mb-5 space-y-3">
-        {digesting.map((run) => {
-          const elapsedSec = Math.max(
-            0,
-            Math.floor((now - new Date(run.receivedAt).getTime()) / 1000),
-          );
-          // 最近 3 条事件倒序（最新在上，旧的向下渐隐——「滚动栏 + 残影」）
-          const recent = (traces[run.id] ?? []).slice(-3).reverse();
-          return (
-            <div
-              key={run.id}
-              className="rounded-xl border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/30 px-4 py-3.5 dark:border-amber-500/20 dark:from-amber-500/5 dark:to-transparent"
-            >
-              <div className="flex items-center gap-2.5">
-                {/* 黄色转圈 = 正在思考/处理（用户定的状态语义） */}
-                <Loader2 size={14} className="shrink-0 animate-spin text-amber-500" />
-                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                  消化中
-                </span>
-                <span className="text-xs font-medium">{run.sourceLabel}</span>
-                <span className="ml-auto text-[10px] tabular-nums text-ink-muted/60">
-                  已跑 {elapsedSec}s
-                </span>
-              </div>
-              {/* 不确定进度条——流动感 */}
-              <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-amber-200/50 dark:bg-amber-500/10">
-                <div
-                  className="h-full w-1/3 animate-pulse rounded-full bg-amber-400"
-                  style={{ animationDuration: "1.5s" }}
-                />
-              </div>
-              {/* 实时轨迹：最新一条最亮，越旧越淡（残影） */}
-              {recent.length > 0 && (
-                <div className="mt-2 space-y-1">
-                  {recent.map((e, i) => (
-                    <p
-                      key={e.id}
-                      className="truncate text-[11px] text-amber-800 dark:text-amber-300"
-                      style={{ opacity: i === 0 ? 1 : i === 1 ? 0.45 : 0.25 }}
-                    >
-                      {e.detail}
-                    </p>
-                  ))}
-                </div>
-              )}
-              {pendingCount > 0 && (
-                <p className="mt-1.5 text-[10px] text-amber-700/70 dark:text-amber-400/60">
-                  另有 {pendingCount} 个批次排队中
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  const idle = idleCard(latest);
   return (
-    <div className="mb-5">
-      <div className="rounded-xl border border-line/60 bg-surface px-4 py-3.5">
-        <div className="flex items-center gap-2.5">
-          {idle.icon}
-          <span className="text-xs font-semibold">{idle.title}</span>
-          {latest !== undefined && (
-            <span className="text-xs font-medium">{latest.sourceLabel}</span>
-          )}
-          <span className="ml-auto text-[10px] tabular-nums text-ink-muted/60">
-            {latest !== undefined ? fmtTime(latest.receivedAt) : ""}
-          </span>
-        </div>
-        <p className={cn("mt-1.5 truncate text-[11px]", idle.tone)}>{idle.sub}</p>
-      </div>
+    <div className="mb-5 space-y-3">
+      {flash !== null && <DoneCard run={flash} />}
+      {digesting.map((run) => (
+        <DigestingCard
+          key={run.id}
+          run={run}
+          events={traces[run.id] ?? []}
+          now={now}
+          pendingCount={pendingCount}
+        />
+      ))}
+      {flash === null && digesting.length === 0 && <IdleCard latest={latest} />}
     </div>
   );
 }
@@ -241,13 +315,38 @@ export function PipelineView() {
   const [now, setNow] = useState(() => Date.now());
   // 消化中批次的实时轨迹（runs 列表不含事件详情——单独拉 detail 喂状态卡）
   const [traces, setTraces] = useState<Record<string, PipelineRunDetail["events"]>>({});
+  // 完成闪示（走查 2026-10-10）：digesting→digested 的那次轮询置「已完成」卡 1 秒
+  const [flash, setFlash] = useState<PipelineRun | null>(null);
+  const prevStates = useRef(new Map<string, PipelineRun["digestState"]>());
+  const baselined = useRef(false); // 首轮只建底（历史批次不许闪）
+  const openedAt = useRef(Date.now());
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => {
     api
       .pipelineRuns(50)
       .then((r) => {
+        // 完成后闪示，两类：①上次轮询见它在消化 → 现在完成；②页开后新到的批次一轮就完成
+        // （没赶上 digesting 的快消化——2s 松弛吸收 receivedAt 秒级截断）
+        const prev = prevStates.current;
+        const isBaseline = !baselined.current;
+        const justDone = r.runs.find(
+          (run) =>
+            run.digestState === "digested" &&
+            (prev.get(run.id) === "digesting" ||
+              (!isBaseline &&
+                !prev.has(run.id) &&
+                Date.parse(run.receivedAt) >= openedAt.current - 2000)),
+        );
+        prevStates.current = new Map(r.runs.map((run) => [run.id, run.digestState]));
+        baselined.current = true;
         setRuns(r.runs);
         setError(null);
+        if (justDone) {
+          setFlash(justDone);
+          if (flashTimer.current !== null) clearTimeout(flashTimer.current);
+          flashTimer.current = setTimeout(() => setFlash(null), 1000);
+        }
         // 拉每个消化中批次的轨迹（失败静默——轨迹是锦上添花，不阻塞列表）
         for (const run of r.runs.filter((x) => x.digestState === "digesting")) {
           api
@@ -261,6 +360,13 @@ export function PipelineView() {
         }
       })
       .catch((err) => setError(String(err)));
+  }, []);
+
+  // 卸载时清掉闪示计时器（防卸载后 setState）
+  useEffect(() => {
+    return () => {
+      if (flashTimer.current !== null) clearTimeout(flashTimer.current);
+    };
   }, []);
 
   const hasDigesting = runs?.some((r) => r.digestState === "digesting") ?? false;
@@ -281,7 +387,7 @@ export function PipelineView() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-4">
       {/* ── 常驻状态卡（空闲也在——没卡片让人以为页面死了）── */}
-      {runs !== null && <StatusCard runs={runs} traces={traces} now={now} />}
+      {runs !== null && <StatusCard runs={runs} traces={traces} now={now} flash={flash} />}
 
       {/* ── 标题 + 刷新 ── */}
       <div className="mb-3">
@@ -319,7 +425,11 @@ export function PipelineView() {
             <div key={run.id}>
               <button
                 onClick={() => setOpenId(open ? null : run.id)}
-                className="flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors hover:bg-surface"
+                className={cn(
+                  "flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors",
+                  // 展开时行与详情拼成一张圆角卡（走查 2026-10-10：方下方圆不协调）
+                  open ? "rounded-t-lg bg-surface" : "rounded-lg hover:bg-surface",
+                )}
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", info.dot)} />
                 <span className="text-[10px] text-ink-muted">{info.text}</span>
