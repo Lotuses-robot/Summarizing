@@ -130,10 +130,19 @@ function idleCard(latest: PipelineRun | undefined): {
       tone: "text-danger",
     };
   }
+  if (latest.digestState === "digested") {
+    return {
+      icon: <CheckCircle2 size={20} className="shrink-0 text-emerald-500" />,
+      title: "空闲",
+      sub: latest.summary !== null ? `最近一批已消化——${latest.summary}` : "最近一批已消化。",
+      tone: "text-ink-muted",
+    };
+  }
+  // 契约上不可达（只在无消化中批次时渲染此卡）——但绝不默认谎称「已消化」，给中性灰
   return {
-    icon: <CheckCircle2 size={20} className="shrink-0 text-emerald-500" />,
+    icon: <Circle size={20} className="shrink-0 text-ink-muted/50" />,
     title: "空闲",
-    sub: latest.summary !== null ? `最近一批已消化——${latest.summary}` : "最近一批已消化。",
+    sub: "状态同步中。",
     tone: "text-ink-muted",
   };
 }
@@ -200,7 +209,7 @@ function DigestingCard({
       <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-amber-200/50 dark:bg-amber-500/10">
         <div
           className="h-full animate-pulse rounded-full bg-amber-400 transition-[width] duration-700"
-          style={{ width: `${Math.max(5, roundPct)}%`, animationDuration: "2s" }}
+          style={{ width: `${Math.max(5, roundPct)}%` }}
         />
       </div>
       {/* 实时轨迹：最新一条最亮，越旧越淡（残影） */}
@@ -326,12 +335,10 @@ export function PipelineView() {
   // 消化中批次的实时轨迹（runs 列表不含事件详情——单独拉 detail 喂状态卡）
   const [traces, setTraces] = useState<Record<string, PipelineRunDetail["events"]>>({});
   // 完成闪示（走查 2026-10-10；二轮评审放宽触发线）：非 digested→digested 的跃迁置「已完成」卡
-  // 3 秒（同轮多批多张，计时自最后一次完成）
+  // 3 秒（同轮多批多张；计时由 [flash] effect 自最后一次变更起算）
   const [flash, setFlash] = useState<PipelineRun[]>([]);
-  const prevStates = useRef(new Map<string, PipelineRun["digestState"]>());
-  const baselined = useRef(false); // 首轮只建底（历史批次不许闪）
+  const prevStates = useRef<Map<string, PipelineRun["digestState"]> | null>(null); // null = 首轮未建底（历史批次不许闪）
   const openedAt = useRef(Date.now());
-  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => {
     api
@@ -341,29 +348,25 @@ export function PipelineView() {
         //   收全所有命中——同轮多批完成不能只闪第一个（二轮评审 F1）。
         // ②页开后新到的批次一轮就完成（没赶上 digesting 的快消化——2s 松弛吸收 receivedAt 秒级截断）
         const prev = prevStates.current;
-        const isBaseline = !baselined.current;
-        const justDone = r.runs.filter((run) => {
-          if (run.digestState !== "digested") return false;
-          const was = prev.get(run.id);
-          if (was !== undefined) return was !== "digested";
-          return !isBaseline && Date.parse(run.receivedAt) >= openedAt.current - 2000;
-        });
+        const justDone =
+          prev === null
+            ? []
+            : r.runs.filter((run) => {
+                if (run.digestState !== "digested") return false;
+                const was = prev.get(run.id);
+                if (was !== undefined) return was !== "digested";
+                return Date.parse(run.receivedAt) >= openedAt.current - 2000;
+              });
         prevStates.current = new Map(r.runs.map((run) => [run.id, run.digestState]));
-        baselined.current = true;
         setRuns(r.runs);
         setError(null);
-        if (justDone.length > 0) {
-          // 并入现有闪示（同批次不重复叠）；计时从最后一次完成起算
-          setFlash((cur) => [...cur, ...justDone.filter((nd) => !cur.some((c) => c.id === nd.id))]);
-          if (flashTimer.current !== null) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setFlash([]), 3000);
-        }
+        if (justDone.length > 0) setFlash((cur) => [...cur, ...justDone]);
         // 拉每个消化中批次的轨迹（失败静默——轨迹是锦上添花，不阻塞列表）
         for (const run of r.runs.filter((x) => x.digestState === "digesting")) {
           api
             .pipelineRun(run.id)
             .then((detail) => {
-              setTraces((cur) => ({ ...cur, [run.id]: detail.events ?? [] }));
+              setTraces((cur) => ({ ...cur, [run.id]: detail.events }));
             })
             .catch(() => {
               // 轨迹拉取失败：状态卡退化为无轨迹（列表本身照常可用）
@@ -373,12 +376,12 @@ export function PipelineView() {
       .catch((err) => setError(String(err)));
   }, []);
 
-  // 卸载时清掉闪示计时器（防卸载后 setState）
+  // 闪示窗口：flash 每变一次（并入新完成）自动重新计时；卸载清理由 effect cleanup 收
   useEffect(() => {
-    return () => {
-      if (flashTimer.current !== null) clearTimeout(flashTimer.current);
-    };
-  }, []);
+    if (flash.length === 0) return;
+    const t = setTimeout(() => setFlash([]), 3000);
+    return () => clearTimeout(t);
+  }, [flash]);
 
   const hasDigesting = runs?.some((r) => r.digestState === "digesting") ?? false;
 

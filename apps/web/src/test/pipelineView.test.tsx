@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DIGEST_MAX_ROUNDS } from "@summarizing/shared";
 import { PipelineView } from "../components/pipeline/PipelineView";
 import "@testing-library/jest-dom/vitest";
 import { fetchUrl, jsonResponse } from "./helpers/http";
@@ -50,9 +51,14 @@ const DETAIL_EVENTS = [
   },
 ];
 
-/** 本地墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）——供「刚完成/页开后到达」用例构造。 */
+/** 本地墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）——供「刚完成/页开后到达」用例构造。
+ *  显式补零（不依赖 ICU locale——sv-SE 在 small-icu 运行时会静默变格式）。 */
 function localNowStr(): string {
-  return new Date().toLocaleString("sv-SE").replace(" ", "T");
+  const d = new Date();
+  return (
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` +
+    `T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`
+  );
 }
 
 /** 详情请求的空替身：给真实形状（列表 payload 不再被 `detail.events ?? []` 容错吸收——评审 F8 卫生）。 */
@@ -69,6 +75,21 @@ function emptyDetail(): Response {
     },
     events: [],
   });
+}
+
+/** 台账路由替身（场景标志位留在用例内）：详情给空真形状，列表按传入闭包取 runs。 */
+function stubRuns(current: () => unknown[]): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = fetchUrl(input);
+      if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
+      if (url.includes("/api/pipeline/runs")) {
+        return Promise.resolve(jsonResponse({ runs: current() }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
 }
 
 /** 受控 fetch 替身：台账按 URL 分流；详情按 id 返回固定事件。 */
@@ -202,19 +223,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
       let phase: "digesting" | "digested" = "digesting";
       // 同一批次的状态跃迁（digesting→digested 才触发闪示）
       const digestingRun = { ...RUNS[1], digestState: "digesting", summary: null };
-      vi.stubGlobal(
-        "fetch",
-        vi.fn((input: RequestInfo | URL): Promise<Response> => {
-          const url = fetchUrl(input);
-          if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
-          if (url.includes("/api/pipeline/runs")) {
-            return Promise.resolve(
-              jsonResponse({ runs: phase === "digesting" ? [digestingRun] : [RUNS[1]] }),
-            );
-          }
-          return Promise.resolve(jsonResponse({}));
-        }),
-      );
+      stubRuns(() => (phase === "digesting" ? [digestingRun] : [RUNS[1]]));
       render(<PipelineView />);
       await waitFor(() => expect(screen.getAllByText("消化中").length).toBeGreaterThan(0));
 
@@ -239,17 +248,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
       let done = false;
       const before = [RUNS[0], { ...RUNS[1], digestState: "digesting", summary: null }];
       const after = [{ ...RUNS[0], digestState: "digested" }, RUNS[1]];
-      vi.stubGlobal(
-        "fetch",
-        vi.fn((input: RequestInfo | URL): Promise<Response> => {
-          const url = fetchUrl(input);
-          if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
-          if (url.includes("/api/pipeline/runs")) {
-            return Promise.resolve(jsonResponse({ runs: done ? after : before }));
-          }
-          return Promise.resolve(jsonResponse({}));
-        }),
-      );
+      stubRuns(() => (done ? after : before));
       render(<PipelineView />);
       await waitFor(() => expect(screen.getAllByText("消化中").length).toBeGreaterThanOrEqual(2));
 
@@ -261,16 +260,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
 
   it("首轮建底：挂载时就有「刚完成」批次 → 不闪（历史不许闪，评审 F4）", async () => {
     const recentRun = { ...RUNS[1], receivedAt: localNowStr() };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL): Promise<Response> => {
-        const url = fetchUrl(input);
-        if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(jsonResponse({ runs: [recentRun] }));
-        }
-        return Promise.resolve(jsonResponse({}));
-      }),
-    );
+    stubRuns(() => [recentRun]);
     render(<PipelineView />);
     // 同一次提交渲染空闲卡与（若有）闪示卡——空闲在即闪示无
     expect(await screen.findByText(/最近一批已消化——/)).toBeInTheDocument();
@@ -280,16 +270,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
   it("页开后到达的旧批次（完成态）→ 不闪（新近窗口只认「刚完成」，评审 F4）", async () => {
     let arrived = false;
     const oldRun = { ...RUNS[1], receivedAt: "2026-09-01T10:00:00" }; // 明显旧数据
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL): Promise<Response> => {
-        const url = fetchUrl(input);
-        if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(jsonResponse({ runs: arrived ? [oldRun] : [] }));
-        }
-        return Promise.resolve(jsonResponse({}));
-      }),
-    );
+    stubRuns(() => (arrived ? [oldRun] : []));
     render(<PipelineView />);
     await waitFor(() => expect(screen.getByText("空闲")).toBeInTheDocument()); // 基线建底（空库）
 
@@ -301,16 +282,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
   });
 
   it("常驻状态卡：无在途时也在——空闲 + 最近一批结局", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL): Promise<Response> => {
-        const url = fetchUrl(input);
-        if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(jsonResponse({ runs: [RUNS[1]] })); // 只有已消化批次
-        }
-        return Promise.resolve(jsonResponse({}));
-      }),
-    );
+    stubRuns(() => [RUNS[1]]); // 只有已消化批次
     render(<PipelineView />);
     expect(await screen.findByText("空闲")).toBeInTheDocument();
     expect(screen.getByText(/最近一批已消化——应用 1 项变更：新建事项「作业」/)).toBeInTheDocument();
@@ -318,19 +290,8 @@ describe("PipelineView（流水视图，specs/005）", () => {
 
   it("快消化闪示：页开后新到的批次一轮就完成（没赶上 digesting 轮询）也闪", async () => {
     let arrived = false;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL): Promise<Response> => {
-        const url = fetchUrl(input);
-        if (url.includes("/api/pipeline/runs")) {
-          // receivedAt 在请求时刻生成（页开后「刚完成」——评审 F3：消除渲染前构造的时间竞态）
-          return Promise.resolve(
-            jsonResponse({ runs: arrived ? [{ ...RUNS[1], receivedAt: localNowStr() }] : [] }),
-          );
-        }
-        return Promise.resolve(jsonResponse({}));
-      }),
-    );
+    // receivedAt 在请求时刻生成（页开后「刚完成」——评审 F3：消除渲染前构造的时间竞态）
+    stubRuns(() => (arrived ? [{ ...RUNS[1], receivedAt: localNowStr() }] : []));
     render(<PipelineView />);
     await waitFor(() => expect(screen.getByText("空闲")).toBeInTheDocument()); // 基线建底（空库）
 
@@ -346,19 +307,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
       digestState: "failed",
       summary: "处理失败，标记「未处理」：测试",
     };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL): Promise<Response> => {
-        const url = fetchUrl(input);
-        if (url.includes("/api/pipeline/runs/r-")) return Promise.resolve(emptyDetail());
-        if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(
-            jsonResponse({ runs: phase === "failed" ? [failedRun] : [RUNS[1]] }),
-          );
-        }
-        return Promise.resolve(jsonResponse({}));
-      }),
-    );
+    stubRuns(() => (phase === "failed" ? [failedRun] : [RUNS[1]]));
     render(<PipelineView />);
     // 基线先见到 failed 态（列表行精确「未处理」；空闲卡红叉同帧渲染）
     await waitFor(() => expect(screen.getByText("未处理")).toBeInTheDocument());
@@ -368,8 +317,9 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(await screen.findByText("已完成")).toBeInTheDocument();
   });
 
-  it("轮数封顶：跨重试累计超上限也只显「第 8/8 轮」（二轮评审 F1 盲区）", async () => {
-    const traces = Array.from({ length: 9 }, (_, i) => ({
+  it("轮数封顶：跨重试累计超上限也只显「第 N/N 轮」（二轮评审 F1 盲区）", async () => {
+    // 上限 + 1 条 trace（常量调整后此处仍表达同一意图）
+    const traces = Array.from({ length: DIGEST_MAX_ROUNDS + 1 }, (_, i) => ({
       id: `x${i}`,
       action: "digest_trace",
       detail: `第 ${i + 1} 轮：search_items`,
@@ -404,21 +354,14 @@ describe("PipelineView（流水视图，specs/005）", () => {
       }),
     );
     render(<PipelineView />);
-    expect(await screen.findByText(/第 8\/8 轮/)).toBeInTheDocument();
-    expect(screen.queryByText(/第 9\/8 轮/)).not.toBeInTheDocument();
+    expect(
+      await screen.findByText(new RegExp(`第 ${DIGEST_MAX_ROUNDS}/${DIGEST_MAX_ROUNDS} 轮`)),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(`第 ${DIGEST_MAX_ROUNDS + 1}/`))).not.toBeInTheDocument();
   });
 
   it("空库 → 状态卡空闲 + 可见空态文案（不是空白/报错）", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL): Promise<Response> => {
-        const url = fetchUrl(input);
-        if (url.includes("/api/pipeline/runs")) {
-          return Promise.resolve(jsonResponse({ runs: [] }));
-        }
-        return Promise.resolve(jsonResponse({}));
-      }),
-    );
+    stubRuns(() => []);
     render(<PipelineView />);
     expect(await screen.findByText("空闲")).toBeInTheDocument();
     expect(screen.getByText("等待第一条信息。")).toBeInTheDocument();

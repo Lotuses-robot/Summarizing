@@ -102,6 +102,11 @@ function claimsRecorded(reply: string): boolean {
   return RECORDED_CLAIM_RE.test(reply);
 }
 
+/** 「已录入」工具轨迹条目（ingest 工具 / 零工具守卫 / LLM 挂兜底三处共用——对用户可见的文案单一出处）。 */
+function ingestAction(): { tool: string; note: string } {
+  return { tool: "ingest", note: "已录入，消化中" };
+}
+
 /** 前台主流程（D-78）：多轮工具循环后给出回复；LLM 挂/超轮数时兜底，已录入过绝不重复录入（消化非幂等）。
  *  mentions = 用户在输入框 @ 提及的事项（2026-09-27）——注入给模型做指代消解，id 由前端看板保证真实。 */
 export async function handleChat(
@@ -126,7 +131,7 @@ export async function handleChat(
       const why = state.actions.length === 0 ? "本轮无成功工具调用" : "回复声称已录入";
       process.stderr.write(`[chat] ${why}，按兜底录入：${message.slice(0, 60)}\n`);
       fallbackIngest(db, llm, modelTag, tools, message);
-      state.actions.push({ tool: "ingest", note: "已录入，消化中" });
+      state.actions.push(ingestAction());
     }
     result = { reply, actions: state.actions, references: pickReferences(state) };
   } catch (err) {
@@ -136,7 +141,7 @@ export async function handleChat(
     if (!state.ingested) {
       result = {
         reply: fallbackIngest(db, llm, modelTag, tools, message),
-        actions: [{ tool: "ingest", note: "已录入，消化中" }],
+        actions: [ingestAction()],
         references: [],
       };
     } else {
@@ -275,7 +280,7 @@ async function runTool(
         const { content } = IngestArgsSchema.parse(args);
         const raw = insertChatRaw(db, content);
         state.ingested = true;
-        state.actions.push({ tool: "ingest", note: "已录入，消化中" });
+        state.actions.push(ingestAction());
         kickDigest(db, llm, tools, modelTag, raw, "ingest-tool");
         return JSON.stringify({ ok: true, note: "已录入待处理队列，agent0 消化中" });
       }
