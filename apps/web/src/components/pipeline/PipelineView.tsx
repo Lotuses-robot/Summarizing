@@ -4,17 +4,17 @@ import type { PipelineRun, PipelineRunDetail } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
 
-/** 消化状态徽章的展示文案与配色。 */
-function stateBadge(state: PipelineRun["digestState"]): { text: string; cls: string } {
+/** 消化状态徽章的展示文案与配色（dot 与时间线节点色同源——视觉关联）。 */
+function stateBadge(state: PipelineRun["digestState"]): { text: string; cls: string; dot: string } {
   switch (state) {
     case "digesting":
-      return { text: "消化中", cls: "text-amber-600" };
+      return { text: "消化中", cls: "text-amber-600", dot: "bg-amber-500 animate-pulse" };
     case "digested":
-      return { text: "已消化", cls: "text-emerald-600" };
+      return { text: "已消化", cls: "text-emerald-600", dot: "bg-emerald-500" };
     case "failed":
-      return { text: "未处理", cls: "text-red-500" };
+      return { text: "未处理", cls: "text-red-500", dot: "bg-red-500" };
     case "pending":
-      return { text: "排队中", cls: "text-zinc-400" };
+      return { text: "排队中", cls: "text-zinc-400", dot: "bg-zinc-400" };
   }
 }
 
@@ -160,33 +160,28 @@ export function PipelineView() {
                 open ? "border-accent/30" : "border-line hover:border-line/80",
               )}
             >
-              {/* 台账行：可点击展开 */}
+              {/* 台账行：色点 + 两行层级（与时间线视觉同源） */}
               <button
                 onClick={() => setOpenId(open ? null : run.id)}
-                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left"
+                className="flex w-full items-start gap-2.5 px-3.5 py-2.5 text-left"
               >
                 <span
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-[10px] font-medium leading-4",
-                    badge.cls,
-                    run.digestState === "digesting" && "animate-pulse bg-amber-50",
-                    run.digestState === "digested" && "bg-emerald-50",
-                    run.digestState === "failed" && "bg-red-50",
-                    run.digestState === "pending" && "bg-zinc-100",
+                  className={cn("mt-0.5 h-2 w-2 shrink-0 rounded-full", badge.dot)}
+                  title={badge.text}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={cn("text-xs font-medium", badge.cls)}>{badge.text}</span>
+                    <span className="text-xs font-medium">{run.sourceLabel}</span>
+                    <span className="ml-auto shrink-0 text-[10px] text-ink-muted/70">
+                      {run.receivedAt.slice(5, 16).replace("T", " ")}
+                    </span>
+                  </div>
+                  {run.summary !== null && (
+                    <p className="mt-0.5 truncate text-xs text-ink-muted">{run.summary}</p>
                   )}
-                >
-                  {badge.text}
-                </span>
-                <span className="text-xs font-medium">{run.sourceLabel}</span>
-                <span className="ml-auto shrink-0 text-[10px] text-ink-muted/70">
-                  {run.receivedAt.slice(5, 16).replace("T", " ")}
-                </span>
-                <span className="shrink-0 text-[10px] text-ink-muted/50">{run.eventCount} 条</span>
+                </div>
               </button>
-              {/* 摘要行 */}
-              {run.summary !== null && (
-                <p className="px-3.5 pb-2 text-xs leading-relaxed text-ink-muted">{run.summary}</p>
-              )}
               {/* 展开详情 */}
               {open && <RunDetail id={run.id} />}
             </div>
