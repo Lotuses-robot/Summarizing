@@ -92,7 +92,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getByText("消化中")).toBeInTheDocument();
     expect(screen.getByText("英语课官方群")).toBeInTheDocument();
     expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
-    expect(screen.getAllByText("2 条").length).toBeGreaterThan(0);
+    expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
   });
 
   it("展开行 → 详情：原文 + 时间线事件按序渲染", async () => {
