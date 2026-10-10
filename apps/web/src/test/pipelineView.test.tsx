@@ -360,6 +360,65 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.queryByText(new RegExp(`第 ${DIGEST_MAX_ROUNDS + 1}/`))).not.toBeInTheDocument();
   });
 
+  it("展开消化中批次：详情随轮询刷新（eventCount 变 → 重拉，走查修订 2026-10-10）", async () => {
+    let grown = false;
+    const first = {
+      id: "e1",
+      action: "digest_trace",
+      detail: "第 1 轮：search_items",
+      payload: null,
+      at: "2026-09-28T11:00:05",
+      by: { actor: "agent0", model: "test" },
+    };
+    const second = {
+      id: "e2",
+      action: "digest_trace",
+      detail: "第 2 轮：get_item",
+      payload: null,
+      at: "2026-09-28T11:00:08",
+      by: { actor: "agent0", model: "test" },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/pipeline/runs/r-digesting")) {
+          return Promise.resolve(
+            jsonResponse({
+              raw: {
+                id: "r-digesting",
+                content: "社团群消息",
+                sourceType: "nc",
+                sourceIdentity: { sourceLabel: "社团群" },
+                receivedAt: "2026-09-28T11:00:00",
+                eventTime: null,
+                digestState: "digesting",
+              },
+              events: grown ? [second, first] : [first],
+            }),
+          );
+        }
+        if (url.includes("/api/pipeline/runs")) {
+          return Promise.resolve(
+            jsonResponse({ runs: [{ ...RUNS[0], eventCount: grown ? 2 : 1 }] }),
+          );
+        }
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<PipelineView />);
+    // 展开消化中的批次（卡片 meta 里也有「社团群」——用行按钮定位）
+    fireEvent.click(await screen.findByRole("button", { name: /社团群/ }));
+    // 断言限定在详情面板内（状态卡轨迹也在刷新——不做 within 会被假通过）
+    const detail = within(await screen.findByTestId("run-detail"));
+    await detail.findByText("第 1 轮：search_items");
+    expect(detail.queryByText("第 2 轮：get_item")).not.toBeInTheDocument();
+
+    grown = true; // 新事件落流水 → 父级轮询拿到新 eventCount
+    fireEvent.click(screen.getByTitle("刷新"));
+    expect(await detail.findByText("第 2 轮：get_item")).toBeInTheDocument();
+  });
+
   it("空库 → 状态卡空闲 + 可见空态文案（不是空白/报错）", async () => {
     stubRuns(() => []);
     render(<PipelineView />);

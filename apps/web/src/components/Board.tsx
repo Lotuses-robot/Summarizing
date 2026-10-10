@@ -11,6 +11,7 @@ import { cn } from "../lib/cn";
 import { loadSectionFold, saveSectionFold } from "../lib/appearance";
 import { pushEscLayer } from "../lib/escLayer";
 import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urgency";
+import { fmtShortTime } from "../lib/time";
 import type { BoardFilter } from "./FilterBar";
 import { api } from "../api";
 import { ItemBody } from "./board/ItemBody";
@@ -52,12 +53,6 @@ const SECTION_META: {
 ];
 
 const NEAR_MS = 24 * 60 * 60_000; // 临近 = 24h 内到期（05§二 四点标记）
-
-/** 日期显示成「月-日 时:分」——看板行内的短格式。 */
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
 
 /** 看板单行（用户 2026-09-27 行布局 v3，借鉴 Todoist/Things 3）：标题 → 相对人话 ddl → tags
  *  同一条阅读线内联（不用视线右缘远跳）；ddl 颜色编码（过期红/临近 accent/远灰），悬停给绝对时间；
@@ -166,9 +161,9 @@ function Row({
               "shrink-0 text-xs font-normal",
               timeOverdue ? "text-danger" : near ? "text-accent" : "text-ink-muted",
             )}
-            title={`到期 ${fmtDate(dueText)}`}
+            title={`到期 ${fmtShortTime(dueText)}`}
           >
-            {dueRelative ?? fmtDate(dueText)}
+            {dueRelative ?? fmtShortTime(dueText)}
           </span>
         )}
         {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}

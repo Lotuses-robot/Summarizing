@@ -11,6 +11,7 @@ import {
 import { DIGEST_MAX_ROUNDS, type PipelineRun, type PipelineRunDetail } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
+import { fmtShortTime } from "../../lib/time";
 
 /** 消化状态 → 色点 + 文字。 */
 function stateInfo(state: PipelineRun["digestState"]): { dot: string; text: string } {
@@ -35,8 +36,9 @@ function eventDot(action: string): string {
   return "bg-zinc-400";
 }
 
-/** 单批详情：原文 + 纯时间线（最新在上——与状态卡轨迹同向；节点色区分类型）。 */
-function RunDetail({ id }: { id: string }) {
+/** 单批详情：原文 + 纯时间线（最新在上——与状态卡轨迹同向；节点色区分类型）。
+ *  随父级轮询刷新：eventCount 变化（有新事件）即重拉——消化中展开的时间线不再冻结。 */
+function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
   const [detail, setDetail] = useState<PipelineRunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,7 +56,7 @@ function RunDetail({ id }: { id: string }) {
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, eventCount]);
 
   if (error !== null) {
     return <p className="px-4 py-2 text-xs text-danger">详情加载失败：{error}</p>;
@@ -84,18 +86,13 @@ function RunDetail({ id }: { id: string }) {
             </div>
             <div className="min-w-0 flex-1 pb-3">
               <p className="text-xs leading-relaxed">{e.detail}</p>
-              <p className="mt-0.5 text-[10px] text-ink-muted/60">{e.at}</p>
+              <p className="mt-0.5 text-[10px] text-ink-muted/60">{fmtShortTime(e.at)}</p>
             </div>
           </div>
         ))}
       </div>
     </div>
   );
-}
-
-/** 列表/卡片共用的时间显示：MM-DD HH:mm。 */
-function fmtTime(s: string): string {
-  return s.slice(5, 16).replace("T", " ");
 }
 
 /** 空闲态卡的图标与文案（仅在没有消化中批次与完成闪示时调用：说清「空闲」+ 最近一批结局）。 */
@@ -153,7 +150,7 @@ function HeroCard({
   meta,
   children,
 }: {
-  shell: string; // 卡壳配色（琥珀=消化中 / 翠绿=完成闪示 / 面板色=空闲）
+  shell: string; // 卡壳配色（主题色底=消化中/完成闪示；面板色=空闲）
   meta: ReactNode; // 顶栏：图标 + 来源 + 右侧计时
   children: ReactNode; // 大 H1 + 详情区
 }) {
@@ -165,7 +162,8 @@ function HeroCard({
   );
 }
 
-/** 消化中卡：黄色转圈（用户定的状态语义）+ 大 H1「消化中」+ 已跑耗时 + 轮次进度条 + 渐隐轨迹。 */
+/** 消化中卡（走查 2026-10-10 晚修订：卡底一律跟主题色 `--accent` 派生、色板切换自动跟随；
+ *  语义色只留图标——黄色转圈=思考中，用户定的）+ 大 H1「消化中」+ 已跑耗时 + 轮次进度条 + 渐隐轨迹。 */
 function DigestingCard({
   run,
   events,
@@ -189,26 +187,22 @@ function DigestingCard({
   const roundPct = Math.round((rounds / DIGEST_MAX_ROUNDS) * 100);
   return (
     <HeroCard
-      shell="border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/20 dark:border-amber-500/20 dark:from-amber-500/10 dark:to-transparent"
+      shell="border border-accent/25 bg-gradient-to-b from-accent-soft to-accent-soft/30"
       meta={
         <>
           <Loader2 size={16} className="shrink-0 animate-spin text-amber-500" />
-          <span className="text-xs font-medium text-amber-700/90 dark:text-amber-400/90">
-            {run.sourceLabel}
-          </span>
+          <span className="text-xs font-medium text-ink-muted">{run.sourceLabel}</span>
           <span className="ml-auto text-xs tabular-nums text-ink-muted/70">
             {rounds > 0 && `第 ${rounds}/${DIGEST_MAX_ROUNDS} 轮 · `}已跑 {elapsedSec}s
           </span>
         </>
       }
     >
-      <p className="mt-4 text-3xl font-semibold tracking-tight text-amber-900 dark:text-amber-200">
-        消化中
-      </p>
-      {/* 轮次进度条：宽度 = 已完成轮数/上限（真实推进，不是纯装饰动画） */}
-      <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-amber-200/50 dark:bg-amber-500/10">
+      <p className="mt-4 text-3xl font-semibold tracking-tight text-accent">消化中</p>
+      {/* 轮次进度条：宽度 = 已完成轮数/上限（真实推进，不是纯装饰动画）；色随主题 */}
+      <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-line/40">
         <div
-          className="h-full animate-pulse rounded-full bg-amber-400 transition-[width] duration-700"
+          className="h-full animate-pulse rounded-full bg-accent transition-[width] duration-700"
           style={{ width: `${Math.max(5, roundPct)}%` }}
         />
       </div>
@@ -218,7 +212,7 @@ function DigestingCard({
           {recent.map((e, i) => (
             <p
               key={e.id}
-              className="truncate text-xs text-amber-800 dark:text-amber-300"
+              className="truncate text-xs text-ink"
               style={{ opacity: i === 0 ? 1 : i === 1 ? 0.45 : 0.25 }}
             >
               {e.detail}
@@ -227,40 +221,32 @@ function DigestingCard({
         </div>
       )}
       {pendingCount > 0 && (
-        <p className="mt-2 text-[10px] text-amber-700/70 dark:text-amber-400/60">
-          另有 {pendingCount} 个批次排队中
-        </p>
+        <p className="mt-2 text-[10px] text-ink-muted/70">另有 {pendingCount} 个批次排队中</p>
       )}
     </HeroCard>
   );
 }
 
 /** 完成闪示卡（走查 2026-10-10；二轮评审放宽触发线）：任何非 digested → digested 的跃迁（含失败重试）
- *  置顶 3s，同轮多批各一张——绿勾弹出 + 卡片淡入。 */
+ *  置顶 3s，同轮多批各一张——卡底跟主题色派生；绿勾弹出（勾保持语义绿，用户定的）+ 卡片淡入。 */
 function DoneCard({ run }: { run: PipelineRun }) {
   return (
     <HeroCard
-      shell="flash-in border border-emerald-200 bg-gradient-to-b from-emerald-50/80 to-emerald-50/20 dark:border-emerald-500/20 dark:from-emerald-500/10 dark:to-transparent"
+      shell="flash-in border border-accent/25 bg-gradient-to-b from-accent-soft to-accent-soft/30"
       meta={
         <>
-          <span className="text-xs font-medium text-emerald-700/90 dark:text-emerald-400/90">
-            {run.sourceLabel}
-          </span>
+          <span className="text-xs font-medium text-ink-muted">{run.sourceLabel}</span>
           <span className="ml-auto text-xs tabular-nums text-ink-muted/70">
-            {fmtTime(run.receivedAt)}
+            {fmtShortTime(run.receivedAt)}
           </span>
         </>
       }
     >
       <div className="mt-4 flex items-center gap-3">
         <CheckCircle2 size={30} className="pop-in shrink-0 text-emerald-500" />
-        <p className="text-3xl font-semibold tracking-tight text-emerald-900 dark:text-emerald-200">
-          已完成
-        </p>
+        <p className="text-3xl font-semibold tracking-tight text-accent">已完成</p>
       </div>
-      <p className="mt-2.5 truncate text-sm text-emerald-800/90 dark:text-emerald-300/90">
-        {run.summary ?? "已消化"}
-      </p>
+      <p className="mt-2.5 truncate text-sm text-ink-muted">{run.summary ?? "已消化"}</p>
     </HeroCard>
   );
 }
@@ -277,7 +263,7 @@ function IdleCard({ latest }: { latest: PipelineRun | undefined }) {
             <span className="text-xs font-medium text-ink-muted/80">{latest.sourceLabel}</span>
           )}
           <span className="ml-auto text-xs tabular-nums text-ink-muted/60">
-            {latest !== undefined ? fmtTime(latest.receivedAt) : ""}
+            {latest !== undefined ? fmtShortTime(latest.receivedAt) : ""}
           </span>
         </>
       }
@@ -454,7 +440,7 @@ export function PipelineView() {
                   </span>
                 )}
                 <span className="ml-auto shrink-0 text-[10px] text-ink-muted/50">
-                  {fmtTime(run.receivedAt)}
+                  {fmtShortTime(run.receivedAt)}
                 </span>
                 <ChevronRight
                   size={13}
@@ -464,7 +450,7 @@ export function PipelineView() {
                   )}
                 />
               </button>
-              {open && <RunDetail id={run.id} />}
+              {open && <RunDetail id={run.id} eventCount={run.eventCount} />}
             </div>
           );
         })}
