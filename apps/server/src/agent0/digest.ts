@@ -121,6 +121,14 @@ export async function digestRawInput(
           if (seenKeys.has(key)) continue;
           seenKeys.add(key);
           rejected.push(r);
+          // 新增拒收也要落流水（九轮评审：被拒过就要有行可查）
+          repo.appendPipelineEvent(db, {
+            rawInputId: raw.id,
+            action: "fence_reject",
+            detail: `围栏拒收：${r.reason}`,
+            payload: r.item,
+            by,
+          });
         }
         appendPipelineEventBestEffort(
           db,
