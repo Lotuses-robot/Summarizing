@@ -394,7 +394,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
                 eventTime: null,
                 digestState: "digesting",
               },
-              events: grown ? [second, first] : [first],
+              events: grown ? [first, second] : [first],
             }),
           );
         }

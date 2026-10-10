@@ -39,7 +39,7 @@ for (const t of [
   "source_settings",
   "uncertain_inputs",
   "chat_turns",
-  "replay_nodes",
+  "pipeline_events",
 ]) {
   client.prepare(`DELETE FROM ${t}`).run();
 }

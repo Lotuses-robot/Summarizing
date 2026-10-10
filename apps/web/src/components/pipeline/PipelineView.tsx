@@ -11,7 +11,7 @@ import {
 import { DIGEST_MAX_ROUNDS, type PipelineRun, type PipelineRunDetail } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
-import { fmtShortTime } from "../../lib/time";
+import { fmtShortTime, fmtTimeSec } from "../../lib/time";
 
 /** 消化状态 → 色点 + 文字。 */
 function stateInfo(state: PipelineRun["digestState"]): { dot: string; text: string } {
@@ -86,7 +86,7 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
             </div>
             <div className="min-w-0 flex-1 pb-3">
               <p className="text-xs leading-relaxed">{e.detail}</p>
-              <p className="mt-0.5 text-[10px] text-ink-muted/60">{fmtShortTime(e.at)}</p>
+              <p className="mt-0.5 text-[10px] text-ink-muted/60">{fmtTimeSec(e.at)}</p>
             </div>
           </div>
         ))}
