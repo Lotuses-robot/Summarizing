@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import type { PipelineRun, PipelineRunDetail } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
@@ -56,7 +56,7 @@ function RunDetail({ id }: { id: string }) {
   }
 
   return (
-    <div className="space-y-3 px-4 pb-3 pt-2">
+    <div className="mx-1 mb-2 space-y-3 rounded-lg bg-surface px-3.5 pb-3 pt-3">
       <section>
         <p className="whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">
           {detail.raw.content}
@@ -151,7 +151,8 @@ export function PipelineView() {
                 className="rounded-xl border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/30 px-4 py-3.5 dark:border-amber-500/20 dark:from-amber-500/5 dark:to-transparent"
               >
                 <div className="flex items-center gap-2.5">
-                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
+                  {/* 黄色转圈 = 正在思考/处理（用户定的状态语义） */}
+                  <Loader2 size={14} className="shrink-0 animate-spin text-amber-500" />
                   <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
                     消化中
                   </span>
@@ -188,22 +189,30 @@ export function PipelineView() {
       )}
 
       {/* ── 标题 + 刷新 ── */}
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">流水</h2>
-        <button
-          title="刷新"
-          onClick={load}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
-        >
-          <RefreshCw size={14} />
-        </button>
+      <div className="mb-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">
+            流水
+            {runs !== null && runs.length > 0 && (
+              <span className="ml-2 text-xs text-ink-muted">{runs.length} 个批次</span>
+            )}
+          </h2>
+          <button
+            title="刷新"
+            onClick={load}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-ink-muted">
+          每条信息从进站到消化的全程留痕——点开行看 agent0 的思考与工具使用。
+        </p>
       </div>
 
       {error !== null && <p className="mb-2 text-xs text-danger">流水加载失败：{error}</p>}
       {runs !== null && runs.length === 0 && (
-        <p className="py-6 text-center text-xs text-ink-muted">
-          还没有批次——去对话或群里丢点信息。
-        </p>
+        <p className="mt-6 text-sm text-ink-muted">还没有批次——去对话或群里丢点信息。</p>
       )}
 
       {/* ── 极简批次列表（无边框，纯行 + 间距）── */}
@@ -215,7 +224,7 @@ export function PipelineView() {
             <div key={run.id}>
               <button
                 onClick={() => setOpenId(open ? null : run.id)}
-                className="flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors hover:bg-canvas"
+                className="flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors hover:bg-surface"
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", info.dot)} />
                 <span className="text-[10px] text-ink-muted">{info.text}</span>
@@ -228,6 +237,13 @@ export function PipelineView() {
                 <span className="ml-auto shrink-0 text-[10px] text-ink-muted/50">
                   {run.receivedAt.slice(5, 16).replace("T", " ")}
                 </span>
+                <ChevronRight
+                  size={13}
+                  className={cn(
+                    "shrink-0 text-ink-muted/40 transition-transform",
+                    open && "rotate-90",
+                  )}
+                />
               </button>
               {open && <RunDetail id={run.id} />}
             </div>

@@ -122,6 +122,8 @@ describe("PipelineView（流水视图，specs/005）", () => {
     stubApi();
     render(<PipelineView />);
     await waitFor(() => expect(screen.getByText("已消化")).toBeInTheDocument());
+    // 标题旁批次数
+    expect(screen.getByText("2 个批次")).toBeInTheDocument();
     // 「消化中」出现两处：置顶状态卡 + 列表行——用 getAllByText
     expect(screen.getAllByText("消化中").length).toBeGreaterThan(0);
     expect(screen.getByText("英语课官方群")).toBeInTheDocument();
