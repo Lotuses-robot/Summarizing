@@ -103,9 +103,7 @@ function Row({
   // 已完成淡出（同款立方曲线）——锚定完成时刻（completedAt）：刚完成最浓，越久淡得越快
   const doneFade =
     item.status === "done" ? doneFadeStrength(row.completedAt ?? row.updatedAt, Date.now()) : 0;
-  // 日期未知（用户 2026-09-27 二轮：不要背景，改主题色细边框——与过期红框同手法；
-  // 2026-09-30 修：原固定蓝 info 不跟色板，改 accent）
-  const isUndated = item.status === "todo" && dueText === null;
+  // 日期未知不再给行描边（走查 2026-10-10 晚：段头已标明「日期未知」，行框反抢注意力——用户要求去掉）
   /** 行背景色：待办临近渐强 / 已完成淡出——全部从主题强调色出（跟色板走）；
    *  封顶同档（TINT_CAP_PERCENT）——「刚完成最亮」由此成立（走查修订 2026-09-30）。 */
   const rowBg = (() => {
@@ -124,7 +122,7 @@ function Row({
       className={cn(
         "group relative cursor-pointer overflow-hidden rounded-md border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
         row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
-        isUndated || near ? "border-accent/60" : "", // 均在主题强调色系（跟色板走）
+        near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
         flash && "row-flash",
         active && "bg-canvas ring-1 ring-accent",
       )}
