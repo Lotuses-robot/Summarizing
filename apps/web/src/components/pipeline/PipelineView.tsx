@@ -167,6 +167,7 @@ export function PipelineView() {
                 className="flex w-full items-center gap-2.5 px-1 py-2.5 text-left transition-colors hover:bg-canvas"
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", info.dot)} />
+                <span className="text-[10px] text-ink-muted">{info.text}</span>
                 <span className="text-xs font-medium">{run.sourceLabel}</span>
                 {run.summary !== null && (
                   <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
