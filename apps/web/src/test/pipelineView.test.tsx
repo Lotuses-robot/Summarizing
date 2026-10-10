@@ -6,18 +6,9 @@ import "@testing-library/jest-dom/vitest";
 import { fetchUrl, jsonResponse } from "./helpers/http";
 
 // 流水视图（specs/005）：台账 + 展开详情——「一条信息从进站到成事项」全程可查。
+// 条目顺序与真接口一致：新到旧（最新在前，状态卡取 runs[0] 作「最近一批」）。
 
 const RUNS = [
-  {
-    id: "r-digested",
-    sourceType: "nc",
-    sourceLabel: "英语课官方群",
-    receivedAt: "2026-09-28T10:00:00",
-    eventTime: "2026-09-28T10:00:00",
-    digestState: "digested",
-    summary: "应用 1 项变更：新建事项「作业」",
-    eventCount: 2,
-  },
   {
     id: "r-digesting",
     sourceType: "nc",
@@ -27,6 +18,16 @@ const RUNS = [
     digestState: "digesting",
     summary: null,
     eventCount: 1,
+  },
+  {
+    id: "r-digested",
+    sourceType: "nc",
+    sourceLabel: "英语课官方群",
+    receivedAt: "2026-09-28T10:00:00",
+    eventTime: "2026-09-28T10:00:00",
+    digestState: "digested",
+    summary: "应用 1 项变更：新建事项「作业」",
+    eventCount: 2,
   },
 ];
 
@@ -148,7 +149,23 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getAllByText("应用 1 项变更：新建事项「作业」").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("空库 → 可见空态文案（不是空白/报错）", async () => {
+  it("常驻状态卡：无在途时也在——空闲 + 最近一批结局", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/pipeline/runs")) {
+          return Promise.resolve(jsonResponse({ runs: [RUNS[1]] })); // 只有已消化批次
+        }
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<PipelineView />);
+    expect(await screen.findByText("空闲")).toBeInTheDocument();
+    expect(screen.getByText(/最近一批已消化——应用 1 项变更：新建事项「作业」/)).toBeInTheDocument();
+  });
+
+  it("空库 → 状态卡空闲 + 可见空态文案（不是空白/报错）", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL): Promise<Response> => {
@@ -160,6 +177,8 @@ describe("PipelineView（流水视图，specs/005）", () => {
       }),
     );
     render(<PipelineView />);
-    expect(await screen.findByText(/还没有批次/)).toBeInTheDocument();
+    expect(await screen.findByText("空闲")).toBeInTheDocument();
+    expect(screen.getByText("等待第一条信息。")).toBeInTheDocument();
+    expect(screen.getByText(/还没有批次/)).toBeInTheDocument();
   });
 });
