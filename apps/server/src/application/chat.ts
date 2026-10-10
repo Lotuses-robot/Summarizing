@@ -109,6 +109,14 @@ export async function handleChat(
   let result: ChatResult;
   try {
     const reply = await converse(db, llm, modelTag, message, history, tools, state, mentions);
+    // 零工具调用兜底（2026-10-10 事故）：三选一纪律（查/录/留痕）= 每轮至少一个工具调用。
+    // 一轮全不调 = 回话无凭据——实证：模型回复称「原话已录入」而库里没有 raw_input（静默丢消息）。
+    // 按 D-14「宁可误录入」真录一次：声称与事实对齐，绝不静默。
+    if (state.actions.length === 0) {
+      process.stderr.write(`[chat] 模型零工具调用，按兜底录入：${message.slice(0, 60)}\n`);
+      fallbackIngest(db, llm, modelTag, tools, message);
+      state.actions.push({ tool: "ingest", note: "已录入，消化中" });
+    }
     result = { reply, actions: state.actions, references: pickReferences(state) };
   } catch (err) {
     // 静默吞错 = 排障黑洞：先留痕再兜底（S2 评审）

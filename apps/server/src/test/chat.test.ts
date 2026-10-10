@@ -109,6 +109,31 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     );
   });
 
+  it("零工具调用但回话声称已录入 → 兜底真录入（2026-10-10 事故：回复说谎 = 静默丢消息）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    // 事故重放：模型零工具调用直接回话——live 时回复称「原话已录入」但库里无批次
+    llm.push({ content: "收到，原话已录入——系统会跟前面那条合并处理。" });
+    llm.push({ content: '{"changes":[]}' }); // 兜底 kickDigest 的消化清单
+
+    const result = await handleChat(db, llm, MODEL, "修改一下开会是十一点", []);
+
+    expect(result.reply).toContain("已录入");
+    // 兜底录入的轨迹对用户可见（不是暗改）
+    expect(result.actions).toEqual([{ tool: "ingest", note: "已录入，消化中" }]);
+    const raws = chatRaws(db);
+    expect(raws).toHaveLength(1);
+    const ingested = raws[0];
+    if (!ingested) throw new Error("批次缺失");
+    expect(ingested.content).toBe("修改一下开会是十一点"); // 逐字
+    await vi.waitFor(
+      () => {
+        expect(repo.getRawInput(db, ingested.id)?.digestState).toBe("digested");
+      },
+      { timeout: 3000 },
+    );
+  });
+
   it("log_chitchat：纯寒暄留痕不进消化", async () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm();
@@ -295,6 +320,8 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
     const db = makeDb(":memory:");
     seedBoard(db);
     const llm = new FakeLlm();
+    // 查询走真实形态：先 get_board 再答（零工具回话会被兜底录入——2026-10-10 守卫，不测那条路）
+    llm.push({ content: null, toolCalls: [{ id: "t1", name: "get_board", argsJson: "{}" }] });
     llm.push({ content: "有 1 件：第三次作业提交。" });
     const app = makeApp({ db, llmRef: { current: llm } });
     const res = await app.inject({
@@ -309,7 +336,7 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
     const body = res.json<{ reply: string; actions: unknown[]; references: unknown[] }>();
     expect(Object.keys(body)).toEqual(["reply", "actions", "references"]);
     expect(body.reply).toContain("第三次作业提交");
-    expect(body.actions).toEqual([]); // 纯文本回复无工具轨迹
+    expect(body.actions).toEqual([{ tool: "get_board", note: "查了看板" }]);
     expect(body.references).toEqual([]);
   });
 
@@ -330,6 +357,7 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
     const itemId = seedBoard(db);
     const llm = new FakeLlm();
     llm.push({ content: "好的。" });
+    llm.push({ content: '{"changes":[]}' }); // 零工具回话触发兜底录入 → 喂消化清单防异步空队列
     const app = makeApp({ db, llmRef: { current: llm } });
     const res = await app.inject({
       method: "POST",
