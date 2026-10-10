@@ -95,16 +95,15 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getAllByText("2 条").length).toBeGreaterThan(0);
   });
 
-  it("展开行 → 详情：原文 + 分频道流水（处理结果/agent0 轨迹）", async () => {
+  it("展开行 → 详情：原文 + 时间线事件按序渲染", async () => {
     stubApi();
     render(<PipelineView />);
     const row = await screen.findByText("英语课官方群");
     fireEvent.click(row);
-    // 展开行懒取详情：原文与分频道事件可见
+    // 展开行懒取详情：原文与时间线事件按序可见
     await waitFor(() => expect(screen.getByText("群里说的作业通知")).toBeInTheDocument());
-    expect(screen.getByText("处理结果")).toBeInTheDocument();
-    expect(screen.getByText("agent0 轨迹")).toBeInTheDocument();
     expect(screen.getByText("第 1 轮：search_items")).toBeInTheDocument();
+    expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
   });
 
   it("空库 → 可见空态文案（不是空白/报错）", async () => {
