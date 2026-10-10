@@ -8,7 +8,7 @@ import { cn } from "../../lib/cn";
 function stateInfo(state: PipelineRun["digestState"]): { dot: string; text: string } {
   switch (state) {
     case "digesting":
-      return { dot: "bg-amber-500 animate-pulse", text: "消化中" };
+      return { dot: "bg-amber-500", text: "消化中" };
     case "digested":
       return { dot: "bg-emerald-500", text: "已消化" };
     case "failed":
@@ -85,11 +85,12 @@ function RunDetail({ id }: { id: string }) {
   );
 }
 
-/** 流水视图：置顶实时消化状态卡 + 极简批次列表（无边框无卡片——纯行 + 间距）。 */
+/** 流水视图：置顶实时消化状态卡（渐隐轨迹 + 思考动画）+ 极简批次列表。 */
 export function PipelineView() {
   const [runs, setRuns] = useState<PipelineRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(() => {
     api
@@ -107,32 +108,50 @@ export function PipelineView() {
     return () => clearInterval(timer);
   }, [load]);
 
-  /** 置顶消化状态卡只展示正在消化的批次。 */
+  // 耗时计时器：有 digesting 批次时每秒跳一次（纯前端视觉，不触发刷新）
+  useEffect(() => {
+    if (!runs?.some((r) => r.digestState === "digesting")) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [runs]);
+
   const digestingRuns = runs?.filter((r) => r.digestState === "digesting") ?? [];
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-4">
-      {/* ── 置顶实时消化状态卡（仅在有消化中批次时出现）── */}
+      {/* ── 置顶实时消化状态卡（有 digesting 批次时出现）── */}
       {digestingRuns.length > 0 && (
-        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3.5 dark:border-amber-500/20 dark:bg-amber-500/5">
-          {digestingRuns.map((run) => (
-            <div key={run.id}>
-              <div className="flex items-center gap-2.5">
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
-                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
-                  消化中
-                </span>
-                <span className="text-xs font-medium">{run.sourceLabel}</span>
+        <div className="mb-5 space-y-3">
+          {digestingRuns.map((run) => {
+            const elapsedSec = Math.max(
+              0,
+              Math.floor((now - new Date(run.receivedAt).getTime()) / 1000),
+            );
+            return (
+              <div
+                key={run.id}
+                className="rounded-xl border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/30 px-4 py-3.5 dark:border-amber-500/20 dark:from-amber-500/5 dark:to-transparent"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
+                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                    消化中
+                  </span>
+                  <span className="text-xs font-medium">{run.sourceLabel}</span>
+                  <span className="ml-auto text-[10px] tabular-nums text-ink-muted/60">
+                    已跑 {elapsedSec}s
+                  </span>
+                </div>
+                {/* 不确定进度条——流动感 */}
+                <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-amber-200/50 dark:bg-amber-500/10">
+                  <div
+                    className="h-full w-1/3 animate-pulse rounded-full bg-amber-400"
+                    style={{ animationDuration: "1.5s" }}
+                  />
+                </div>
               </div>
-              {/* 不确定进度条——消化中持续流动 */}
-              <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-700">
-                <div
-                  className="h-full w-1/3 animate-pulse rounded-full bg-amber-400"
-                  style={{ animationDuration: "1.5s" }}
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
