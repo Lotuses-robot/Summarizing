@@ -85,14 +85,16 @@ describe("PipelineView（流水视图，specs/005）", () => {
     vi.unstubAllGlobals();
   });
 
-  it("台账渲染：状态徽章/来源/摘要/计数（含消化中）", async () => {
+  it("台账渲染：状态/来源/摘要/耗时（含置顶消化状态卡）", async () => {
     stubApi();
     render(<PipelineView />);
     await waitFor(() => expect(screen.getByText("已消化")).toBeInTheDocument());
-    expect(screen.getByText("消化中")).toBeInTheDocument();
+    // 「消化中」出现两处：置顶状态卡 + 列表行——用 getAllByText
+    expect(screen.getAllByText("消化中").length).toBeGreaterThan(0);
     expect(screen.getByText("英语课官方群")).toBeInTheDocument();
     expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
-    expect(screen.getAllByText(/2 条流水/).length).toBeGreaterThan(0);
+    // 置顶状态卡：已跑耗时
+    expect(screen.getByText(/已跑 \d+s/)).toBeInTheDocument();
   });
 
   it("展开行 → 详情：原文 + 时间线事件按序渲染", async () => {
