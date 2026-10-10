@@ -1,4 +1,5 @@
 import {
+  DIGEST_MAX_ROUNDS,
   errText,
   GetItemArgsSchema,
   SearchKbArgsSchema,
@@ -19,10 +20,8 @@ import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
 import { executeChanges } from "../executor/executor";
 
 // 消化管线（01§4.10 全景）：
-// ① 入口 RawInput（已落档）→ ② 自由推理（工具循环）→ ③ 变更清单
-// → ④ 行为围栏（拒收回喂一次，再失败放弃留痕）→ ⑤ 逐项落笔 → ⑥ 事后可查。
-
-const MAX_TOOL_ROUNDS = 8;
+// ① 入口 RawInput（已落档）→ ② 自由推理（工具循环，轮数上限 DIGEST_MAX_ROUNDS 在 shared）
+// → ③ 变更清单 → ④ 行为围栏（拒收回喂一次，再失败放弃留痕）→ ⑤ 逐项落笔 → ⑥ 事后可查。
 
 /** 兜底日志：stderr 自身不可写时静默——catch 块内的最后一级，绝不允许「留痕失败」再抛（八轮评审）。 */
 function bestEffortLog(msg: string): void {
@@ -270,7 +269,7 @@ async function elicitChangeList(
 ): Promise<ChangeList> {
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
   let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+  for (let round = 0; round < DIGEST_MAX_ROUNDS; round++) {
     const turn = await llm.chat({ system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS });
     if (turn.toolCalls.length > 0) {
       traced += 1;
@@ -311,7 +310,7 @@ async function elicitChangeList(
       content: `你的上一条输出不是合法的变更清单 JSON。请严格按系统提示词【输出格式】的字段表重新输出：只输出一个 JSON 对象 {"changes":[...]}，不要任何其他文字。`,
     });
   }
-  throw new Error(`工具循环超过 ${MAX_TOOL_ROUNDS} 轮仍未产出合法变更清单`);
+  throw new Error(`工具循环超过 ${DIGEST_MAX_ROUNDS} 轮仍未产出合法变更清单`);
 }
 
 /** 执行一次工具调用并返回 JSON 结果；工具报错回喂给模型自行调整，不中断循环。

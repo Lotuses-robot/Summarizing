@@ -129,8 +129,9 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getAllByText("消化中").length).toBeGreaterThan(0);
     expect(screen.getByText("英语课官方群")).toBeInTheDocument();
     expect(screen.getByText("应用 1 项变更：新建事项「作业」")).toBeInTheDocument();
-    // 置顶状态卡：已跑耗时
+    // 置顶状态卡：已跑耗时 + 轮次进度（真实事件驱动，非纯装饰）
     expect(screen.getByText(/已跑 \d+s/)).toBeInTheDocument();
+    expect(screen.getByText(/第 2\/8 轮/)).toBeInTheDocument(); // 详情里 2 条 digest_trace
     // 渐隐轨迹：最新活动全亮，上一轮更淡（越旧越透明——「滚动栏 + 残影」）
     const newest = await screen.findByText("第 2 轮：get_item");
     const older = screen.getByText("第 1 轮：list_recent_items");
@@ -155,7 +156,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(order).toEqual(["应用 1 项变更：新建事项「作业」", "第 1 轮：search_items"]);
   });
 
-  it("完成闪示：消化中 → 已完成（1 秒后回落空闲），走查 2026-10-10", async () => {
+  it("完成闪示：消化中 → 已完成（3 秒后回落空闲），走查 2026-10-10", async () => {
     let phase: "digesting" | "digested" = "digesting";
     // 同一批次的状态跃迁（digesting→digested 才触发闪示）
     const digestingRun = { ...RUNS[1], digestState: "digesting", summary: null };
@@ -177,9 +178,9 @@ describe("PipelineView（流水视图，specs/005）", () => {
     phase = "digested";
     fireEvent.click(screen.getByTitle("刷新")); // 手动轮询到完成态
     expect(await screen.findByText("已完成")).toBeInTheDocument();
-    // 1 秒后闪示消失，回落空闲卡（最近一批已消化）
+    // 3 秒后闪示消失，回落空闲卡（最近一批已消化）
     await waitFor(() => expect(screen.queryByText("已完成")).not.toBeInTheDocument(), {
-      timeout: 3000,
+      timeout: 6000,
     });
     expect(screen.getByText("空闲")).toBeInTheDocument();
   });

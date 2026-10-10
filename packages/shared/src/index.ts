@@ -162,6 +162,9 @@ export type Fragment = z.infer<typeof FragmentSchema>;
 export const DigestState = z.enum(["pending", "digesting", "digested", "failed"]); // 未消化 / 消化中 / 已消化 / 未处理
 export type DigestState = z.infer<typeof DigestState>;
 
+/** 消化工具循环最大轮数（超出即判失败）——server 硬约束与流水视图轮次进度条共用单一出处。 */
+export const DIGEST_MAX_ROUNDS = 8;
+
 /** 来源身份：**弹性字典**（D-84）——core 契约只约束「是对象 + 保留键 sourceLabel（非空）」，
  *  适配器自由扩展（QQ 有群/发信人、邮件有发件地址、网页有站点名）；整体 JSON.stringify 进 agent0 提示词。
  *  保留键 `sourceLabel`（D-88 由 `name` 改名）= 给人看的文本来源，区别于 `groupId` 类 id 字段。

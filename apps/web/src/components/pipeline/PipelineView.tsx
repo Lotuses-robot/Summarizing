@@ -8,7 +8,7 @@ import {
   RefreshCw,
   XCircle,
 } from "lucide-react";
-import type { PipelineRun, PipelineRunDetail } from "@summarizing/shared";
+import { DIGEST_MAX_ROUNDS, type PipelineRun, type PipelineRunDetail } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
 
@@ -173,6 +173,9 @@ function DigestingCard({
   const elapsedSec = Math.max(0, Math.floor((now - new Date(run.receivedAt).getTime()) / 1000));
   // 最近 3 条事件倒序（最新在上，旧的向下渐隐——「滚动栏 + 残影」）
   const recent = events.slice(-3).reverse();
+  // 轮次进度：digest_trace 一条 = 完成一轮（真实事件驱动；上限 = 服务端硬约束）
+  const rounds = events.filter((e) => e.action === "digest_trace").length;
+  const roundPct = Math.min(100, Math.round((rounds / DIGEST_MAX_ROUNDS) * 100));
   return (
     <HeroCard
       shell="border border-amber-200 bg-gradient-to-b from-amber-50/80 to-amber-50/20 dark:border-amber-500/20 dark:from-amber-500/10 dark:to-transparent"
@@ -182,18 +185,20 @@ function DigestingCard({
           <span className="text-xs font-medium text-amber-700/90 dark:text-amber-400/90">
             {run.sourceLabel}
           </span>
-          <span className="ml-auto text-xs tabular-nums text-ink-muted/70">已跑 {elapsedSec}s</span>
+          <span className="ml-auto text-xs tabular-nums text-ink-muted/70">
+            {rounds > 0 && `第 ${rounds}/${DIGEST_MAX_ROUNDS} 轮 · `}已跑 {elapsedSec}s
+          </span>
         </>
       }
     >
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-amber-900 dark:text-amber-200">
+      <p className="mt-4 text-3xl font-semibold tracking-tight text-amber-900 dark:text-amber-200">
         消化中
       </p>
-      {/* 不确定进度条——流动感 */}
+      {/* 轮次进度条：宽度 = 已完成轮数/上限（真实推进，不是纯装饰动画） */}
       <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-amber-200/50 dark:bg-amber-500/10">
         <div
-          className="h-full w-1/3 animate-pulse rounded-full bg-amber-400"
-          style={{ animationDuration: "1.5s" }}
+          className="h-full animate-pulse rounded-full bg-amber-400 transition-[width] duration-700"
+          style={{ width: `${Math.max(5, roundPct)}%`, animationDuration: "2s" }}
         />
       </div>
       {/* 实时轨迹：最新一条最亮，越旧越淡（残影） */}
@@ -219,7 +224,7 @@ function DigestingCard({
   );
 }
 
-/** 完成闪示卡（走查 2026-10-10）：digesting→digested 的那次轮询置顶 1s——绿勾弹出 + 卡片淡入。 */
+/** 完成闪示卡（走查 2026-10-10）：digesting→digested 的那次轮询置顶 3s——绿勾弹出 + 卡片淡入。 */
 function DoneCard({ run }: { run: PipelineRun }) {
   return (
     <HeroCard
@@ -235,13 +240,13 @@ function DoneCard({ run }: { run: PipelineRun }) {
         </>
       }
     >
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-4 flex items-center gap-3">
         <CheckCircle2 size={30} className="pop-in shrink-0 text-emerald-500" />
         <p className="text-3xl font-semibold tracking-tight text-emerald-900 dark:text-emerald-200">
           已完成
         </p>
       </div>
-      <p className="mt-1 truncate text-sm text-emerald-800/90 dark:text-emerald-300/90">
+      <p className="mt-2.5 truncate text-sm text-emerald-800/90 dark:text-emerald-300/90">
         {run.summary ?? "已消化"}
       </p>
     </HeroCard>
@@ -265,11 +270,11 @@ function IdleCard({ latest }: { latest: PipelineRun | undefined }) {
         </>
       }
     >
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-4 flex items-center gap-3">
         {idle.icon}
         <p className="text-3xl font-semibold tracking-tight">{idle.title}</p>
       </div>
-      <p className={cn("mt-1 truncate text-sm", idle.tone)}>{idle.sub}</p>
+      <p className={cn("mt-2.5 truncate text-sm", idle.tone)}>{idle.sub}</p>
     </HeroCard>
   );
 }
@@ -315,7 +320,7 @@ export function PipelineView() {
   const [now, setNow] = useState(() => Date.now());
   // 消化中批次的实时轨迹（runs 列表不含事件详情——单独拉 detail 喂状态卡）
   const [traces, setTraces] = useState<Record<string, PipelineRunDetail["events"]>>({});
-  // 完成闪示（走查 2026-10-10）：digesting→digested 的那次轮询置「已完成」卡 1 秒
+  // 完成闪示（走查 2026-10-10）：digesting→digested 的那次轮询置「已完成」卡 3 秒
   const [flash, setFlash] = useState<PipelineRun | null>(null);
   const prevStates = useRef(new Map<string, PipelineRun["digestState"]>());
   const baselined = useRef(false); // 首轮只建底（历史批次不许闪）
@@ -345,7 +350,7 @@ export function PipelineView() {
         if (justDone) {
           setFlash(justDone);
           if (flashTimer.current !== null) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setFlash(null), 1000);
+          flashTimer.current = setTimeout(() => setFlash(null), 3000);
         }
         // 拉每个消化中批次的轨迹（失败静默——轨迹是锦上添花，不阻塞列表）
         for (const run of r.runs.filter((x) => x.digestState === "digesting")) {
