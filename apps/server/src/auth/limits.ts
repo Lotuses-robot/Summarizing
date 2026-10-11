@@ -15,6 +15,9 @@ const loginFails = new Map<string, number[]>();
 const loginIpHits = new Map<string, number[]>();
 const registerHits = new Map<string, number[]>();
 
+/** 限速表全集（重置的单一清单——新加限速表挂进这里，别靠人肉记忆记「重置要加一行」）。 */
+const LIMIT_TABLES: Array<Map<string, number[]>> = [loginFails, loginIpHits, registerHits];
+
 /** 登录锁定键：用户名 + 来源 IP 的**对**——防「拿别人用户名锁人」（受害者从自己 IP 不受影响）。
  *  用户名按查库同口径先折叠（NFKC+trim+小写）——防大小写变体各享一份锁定预算（评审修复）。 */
 export function loginKey(username: string, ip: string): string {
@@ -59,36 +62,38 @@ export function clearLoginFailures(key: string): void {
   loginFails.delete(key);
 }
 
-/** 登录按 IP 的**总量**限速（评审修复）：防随机用户名连刷——每次 miss 都跑真 scrypt，
- *  不给对键锁定（每用户名独立）留打满 CPU 的口子。超限 true → 路由 429。 */
-export function loginIpRateLimited(ip: string, now = Date.now()): boolean {
-  const stamps = pruneStamps(loginIpHits.get(ip) ?? [], now, LOGIN_IP_WINDOW_MS);
-  if (stamps.length >= LOGIN_IP_MAX) {
-    loginIpHits.set(ip, stamps);
+/** 滑窗判限公共体（simplify 收敛）：达上限返回 true（不记新事件）；否则记一次并返回 false。
+ *  登录对键单列——它带 retryAfterSec 计算与「成功清键」语义，不强行并入。 */
+function hitRateLimited(
+  table: Map<string, number[]>,
+  key: string,
+  now: number,
+  windowMs: number,
+  max: number,
+): boolean {
+  const stamps = pruneStamps(table.get(key) ?? [], now, windowMs);
+  if (stamps.length >= max) {
+    table.set(key, stamps);
     return true;
   }
   stamps.push(now);
-  loginIpHits.set(ip, stamps);
-  pruneAllIfHuge(loginIpHits, now, LOGIN_IP_WINDOW_MS);
+  table.set(key, stamps);
+  pruneAllIfHuge(table, now, windowMs);
   return false;
+}
+
+/** 登录按 IP 的**总量**限速（评审修复）：防随机用户名连刷——每次 miss 都跑真 scrypt，
+ *  不给对键锁定（每用户名独立）留打满 CPU 的口子。超限 true → 路由 429。 */
+export function loginIpRateLimited(ip: string, now = Date.now()): boolean {
+  return hitRateLimited(loginIpHits, ip, now, LOGIN_IP_WINDOW_MS, LOGIN_IP_MAX);
 }
 
 /** 注册端点限速（按来源 IP）：超出返回 true（路由转 429）——防邀请码枚举。 */
 export function registerRateLimited(ip: string, now = Date.now()): boolean {
-  const stamps = pruneStamps(registerHits.get(ip) ?? [], now, REGISTER_WINDOW_MS);
-  if (stamps.length >= REGISTER_MAX) {
-    registerHits.set(ip, stamps);
-    return true;
-  }
-  stamps.push(now);
-  registerHits.set(ip, stamps);
-  pruneAllIfHuge(registerHits, now, REGISTER_WINDOW_MS);
-  return false;
+  return hitRateLimited(registerHits, ip, now, REGISTER_WINDOW_MS, REGISTER_MAX);
 }
 
 /** 测试用：清空全部限速状态（模块态，用例间隔离）。 */
 export function resetLimitsForTest(): void {
-  loginFails.clear();
-  loginIpHits.clear();
-  registerHits.clear();
+  for (const table of LIMIT_TABLES) table.clear();
 }

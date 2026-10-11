@@ -1,11 +1,12 @@
 import { errText, IngestRequestSchema, SettingFieldSchema } from "@summarizing/shared";
+import { withTimeout } from "../shared/timeout";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import { nowLocalWallClock } from "../shared/time";
 import { ingestBatch } from "../application/ingest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { TaggedLlm } from "../shared/llm";
-import { SOURCE_SCHEMA_KEY } from "../routes/sources";
+import { SOURCE_SCHEMA_KEY } from "../storage/repo";
 import type {
   SourceAdapter,
   SourceBatch,
@@ -30,6 +31,9 @@ export interface WebhookRoute {
   /** 以 / 开头（如 "/event"）——实际可达 = `/hook/<账户令牌>/<源名><path>`。 */
   path: string;
   handler: SourceRouteHandler;
+  /** 给卡片文案用的动态段名（如 nc 的 ":group_id"）——**只用于展示**（前端把段名替换成实参值）；
+   *  网关匹配恒走字面 `path`（无参段）。缺席 = 无动态段。 */
+  pathHint?: string;
 }
 
 /** 空间侧依赖（装配一个账户的信源所需的一切；db/llmRef 都是**该空间**的）。 */
@@ -42,13 +46,32 @@ export interface SpaceDeps {
   webhookRoutes: WebhookRoute[];
 }
 
-/** webhook 登记口：把适配器的 post/get/put/delete 收进本空间处理器表（附源名——网关按「源名+方法+路径」分发）。 */
-function makeSourceRouter(routes: WebhookRoute[], source: string): SourceRouter {
-  /** 造某方法的登记函数（源名与收集表在闭包）。 */
+/** webhook 登记口：把适配器的 post/get/put/delete 收进本空间处理器表（附源名——网关按「源名+方法+路径」分发）。
+ *  路径在**登记处**校验形状（纯字面段、以 `/` 开头——types.ts 已记录参数段边界）：违规走 `reportError`
+ *  响亮落地（与设置声明校验同姿势）——静默收下一个永不匹配的路径 = 线上「这个源收不到消息」而无任何日志。
+ *  `opts.pathHint` 仅供卡片文案展示（网关匹配恒走字面 `path`）。 */
+function makeSourceRouter(
+  routes: WebhookRoute[],
+  source: string,
+  reportInvalid: (message: string) => void,
+): SourceRouter {
+  /** 合法路径：以 / 起始的纯字面段（字母/数字/._-；无参数段/通配）。 */
+  const LEGAL_PATH = /^\/[A-Za-z0-9._-]+$/;
+  /** 造某方法的登记函数（源名/收集表/报错口在闭包）；违规路径不落表、走 reportInvalid 响亮落地。 */
   const record =
     (method: WebhookRoute["method"]) =>
-    (path: string, handler: WebhookRoute["handler"]): void => {
-      routes.push({ source, method, path, handler });
+    (path: string, handler: WebhookRoute["handler"], opts?: { pathHint?: string }): void => {
+      if (!LEGAL_PATH.test(path)) {
+        reportInvalid(`webhook 路径不合法（须为以 / 开头的纯字面段）：${path}`);
+        return;
+      }
+      routes.push({
+        source,
+        method,
+        path,
+        handler,
+        ...(opts?.pathHint === undefined ? {} : { pathHint: opts.pathHint }),
+      });
     };
   return {
     post: record("POST"),
@@ -149,12 +172,20 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
   const tools = makeAgentTools(deps.db);
   const states = deps.sourceStates;
   const stops: Array<() => Promise<void>> = [];
+  /** 实际上岗的（适配器, 状态）对——start 只遍历它（simplify：取代「重查 states + 不可达 undefined 分支」，
+   *  也顺带不再遍历被去重跳过的适配器）。 */
+  const kept: Array<{ adapter: SourceAdapter; state: SourceState }> = [];
   for (const adapter of adapters) {
     if (states.has(adapter.name)) continue; // 防重复（P7）
     const state: SourceState = { state: "ok", lastOkAt: nowLocalWallClock() };
     const cleanups: (() => void | Promise<void>)[] = [];
     const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state);
-    adapter.register(ctx, makeSourceRouter(deps.webhookRoutes, adapter.name));
+    adapter.register(
+      ctx,
+      makeSourceRouter(deps.webhookRoutes, adapter.name, (message) =>
+        ctx.reportError(new Error(message)),
+      ),
+    );
     if (adapter.settings !== undefined) {
       // 声明在**产生处**校验：坏声明启动即响（走「最近出错」通道可见），
       // 不让它静默穿过到 GET 时才被逐条丢弃（altitude 根修；parseSchema 退化为手改库兜底）
@@ -194,27 +225,22 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
       }
     });
     states.set(adapter.name, state);
+    kept.push({ adapter, state });
   }
   return {
     async start(): Promise<void> {
-      for (const adapter of adapters) {
+      for (const { adapter, state } of kept) {
         try {
           await startWithTimeout(adapter, START_TIMEOUT_MS);
           // 只清「因启动过程产生」的错误；无 start 的信源保持 register 期错误（如坏设置声明）可见
           if (adapter.start === undefined) continue;
-          const state = states.get(adapter.name);
-          if (state !== undefined) {
-            state.state = "ok";
-            state.lastError = undefined;
-            state.lastOkAt = nowLocalWallClock();
-          }
+          state.state = "ok";
+          state.lastError = undefined;
+          state.lastOkAt = nowLocalWallClock();
         } catch (err) {
           const reason = errText(err);
-          const state = states.get(adapter.name);
-          if (state !== undefined) {
-            state.state = "error";
-            state.lastError = reason;
-          }
+          state.state = "error";
+          state.lastError = reason;
           process.stderr.write(`[source:${adapter.name}] 启动失败：${reason}\n`);
         }
       }
@@ -228,16 +254,9 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
 /** start() 的隔离超时：抛错与**永不 resolve**（如无超时 connect）同判为失败——
  *  否则一个挂起的 start 会让装配卡死，网关永久缺该源的处理器。 */
 async function startWithTimeout(adapter: SourceAdapter, ms: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      Promise.resolve(adapter.start?.()),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`start 超时(${ms / 1000}s，按失败隔离)`)), ms);
-        timer.unref(); // 进程活着只为等 start——race 结束后它不许拖住退出
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+  await withTimeout(
+    Promise.resolve(adapter.start?.()),
+    ms,
+    `start 超时(${ms / 1000}s，按失败隔离)`,
+  );
 }

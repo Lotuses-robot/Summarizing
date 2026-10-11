@@ -1,7 +1,7 @@
-import { LayoutDashboard, ScrollText, Settings, TriangleAlert } from "lucide-react";
+import { KeyRound, LayoutDashboard, ScrollText, Settings, TriangleAlert } from "lucide-react";
 import { cn } from "../lib/cn";
 
-/** 最左活动栏（05§一）：主视图切换（看板 / 存疑库审核 / 流水，specs/005）+ 设置固定最底。
+/** 最左活动栏（05§一）：主视图切换（看板 / 存疑库审核 / 流水，specs/005）+ 账户与设置固定最底。
  *  对话开关不在这——它管的停靠面板在右边，开关也放右边（用户 2026-09-26 定）。 */
 export function ActivityBar({
   view,
@@ -9,6 +9,7 @@ export function ActivityBar({
   onHome,
   onShowUncertain,
   onShowPipeline,
+  onOpenAccount,
   onOpenSettings,
 }: {
   view: "board" | "uncertain" | "pipeline";
@@ -18,6 +19,8 @@ export function ActivityBar({
   onHome: () => void;
   onShowUncertain: () => void;
   onShowPipeline: () => void;
+  /** 账户弹层（用户名/改密/接入地址/退出——006）。 */
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -58,9 +61,16 @@ export function ActivityBar({
         <ScrollText size={18} />
       </button>
       <button
+        title="账户"
+        onClick={onOpenAccount}
+        className="mt-auto flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+      >
+        <KeyRound size={18} />
+      </button>
+      <button
         title="设置"
         onClick={onOpenSettings}
-        className="mt-auto flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <Settings size={18} />
       </button>

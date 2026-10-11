@@ -16,6 +16,7 @@ import { UncertainReview } from "./components/UncertainReview";
 import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
+import { UserModal } from "./components/UserModal";
 import { cn } from "./lib/cn";
 import { handleEsc, pushEscLayer } from "./lib/escLayer";
 import { loadChatOpen, saveChatOpen } from "./lib/appearance";
@@ -47,6 +48,7 @@ export default function App() {
     () => window.innerWidth >= 1024 && loadChatOpen(),
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false); // 标签栏默认折叠（用户 2026-09-27 定）
   const [filter, setFilter] = useState<BoardFilter>({ query: "", tags: [] });
   const [focus, setFocus] = useState<{ id: string; token: number } | null>(null);
@@ -62,6 +64,7 @@ export default function App() {
     setBoard(null);
     setUncertain([]);
     setSettingsOpen(false);
+    setAccountOpen(false);
   }, []);
 
   // 启动探测：me 200 → 主界面；401（未登录的正常首屏路径）→ 认证壳；
@@ -241,6 +244,7 @@ export default function App() {
           loadUncertain(); // 进页即拉一次（审核期间轮询已暂停——见上）
         }}
         onShowPipeline={() => setView("pipeline")}
+        onOpenAccount={() => setAccountOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
@@ -355,9 +359,10 @@ export default function App() {
         </aside>
       )}
 
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <UserModal
+        open={accountOpen}
+        onClose={() => setAccountOpen(false)}
         me={me}
         onLogout={logout}
         onTokenRotated={(token) =>

@@ -1,27 +1,23 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SourcesSection } from "../components/settings/SourcesSection";
 import { emptyResponse, fetchUrl, jsonResponse } from "./helpers/http";
 import "@testing-library/jest-dom/vitest";
 
-/** 测试令牌（006：SourcesSection 需令牌 prop——接入地址展示/轮换用）。 */
+/** 测试令牌（hookPath 用）。 */
 const TOKEN = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
-const NEW_TOKEN = "deadbeefdeadbeefdeadbeefdeadbeef";
-/** 空操作桩（默认回调）。 */
-const noop = () => {};
 
-/** 渲染信源区（带令牌；onRotated 可注入——轮换用例用）。 */
-function renderSection(onRotated: (t: string) => void = noop) {
-  return render(<SourcesSection sourceToken={TOKEN} onRotated={onRotated} />);
+/** 渲染信源区（006：接入地址/令牌轮换已移入用户卡——本区只列信源）。 */
+function renderSection() {
+  return render(<SourcesSection />);
 }
 
 /** fetch 替身：按 URL/method 分流（列表 / 读值 / 写值）；记录写调用与读值次数。
  *  writeFail = 写操作拒绝（模拟后端故障——失败必须可见）。 */
 function stubApi(
   settings: Record<string, unknown>,
-  opts: { writeFail?: boolean; settingsSchema?: unknown[] } = {},
+  opts: { writeFail?: boolean; settingsSchema?: unknown[]; hookPath?: string | null } = {},
 ): {
   writes: { url: string; method: string; body: unknown }[];
   readCount: () => number;
@@ -32,9 +28,6 @@ function stubApi(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = fetchUrl(input);
-      if (url.includes("/api/auth/source-token/rotate")) {
-        return Promise.resolve(jsonResponse({ sourceToken: NEW_TOKEN }));
-      }
       if (init?.method === "PUT" || init?.method === "DELETE") {
         if (opts.writeFail === true) return Promise.reject(new Error("网络挂了"));
         const body: unknown = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
@@ -57,6 +50,8 @@ function stubApi(
                 },
                 { key: "windowMinutes", type: "number", label: "打包窗长（分钟）", default: 3 },
               ],
+              // 接入路径由后端下发（006；可用 opts.hookPath 覆盖）
+              hookPath: opts.hookPath === undefined ? "/hook/TOKEN/nc/event" : opts.hookPath,
             },
           ]),
         );
@@ -218,34 +213,20 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
     expect(writes[0]?.body).toEqual({});
   });
 
-  it("接入地址含令牌；轮换（确认后）→ 地址换新、旧令牌不再出现；取消则不动", async () => {
-    stubApi({});
-    /** 带状态宿主：onRotated 接回 prop（与 App 行为同构）。 */
-    function Harness() {
-      const [token, setToken] = useState(TOKEN);
-      return <SourcesSection sourceToken={token} onRotated={setToken} />;
-    }
-    render(<Harness />);
-    // dev 形态（vitest = DEV）站点根指向 server 3001（vite 不代理 /hook——评审修复）
-    const oldUrl = `http://localhost:3001/hook/${TOKEN}/nc/event`;
-    const newUrl = `http://localhost:3001/hook/${NEW_TOKEN}/nc/event`;
-    expect(await screen.findByText(oldUrl)).toBeInTheDocument();
+  it("接入地址：由后端下发的 hookPath 拼站点源展示（前端零拼接）；可复制", async () => {
+    stubApi({}, { hookPath: `/hook/${TOKEN}/nc/event` });
+    renderSection();
+    expect(
+      await screen.findByText(`${location.origin}/hook/${TOKEN}/nc/event`),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    expect(await screen.findByText("已复制")).toBeInTheDocument();
+  });
 
-    // 取消：地址不动
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => false),
-    );
-    fireEvent.click(screen.getByText("重新生成令牌"));
-    expect(screen.getByText(oldUrl)).toBeInTheDocument();
-
-    // 确认：轮换 → 新地址（旧令牌消失）
-    vi.stubGlobal(
-      "confirm",
-      vi.fn(() => true),
-    );
-    fireEvent.click(screen.getByText("重新生成令牌"));
-    expect(await screen.findByText(newUrl)).toBeInTheDocument();
-    expect(screen.queryByText(oldUrl)).not.toBeInTheDocument();
+  it("无登记路径的源（hookPath=null）不显示接入地址行", async () => {
+    stubApi({}, { hookPath: null });
+    renderSection();
+    await screen.findByText("nc");
+    expect(screen.queryByText("接入地址")).not.toBeInTheDocument();
   });
 });

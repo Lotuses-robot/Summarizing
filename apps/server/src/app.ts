@@ -4,6 +4,7 @@ import cookie from "@fastify/cookie";
 import { z } from "zod";
 import { ChatRequestSchema, errText, IngestRequestSchema } from "@summarizing/shared";
 import { getSessionSecret, type RegistryDb } from "./storage/registry";
+import { withTimeout } from "./shared/timeout";
 import * as repo from "./storage/repo";
 import { retryRawInput } from "./agent0/digest";
 import { ingestBatch } from "./application/ingest";
@@ -190,27 +191,17 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
  *  close 失败只留痕；挂起（某信源 stop/清理项永不 settle）按 SHUTDOWN_TIMEOUT_MS 判超时。
  *  退出保证由 `exitAfter` 兜底。index.ts 的 SIGINT 处理 = `exitAfter(gracefulClose(app))`。 */
 export async function gracefulClose(app: FastifyInstance): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
+    await withTimeout(
       // close 中途失败时 Fastify 不再跑剩余 onClose hook——留痕可见，但仍要退出（见 exitAfter）
-      app
-        .close()
-        .catch((err) =>
-          process.stderr.write(`[shutdown] app.close 失败（尽力退出）：${errText(err)}\n`),
-        ),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`关停超时(${SHUTDOWN_TIMEOUT_MS / 1000}s，保底退出)`)),
-          SHUTDOWN_TIMEOUT_MS,
-        );
-        timer.unref(); // 进程活着只为等收尾——race 结束后它不许拖住退出
+      app.close().catch((err) => {
+        process.stderr.write(`[shutdown] app.close 失败（尽力退出）：${errText(err)}\n`);
       }),
-    ]);
+      SHUTDOWN_TIMEOUT_MS,
+      `关停超时(${SHUTDOWN_TIMEOUT_MS / 1000}s，保底退出)`,
+    );
   } catch (err) {
     process.stderr.write(`[shutdown] ${errText(err)}\n`);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

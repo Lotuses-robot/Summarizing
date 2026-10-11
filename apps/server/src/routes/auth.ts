@@ -155,7 +155,10 @@ export function registerAuthSessionRoutes(app: FastifyInstance, deps: AuthSessio
 
   // 轮换接入令牌（FR-008）：旧值即刻作废——全部旧接入地址 401
   app.post("/api/auth/source-token/rotate", async (req, reply) => {
-    const token = rotateSourceToken(deps.registry, req.space.uid);
+    const account = getAccountByUid(deps.registry, req.space.uid);
+    if (account === undefined) return reply.code(401).send({ error: "未登录" });
+    const token = rotateSourceToken(deps.registry, account.uid);
+    req.space.sourceToken = token; // 空间内同步（GET /api/sources 的 hookPath 现取此值）
     return reply.send(RotateTokenResponseSchema.parse({ sourceToken: token }));
   });
 }

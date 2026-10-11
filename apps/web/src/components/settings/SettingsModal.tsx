@@ -6,11 +6,10 @@ import {
   Loader2,
   Palette as PaletteIcon,
   Rss,
-  UserRound,
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { AiSettings, AiSettingsView, AiTestResult, MeView } from "@summarizing/shared";
+import type { AiSettings, AiSettingsView, AiTestResult } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
@@ -53,37 +52,43 @@ const DENSITY_NAMES: Record<Density, string> = { comfortable: "舒适", compact:
 
 // 左侧分类栏（用户 2026-09-27 定：左导航 + 右侧内容，点击定位）。
 // 右侧内容 = 分组卡（macOS 系统设置式，用户 2026-09-30 走查定：一行一设置、控件右对齐、**改完即生效**）。
-type SectionId = "account" | "appearance" | "ai" | "data" | "sources";
+type SectionId = "appearance" | "ai" | "data" | "sources";
 type SectionMeta = { id: SectionId; label: string; icon: LucideIcon };
 const SECTIONS: SectionMeta[] = [
-  { id: "account", label: "账户", icon: UserRound },
   { id: "appearance", label: "外观", icon: PaletteIcon },
   { id: "ai", label: "AI", icon: Bot },
   { id: "data", label: "数据", icon: Database },
   { id: "sources", label: "信源", icon: Rss },
 ];
 
+/** 滚动联动判定（纯函数，可测）：给各分区「顶边相对容器顶」的距离，取「已越过容器顶
+ *  （top ≤ 60，留一点容差）且最靠上」的一段为当前分区；若都还在下方，取最靠上的那段。
+ *  ⚠️ 曾用 rootMargin 把判定区压到顶部 30%：滚到底时末段落进被裁区域 → 高亮退回上一段
+ *  （用户走查 2026-10-03 的 bug）。这里不裁根，用全量站距判定。 */
+export function pickActiveSection(tops: Map<string, number>): SectionId | null {
+  let past: SectionId | null = null;
+  let pastY = Number.NEGATIVE_INFINITY;
+  let nearest: SectionId | null = null;
+  let nearestY = Number.POSITIVE_INFINITY;
+  for (const [id, top] of tops) {
+    if (top <= 60 && top > pastY) {
+      pastY = top;
+      past = id as SectionId;
+    }
+    if (top < nearestY) {
+      nearestY = top;
+      nearest = id as SectionId;
+    }
+  }
+  return past ?? nearest;
+}
+
 /** 设置弹层（05§五 / D-81）：居中，Esc/点外关。外观进 localStorage、AI 进 app_settings、
  *  数据区只读+备份下载、信源区真界面。系统策略不在这里——没有旋钮。
  *  交互总则（走查修订③）：**改完即生效**——下拉/色板/开关点一下即存，输入框失焦即存，
  *  卡尾状态行一闪「已保存」；失败常驻红字（不静默）。整页无「保存」按钮。
  *  ⚠️ 关闭前先 blur（评审 H1）：Esc 不产生焦点转移，「失焦即存」必须在卸载前落一次。 */
-export function SettingsModal({
-  open,
-  onClose,
-  me,
-  onLogout,
-  onTokenRotated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  /** 当前账户（用户名/接入令牌展示用）。 */
-  me: MeView;
-  /** 退出登录（App 清态回认证壳）。 */
-  onLogout: () => void;
-  /** 接入令牌轮换成功回调（App 同步 me.sourceToken）。 */
-  onTokenRotated: (token: string) => void;
-}) {
+export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearance);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
@@ -92,10 +97,46 @@ export function SettingsModal({
   const { statuses, flash, sticky } = useStatus();
   const [testResult, setTestResult] = useState<AiTestResult | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>("appearance");
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   });
+
+  // 滚动联动左栏高亮（用户走查 2026-10-03：此前只在点击时设置，滚动不更新）：
+  // IntersectionObserver 监听各分区，取「视口内最靠上」的一项为当前分区。
+  useEffect(() => {
+    if (!open) return;
+    const root = contentRef.current;
+    if (root === null) return;
+    // 判定：记录每个分区的「顶边相对容器顶部」的距离，每次回调取"已进入容器顶（top ≤ 阈值）
+    // 且最靠上"的一段——滚到底时最后一段进入，高亮才会跟着走。
+    // ⚠️ 曾用 rootMargin 把判定区压到顶部 30%：滚到底时「数据/信源」落进被裁掉的区域 →
+    // isIntersecting=false 被摘除 → 高亮退回上一段（用户走查 2026-10-03 的 bug）。
+    const tops = new Map<string, number>();
+    /** 用当前站距更新左栏高亮（判定权在 pickActiveSection 纯函数）。 */
+    const apply = () => {
+      const id = pickActiveSection(tops);
+      if (id !== null) setActiveSection(id);
+    };
+    /** 量一次各分区顶边相对容器顶的距离，再刷新高亮（IntersectionObserver 只是"何时量"的触发器）。 */
+    const read = () => {
+      const rootTop = root.getBoundingClientRect().top;
+      for (const s of SECTIONS) {
+        const el = document.getElementById(`settings-${s.id}`);
+        if (el !== null) tops.set(s.id, el.getBoundingClientRect().top - rootTop);
+      }
+      apply();
+    };
+    // 观测只是"何时重算"的触发器（任何段进出视口都重算一次全量站距，判定权在 read 里）
+    const observerWithRead = new IntersectionObserver(() => read(), { root, threshold: 0 });
+    for (const s of SECTIONS) {
+      const el = document.getElementById(`settings-${s.id}`);
+      if (el !== null) observerWithRead.observe(el);
+    }
+    read();
+    return () => observerWithRead.disconnect();
+  }, [open]);
 
   /** 关闭（三条路径共用）：先 blur 触发「失焦即存」的提交，再关——Esc 否则会静默丢未失焦的输入。 */
   const closeWithFlush = useCallback(() => {
@@ -208,7 +249,7 @@ export function SettingsModal({
   return (
     <div className="fixed inset-0 z-50 bg-black/40" onClick={closeWithFlush}>
       <div
-        className="mx-auto mt-[7vh] flex h-[min(620px,84vh)] w-[min(860px,94vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
+        className="mx-auto mt-[7vh] flex h-[min(640px,84vh)] w-[min(860px,94vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <nav className="flex w-36 shrink-0 flex-col border-r border-line bg-canvas p-3">
@@ -233,9 +274,12 @@ export function SettingsModal({
           </button>
         </nav>
 
-        <div className="flex-1 space-y-7 overflow-y-auto px-6 py-5">
-          <AccountCard me={me} onLogout={onLogout} />
-
+        <div
+          ref={contentRef}
+          // pb 大余量：让最后一张卡（信源）也能滚到接近顶部——否则「数据/信源」锚点滚不到位、
+          // 左栏高亮联动错乱（用户走查 2026-10-03）。min-h-0 保 flex 子项可滚。
+          className="min-h-0 min-w-0 flex-1 space-y-7 overflow-y-auto px-6 pt-5 pb-[calc(2rem+8vh)]"
+        >
           <Card
             id="settings-appearance"
             icon={PaletteIcon}
@@ -354,15 +398,21 @@ export function SettingsModal({
                     )}
                   </div>
                 </Row>
-                {/* 状态槽定高常驻（评审 H：条件渲染会 33px 跳版）——测试结果两行当 children 塞入 */}
-                <StatusSlot statuses={statuses}>
-                  {testResult !== null && testResult.ok === true && (
-                    <p className="text-accent">通（{testResult.latencyMs ?? "?"} ms）</p>
-                  )}
-                  {testResult !== null && testResult.ok === false && (
-                    <p className="text-danger">不通：{testResult.error ?? "未知原因"}</p>
-                  )}
-                </StatusSlot>
+                {/* 状态槽：有测试结果/保存反馈才出现（无则不渲染——用户走查 2026-10-03 修空行）。
+                    children 仅在真有 testResult 时给（`{cond && …}` 会传 false，不算内容）。 */}
+                <StatusSlot
+                  statuses={statuses}
+                  {...(testResult === null
+                    ? {}
+                    : {
+                        children:
+                          testResult.ok === true ? (
+                            <p className="text-accent">通（{testResult.latencyMs ?? "?"} ms）</p>
+                          ) : (
+                            <p className="text-danger">不通：{testResult.error ?? "未知原因"}</p>
+                          ),
+                      })}
+                />
               </>
             )}
           </Card>
@@ -391,7 +441,7 @@ export function SettingsModal({
             bare
             footnote="对话输入始终可用——把信息发给前台即录入。"
           >
-            <SourcesSection sourceToken={me.sourceToken} onRotated={onTokenRotated} />
+            <SourcesSection />
           </Card>
         </div>
       </div>
@@ -406,68 +456,4 @@ function toBody(form: { baseUrl: string; model: string; apiKey: string }): AiSet
     model: form.model.trim(),
     ...(form.apiKey !== "" ? { apiKey: form.apiKey } : {}),
   };
-}
-
-/** 账户卡（006）：用户名展示 + 修改密码（显式按钮——这是「操作」不是「偏好」，不进即存管道）+ 退出登录。 */
-function AccountCard({ me, onLogout }: { me: MeView; onLogout: () => void }) {
-  const [oldPassword, setOldPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const { statuses, flash, sticky } = useStatus();
-
-  /** 提交改密：成功清输入并提示（其余端已下线；本端 cookie 由服务端续签）。 */
-  const submit = () => {
-    if (busy) return;
-    setBusy(true);
-    api
-      .changePassword(oldPassword, newPassword)
-      .then(() => {
-        setOldPassword("");
-        setNewPassword("");
-        flash("pwd", "密码已修改（其他设备已下线）");
-      })
-      .catch((err: unknown) => sticky("pwd", `修改失败：${errText(err)}`))
-      .finally(() => setBusy(false));
-  };
-
-  return (
-    <Card id="settings-account" icon={UserRound} title="账户" desc="登录与安全">
-      <Row label="用户名">
-        <span className="text-sm">{me.username}</span>
-      </Row>
-      <Row label="修改密码" description="修改后其他设备自动下线">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className="input w-[10rem]"
-            type="password"
-            placeholder="原密码"
-            autoComplete="current-password"
-            value={oldPassword}
-            onChange={(e) => setOldPassword(e.target.value)}
-          />
-          <input
-            className="input w-[10rem]"
-            type="password"
-            placeholder="新密码（≥8）"
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-          <button
-            className="btn"
-            disabled={busy || oldPassword === "" || newPassword === ""}
-            onClick={submit}
-          >
-            {busy ? "修改中…" : "修改"}
-          </button>
-        </div>
-      </Row>
-      <Row label="退出登录" description="仅清除本设备会话">
-        <button className="btn" onClick={onLogout}>
-          退出登录
-        </button>
-      </Row>
-      <StatusSlot statuses={statuses} />
-    </Card>
-  );
 }

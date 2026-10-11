@@ -94,24 +94,26 @@ export interface SessionAuthDeps {
  *  失败一律 401「未登录」（**细分只进日志**：签名坏/uid 不存在=warn、停用=info；见 contracts/http.md 失败矩阵）。 */
 export function makeSessionAuth(deps: SessionAuthDeps) {
   return async (req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | void> => {
+    /** 六态统一拒绝（`deny` 单出处——话术只有一份，simplify 收敛）。 */
+    const deny = (): FastifyReply => reply.code(401).send({ error: "未登录" });
     const raw = req.cookies[SESSION_COOKIE];
-    if (raw === undefined) return reply.code(401).send({ error: "未登录" });
+    if (raw === undefined) return deny();
     const payload = parseSession(raw, deps.secret);
     if (payload === null) {
       req.log.warn("会话 cookie 签名/格式非法（可能被篡改）");
-      return reply.code(401).send({ error: "未登录" });
+      return deny();
     }
-    if (payload.exp <= Date.now()) return reply.code(401).send({ error: "未登录" });
+    if (payload.exp <= Date.now()) return deny();
     const account = getAccountByUid(deps.registry, payload.uid);
     if (account === undefined) {
       req.log.warn(`会话指向不存在的账户 uid=${payload.uid}`);
-      return reply.code(401).send({ error: "未登录" });
+      return deny();
     }
     if (account.status !== "active") {
       req.log.info(`停用账户的会话被拒 uid=${payload.uid}`);
-      return reply.code(401).send({ error: "未登录" });
+      return deny();
     }
-    if (account.tokenVersion !== payload.tv) return reply.code(401).send({ error: "未登录" });
+    if (account.tokenVersion !== payload.tv) return deny();
     // 滑动续签：剩余不足半程时随本次响应重发（登录态不断线）
     if (payload.exp - Date.now() < RENEW_BELOW_MS) {
       setSessionCookie(reply, account.uid, account.tokenVersion, deps.secret);

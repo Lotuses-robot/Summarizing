@@ -7,7 +7,7 @@ import {
   type AccountRow,
   type RegistryDb,
 } from "./storage/registry";
-import { readStoredAi } from "./routes/settings";
+import { readStoredAi } from "./storage/repo";
 import {
   envFromAiSettings,
   makeOpenAiLlm,
@@ -17,6 +17,7 @@ import {
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { sweepOrphanPending } from "./agent0/digest";
 import { errText } from "@summarizing/shared";
+import { withTimeout } from "./shared/timeout";
 import { registerSources, type WebhookRoute } from "./sources/host";
 import { allSourceAdapters } from "./sources/registry";
 import type { SourceAdapter, SourceState } from "./sources/types";
@@ -28,6 +29,8 @@ import type { SourceAdapter, SourceState } from "./sources/types";
 /** 一个账户的运行空间。 */
 export interface Space {
   uid: string;
+  /** 本账户 webhook 接入令牌（网关定向与接入地址拼装用——GET /api/sources 的 hookPath 现填）。 */
+  sourceToken: string;
   db: Db;
   /** 本账户的 LLM 引用（由本库设置构建；设置路由热切换它）。 */
   llmRef: { current: TaggedLlm };
@@ -47,12 +50,14 @@ declare module "fastify" {
 }
 
 /** 本库 AI 客户端：设置覆盖优先，回退 .env；两者都缺 → **未配置占位**（构造不抛——服务器 .env
- *  留空是部署常态，装配期抛会把整站锁死；用到时明确报未配置，FR-009。评审修复）。 */
+ *  留空是部署常态，装配期抛会把整站锁死；用到时明确报未配置，FR-009。评审修复）。
+ *  构造失败的真因写 stderr（simplify：无声吞错会让「尚未配置」这句提示可能不实——留痕可见）。 */
 function buildLlm(db: Db): TaggedLlm {
   const stored = readStoredAi(db);
   try {
     return stored !== null ? makeOpenAiLlm(envFromAiSettings(stored)) : makeOpenAiLlm();
-  } catch {
+  } catch (err) {
+    process.stderr.write(`[space] AI 客户端构造失败，按未配置处理：${errText(err)}\n`);
     return makeUnconfiguredLlm();
   }
 }
@@ -80,6 +85,7 @@ async function assembleSpace(
 
     return {
       uid: account.uid,
+      sourceToken: account.sourceToken,
       db,
       llmRef,
       tools: makeAgentTools(db),
@@ -155,14 +161,18 @@ export function makeSpaceHub(args: {
       }
     },
     async closeAll(): Promise<void> {
-      for (const space of spaces.values()) {
-        try {
-          await space.stop();
-        } catch (err) {
-          process.stderr.write(`[space] ${space.uid} 关停失败（继续）：${errText(err)}\n`);
-        }
-      }
+      // 并行关停（simplify）：串行时一个挂起的 stop 会吃掉整批的 10s 预算、其余空间永久不清理
+      const all = [...spaces.values()];
       spaces.clear();
+      await Promise.allSettled(
+        all.map(async (space) => {
+          try {
+            await space.stop();
+          } catch (err) {
+            process.stderr.write(`[space] ${space.uid} 关停失败（继续）：${errText(err)}\n`);
+          }
+        }),
+      );
     },
   };
 }
@@ -170,18 +180,9 @@ export function makeSpaceHub(args: {
 /** 关停全部空间并套超时兜底：挂起按 ms 放弃等待（与 app 的 gracefulClose 对称——任何一侧挂起
  *  都不许拖住 Ctrl-C）。永不 reject：失败/超时只留痕。index.ts 的 SIGINT 处理用它。 */
 export async function closeSpacesWithTimeout(hub: SpaceHub, ms: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
-      hub.closeAll(),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`空间关停超时(${ms / 1000}s，保底退出)`)), ms);
-        timer.unref(); // 进程活着只为等收尾——race 结束后它不许拖住退出
-      }),
-    ]);
+    await withTimeout(hub.closeAll(), ms, `空间关停超时(${ms / 1000}s，保底退出)`);
   } catch (err) {
     process.stderr.write(`[shutdown] ${errText(err)}\n`);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
   }
 }

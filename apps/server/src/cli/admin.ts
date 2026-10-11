@@ -1,6 +1,6 @@
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { UsernameSchema } from "@summarizing/shared";
+import { InviteCodeSchema, PasswordSchema, UsernameSchema } from "@summarizing/shared";
 import {
   createAccount,
   createInvite,
@@ -53,12 +53,15 @@ function mustFind(db: RegistryDb, usernameRaw: string) {
   return account;
 }
 
-/** 交互读两次密码并核对（≥8 字符；不一致/过短**重问**，连续 3 轮失败才放弃——contracts/cli.md）。 */
+/** 交互读两次密码并核对：规则与文案复用 **PasswordSchema**（shared 单一出处——曾手写 length<8，
+ *  且线下建号可绕开 API 的 200 上限）；不合规/不一致**重问**，连续 3 轮失败才放弃。 */
 async function askPasswordTwice(io: AdminIo): Promise<string> {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const first = await io.prompt("密码（≥8 字符，不回显）：", { secret: true });
-    if (first.length < 8) {
-      io.log("密码至少 8 个字符，请重试");
+    const parsed = PasswordSchema.safeParse(first);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      io.log(`${issue ? issue.message : "密码不合规"}，请重试`);
       continue;
     }
     const second = await io.prompt("再输一次：", { secret: true });
@@ -66,7 +69,7 @@ async function askPasswordTwice(io: AdminIo): Promise<string> {
       io.log("两次输入不一致，请重试");
       continue;
     }
-    return first;
+    return parsed.data;
   }
   throw new Error("密码输入连续 3 次失败，已取消");
 }
@@ -153,9 +156,10 @@ export async function runAdmin(argv: string[], deps: AdminDeps): Promise<void> {
       }
       case "invite:revoke": {
         if (arg === undefined) throw new Error("用法：invite:revoke <code>");
-        const code = arg.toUpperCase().trim();
-        if (!revokeInvite(db, code)) throw new Error("作废失败：码不存在或已被使用");
-        io.log(`邀请码 ${code} 已作废`);
+        const parsed = InviteCodeSchema.safeParse(arg); // 归一规则住 schema（shared 单一出处）
+        if (!parsed.success) throw new Error("邀请码格式不正确");
+        if (!revokeInvite(db, parsed.data)) throw new Error("作废失败：码不存在或已被使用");
+        io.log(`邀请码 ${parsed.data} 已作废`);
         return;
       }
       default:

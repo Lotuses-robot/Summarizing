@@ -124,12 +124,10 @@ export function listAccounts(db: RegistryDb): AccountRow[] {
   return db.select().from(accounts).orderBy(accounts.createdAt).all();
 }
 
-/** 建一个账户（uid 与令牌在此生成）；重名由 UNIQUE 约束响亮拒绝（调用方转 409）。 */
-export function createAccount(
-  db: RegistryDb,
-  args: { username: string; passwordHash: string },
-): AccountRow {
-  const row: AccountRow = {
+/** 账户行装配（建号两条路径——直接建号 / 核销邀请码事务内——共享同一份字段真相，
+ *  加列/改默认值只动这一处；simplify 去重）。 */
+function buildAccountRow(args: { username: string; passwordHash: string }): AccountRow {
+  return {
     uid: newUid(),
     username: args.username,
     passwordHash: args.passwordHash,
@@ -138,6 +136,14 @@ export function createAccount(
     sourceToken: newSourceToken(),
     createdAt: nowLocalWallClock(),
   };
+}
+
+/** 建一个账户（uid 与令牌在此生成）；重名由 UNIQUE 约束响亮拒绝（调用方转 409）。 */
+export function createAccount(
+  db: RegistryDb,
+  args: { username: string; passwordHash: string },
+): AccountRow {
+  const row = buildAccountRow(args);
   db.insert(accounts).values(row).run();
   return row;
 }
@@ -212,7 +218,8 @@ export function redeemInviteAndCreateAccount(
       if (redeemed.changes !== 1) {
         return { ok: false as const, reason: "code" as const };
       }
-      const account = createAccountInTx(tx, args);
+      const account = buildAccountRow(args);
+      tx.insert(accounts).values(account).run();
       tx.update(invites).set({ usedBy: account.uid }).where(eq(invites.code, args.code)).run();
       return { ok: true as const, account };
     });
@@ -220,24 +227,6 @@ export function redeemInviteAndCreateAccount(
     if (isUniqueViolation(err)) return { ok: false, reason: "username" };
     throw err;
   }
-}
-
-/** 事务内建账户（与 createAccount 同形；tx 无 .transaction 但读写 API 相同）。 */
-function createAccountInTx(
-  tx: Parameters<Parameters<RegistryDb["transaction"]>[0]>[0],
-  args: { username: string; passwordHash: string },
-): AccountRow {
-  const row: AccountRow = {
-    uid: newUid(),
-    username: args.username,
-    passwordHash: args.passwordHash,
-    status: "active",
-    tokenVersion: 1,
-    sourceToken: newSourceToken(),
-    createdAt: nowLocalWallClock(),
-  };
-  tx.insert(accounts).values(row).run();
-  return row;
 }
 
 /** better-sqlite3 的唯一约束冲突判定（不 import 其错误类型——按 code 字符串兜住；`in` 窄化免断言）。 */

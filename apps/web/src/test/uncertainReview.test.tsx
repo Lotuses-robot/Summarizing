@@ -150,6 +150,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onHome={() => {}}
         onShowUncertain={() => {}}
         onShowPipeline={() => {}}
+        onOpenAccount={() => {}}
         onOpenSettings={() => {}}
       />,
     );
@@ -161,6 +162,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onHome={() => {}}
         onShowUncertain={() => {}}
         onShowPipeline={() => {}}
+        onOpenAccount={() => {}}
         onOpenSettings={() => {}}
       />,
     );
@@ -179,6 +181,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onHome={onHome}
         onShowUncertain={onShowUncertain}
         onShowPipeline={onShowPipeline}
+        onOpenAccount={() => {}}
         onOpenSettings={onOpenSettings}
       />,
     );

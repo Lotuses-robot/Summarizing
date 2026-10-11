@@ -62,10 +62,10 @@ export type SourceRouteHandler = (req: SourceRouteRequest, reply: FastifyReply) 
  *  收窄理由：①Fastify listen 后不能再注册路由 → 运行中新账户必须走网关；②信源不得挂全局路由
  *  （多用户下=鉴权旁路，直接排除）。拉型源（SSE 等出站客户端）不用它——走 `start()`。 */
 export interface SourceRouter {
-  post(path: string, handler: SourceRouteHandler): void;
-  get(path: string, handler: SourceRouteHandler): void;
-  put(path: string, handler: SourceRouteHandler): void;
-  delete(path: string, handler: SourceRouteHandler): void;
+  post(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
+  get(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
+  put(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
+  delete(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
 }
 
 /** 信源适配器：一个源一个模块，注册表加一个**工厂**（每空间各造一份实例——私有态天然隔离）。 */

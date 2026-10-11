@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
+  AiSettingsSchema,
   EvidenceSourceSchema,
   FragmentSchema,
   PipelineEventSchema,
@@ -13,6 +14,7 @@ import {
   UncertainInputSchema,
   normalizeSourceIdentity,
   sourceLabelOf,
+  type AiSettings,
   type EvidenceSource,
   type Fragment,
   type Item,
@@ -27,6 +29,28 @@ import {
 import { nowLocalWallClock } from "../shared/time";
 import type { DbOrTx } from "./db";
 import * as s from "./schema";
+
+/** 信源声明的设置 schema 在设置 KV 里的保留键（D-88 T3）：host 写、routes 读并过滤——
+ *  居家真相在 storage 层（simplify 下沉：core 装配不再反向 import 路由模块）。 */
+export const SOURCE_SCHEMA_KEY = "__schema__";
+
+/** 存量 AI 设置在 app_settings 的键（设置路由写、空间装配读——同住 storage 单一出处）。 */
+export const AI_SETTINGS_KEY = "ai";
+
+/** 读存量 AI 设置（app_settings 的 ai 行）；缺失、坏 JSON、形状不符都视为无覆盖（回 .env，不崩不静默崩溃）。
+ *  空间装配（spaces）与设置路由共用——解析逻辑唯一出处。 */
+export function readStoredAi(db: DbOrTx): AiSettings | null {
+  const raw = getAppSetting(db, AI_SETTINGS_KEY);
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    const parsed = AiSettingsSchema.safeParse(value);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    process.stderr.write("[settings] app_settings 的 ai 行不是合法 JSON，忽略并回退 .env\n");
+    return null;
+  }
+}
 
 // repo 层：唯一允许碰存储的地方（01§8.3 一份数据一个所有者）。
 // 读出统一过 shared 的 zod parse——表结构与类型漂移时在这里爆，而不是静默错下去。

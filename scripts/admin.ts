@@ -138,11 +138,10 @@ function makeTerminalIo(): AdminIo {
 async function main(): Promise<void> {
   const root = findRoot();
   dotenv.config({ path: path.join(root, ".env"), quiet: true });
-  const baseUrl = process.env.BASE_URL;
   await runAdmin(process.argv.slice(2), {
     dataRoot: path.join(root, "data"),
     io: makeTerminalIo(),
-    ...(baseUrl === undefined || baseUrl === "" ? {} : { baseUrl }),
+    baseUrl: process.env.BASE_URL, // undefined/空串由内核按「未设置」处理（判定单一出处）
   });
 }
 

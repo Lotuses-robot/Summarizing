@@ -586,14 +586,17 @@ export const SettingFieldSchema = z.discriminatedUnion("type", [
 ]);
 export type SettingField = z.infer<typeof SettingFieldSchema>;
 
-/** GET /api/sources 的一项：信源名 + 运行状态（含最近错误）+ 设置 schema。
- *  state 由宿主维护（reportError/startSources 写）——前端据此显示「最近出错」。 */
+/** GET /api/sources 的一项：信源名 + 运行状态（含最近错误）+ 设置 schema + 接入路径。
+ *  state 由宿主维护（reportError/startSources 写）——前端据此显示「最近出错」。
+ *  hookPath：本源的完整 webhook 接入地址（已含账户令牌；无登记路径的源为 null）——**由后端算好，
+ *  前端零拼接**（信源的 URL 形状是源自己的知识，加新源前端不改；006 用户走查定）。 */
 export const SourceSummarySchema = z.object({
   name: z.string(),
   state: z.enum(["ok", "error"]),
   lastError: z.string().optional(),
   lastOkAt: z.string().optional(),
   settings: z.array(SettingFieldSchema),
+  hookPath: z.string().nullable(),
 });
 export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 

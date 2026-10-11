@@ -21,26 +21,33 @@ import { FakeLlm } from "./fakeLlm";
 // 断言走真实认证链（受保护作用域 preHandler 逐请求验签+读账户），不设测试后门（宪法 V）。
 // 数据全落 mkdtemp 临时目录（每个实例自成一套 system.db + users/）。
 
-const createdDirs: string[] = [];
-const closers: Array<() => Promise<void>> = [];
+/** 全部测试口令（各账户共用）。 */
+const TEST_PASSWORD = "test-password-123";
 
-/** 关闭本文件已建的全部测试实例：app.close + 空间 closeAll + **显式关 SQLite 句柄**
- *  （Windows 禁止删除被打开的文件——句柄不关，临时目录清理必挂 EPERM）。幂等（closers 一次性）。 */
-async function closeAllTestAccounts(): Promise<void> {
-  for (const close of closers.splice(0)) {
+let testPasswordHash: Promise<string> | null = null;
+
+/** 取（惰性生成并缓存）测试口令哈希——scrypt ~50ms/次 × ~90 个建账户点纯属浪费（simplify/效率）；
+ *  账户间共享盐对测试语义无影响（无任何用例断言盐）。 */
+function getTestPasswordHash(): Promise<string> {
+  testPasswordHash ??= hashPassword(TEST_PASSWORD);
+  return testPasswordHash;
+}
+
+/** 每实例一条登记：临时目录 + 关停函数（单一清单——取代两份并列登记，免「两处 push 成对」）。 */
+const realms: Array<{ dir: string; close: () => Promise<void> }> = [];
+
+/** 清理本文件已建的全部测试实例：**先关全部句柄、再删全部目录**（各逐项容错——一个失败不拖累其余）。
+ *  Windows 上句柄不关则删目录必挂 EPERM（SQLite 文件被打开）。建议各测试文件挂 afterEach。 */
+export async function cleanupAllTestAccounts(): Promise<void> {
+  const all = realms.splice(0);
+  for (const { close } of all) {
     try {
       await close();
     } catch {
-      // 尽力而为：清理阶段不因单个关停失败中断（残留可见于 %TEMP%）
+      // 尽力而为：单个关停失败不中断（残留可见于 %TEMP%）
     }
   }
-}
-
-/** 清理本文件已建的全部测试实例：**先关句柄、再删临时目录**（逐目录容错——一个失败不拖累其余）。
- *  建议各测试文件挂 `afterEach(cleanupAllTestAccounts)`（async 函数作 hook 会被 vitest 等待）。 */
-export async function cleanupAllTestAccounts(): Promise<void> {
-  await closeAllTestAccounts();
-  for (const dir of createdDirs.splice(0)) {
+  for (const { dir } of all) {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     } catch (err) {
@@ -84,38 +91,34 @@ export interface TestAccount {
 export async function makeTestRealm(
   args: { adapters?: Array<() => SourceAdapter> } = {},
 ): Promise<TestRealm> {
-  // 空间装配要建真 llm 客户端（缺 env 直接抛）——给占位值；随即被 FakeLlm 换掉，不发网络请求
-  process.env.OPENAI_BASE_URL ??= "http://127.0.0.1:9/v1";
-  process.env.OPENAI_MODEL ??= "test-model";
-
+  // 空间装配缺 env 时走「未配置占位」客户端（buildLlm，不抛）——无需环境修补；
+  // 装配后由 addAccount 统一换成 FakeLlm，全程不发网络请求。
   const dir = mkdtempSync(path.join(os.tmpdir(), "summarizing-test-"));
-  createdDirs.push(dir);
   const registry = makeRegistryDb(path.join(dir, "system.db"));
-  const hub = makeSpaceHub({
-    registry,
-    dataRoot: dir,
-    ...(args.adapters === undefined ? {} : { adapters: args.adapters }),
-  });
+  const hub = makeSpaceHub({ registry, dataRoot: dir, adapters: args.adapters });
   const app = makeApp({ registry, hub });
   const secret = getSessionSecret(registry);
   const spaces: Space[] = [];
 
-  closers.push(async () => {
-    await app.close();
-    await hub.closeAll();
-    // 显式关 SQLite 句柄（Windows：删被打开的文件 = EPERM；重复 close 由 try 兜住）
-    for (const s of spaces) {
-      try {
-        s.db.$client.close();
-      } catch {
-        // 已关或未开——忽略
+  realms.push({
+    dir,
+    close: async () => {
+      await app.close();
+      await hub.closeAll();
+      // 显式关 SQLite 句柄（Windows：删被打开的文件 = EPERM；重复 close 由 try 兜住）
+      for (const s of spaces) {
+        try {
+          s.db.$client.close();
+        } catch {
+          // 已关或未开——忽略
+        }
       }
-    }
-    try {
-      registry.$client.close();
-    } catch {
-      // 同上
-    }
+      try {
+        registry.$client.close();
+      } catch {
+        // 同上
+      }
+    },
   });
 
   let n = 0;
@@ -129,7 +132,7 @@ export async function makeTestRealm(
       const username = a.username ?? (n === 1 ? "tester" : `tester${n}`);
       const account = createAccount(registry, {
         username,
-        passwordHash: await hashPassword("test-password-123"),
+        passwordHash: await getTestPasswordHash(),
       });
       const space = await hub.ensure(account.uid);
       spaces.push(space);
@@ -159,9 +162,6 @@ export async function makeTestRealm(
 export async function makeTestAccount(
   args: { username?: string; llm?: FakeLlm; adapters?: Array<() => SourceAdapter> } = {},
 ): Promise<TestAccount> {
-  const realm = await makeTestRealm(args.adapters === undefined ? {} : { adapters: args.adapters });
-  return realm.addAccount({
-    ...(args.username === undefined ? {} : { username: args.username }),
-    ...(args.llm === undefined ? {} : { llm: args.llm }),
-  });
+  const realm = await makeTestRealm({ adapters: args.adapters });
+  return realm.addAccount(args);
 }

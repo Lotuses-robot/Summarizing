@@ -5,11 +5,6 @@ import { cn } from "../../lib/cn";
 // 设置页原语（macOS 系统设置式，用户 2026-09-30 定）：分组卡 + 一行一设置（左标签右控件）。
 // SettingsModal 与 SourcesSection 共用这一套，保证整页节奏一致。
 
-/** 卡片容器壳（圆角框 + 裁切内容）：分组卡与无头兜底块共用（simplify 复用评审 #2）。 */
-export function Panel({ children }: { children: ReactNode }) {
-  return <div className="overflow-hidden rounded-xl border border-line bg-surface">{children}</div>;
-}
-
 /** 分组卡：小标题（图标+名+一句灰描述）在上，卡内一行一设置；footnote 在卡下方（灰小字）。
  *  bare = 不套容器盒（内容自带卡片时用，如信源区——每源一张卡）。 */
 export function Card({
@@ -39,7 +34,11 @@ export function Card({
         </span>
         {desc !== undefined && <span className="truncate text-xs text-ink-muted">· {desc}</span>}
       </header>
-      {bare ? children : <Panel>{children}</Panel>}
+      {bare ? (
+        children
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-line bg-surface">{children}</div>
+      )}
       {footnote !== undefined && <p className="mt-1.5 px-0.5 text-xs text-ink-muted">{footnote}</p>}
     </section>
   );
@@ -155,8 +154,10 @@ export function useStatus(): {
   return { statuses, flash, sticky };
 }
 
-/** 卡尾状态槽：**定高常驻**（条件渲染会 33px 跳版，评审 H）——只换字不换高；
- *  flash 灰字 / sticky 红字。children = 槽内额外内容（如 AI 卡的连接测试结果两行）。 */
+/** 卡尾状态槽（走查 2026-10-03 彻底修）：**无反馈即整槽不渲染**——有状态或 children 才出现
+ *  （此前定高常驻 → 每张卡底部挂一条无字空框）。有状态时 min-h-2rem 领定高防文案切换抖高（评审 H）。
+ *  ⚠️ children 传 `{cond && …}` 时条件不成立 = `false`（**算有内容**）——务必把条件提到槽外
+ *  （`{cond ? <p/> : undefined}` 或外层 `{cond && <StatusSlot …/>}`），否则槽仍会空撑。 */
 export function StatusSlot({
   statuses,
   children,
@@ -164,6 +165,12 @@ export function StatusSlot({
   statuses: RowStatus[];
   children?: ReactNode;
 }) {
+  if (
+    statuses.length === 0 &&
+    (children === null || children === undefined || children === false)
+  ) {
+    return null;
+  }
   return (
     <div className="min-h-[2rem] border-t border-line px-4 py-2 text-xs">
       {children}

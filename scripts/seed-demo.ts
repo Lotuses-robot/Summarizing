@@ -13,6 +13,7 @@ import {
   makeRegistryDb,
 } from "../apps/server/src/storage/registry";
 import { hashPassword } from "../apps/server/src/auth/password";
+import { wallClockFromDate } from "../apps/server/src/shared/time";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DATA = path.join(ROOT, "data");
@@ -22,15 +23,9 @@ const DEMO_PASSWORD = "demo-password-123";
 const MODEL = "deepseek-flash";
 const BY = { actor: "agent0", model: MODEL };
 
-/** 本地墙钟串：now 往前推 ms 毫秒（与 repo 的 receivedAt/at 同格式）。 */
+/** 本地墙钟串：now 往前推 ms 毫秒（格式化唯一出处 = server 的 wallClockFromDate——simplify 去重）。 */
 function wallClockAgo(ms: number): string {
-  const d = new Date(Date.now() - ms);
-  /** 两位数补零。 */
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
-    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-  );
+  return wallClockFromDate(new Date(Date.now() - ms));
 }
 
 const DAY = 86_400_000;

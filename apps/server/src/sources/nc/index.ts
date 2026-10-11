@@ -147,6 +147,7 @@ export function makeNcAdapter(): SourceAdapter {
       runtime = { ctx, windowMinutes };
 
       // 快收：白名单过滤 → 规范化 → 入缓冲 → 204（nc 规范：无需响应体）
+      // 卡片文案：动态段名（实测 nc 上报路径形如 /event），实际可达地址由 core 按账户令牌拼
       router.post("/event", async (req, reply) => {
         const parsed = NcEventSchema.safeParse(req.body);
         if (!parsed.success) return reply.code(204).send(); // 非群消息/形状不符 → 静默丢

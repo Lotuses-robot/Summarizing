@@ -3,7 +3,12 @@ import { Plus, Trash2 } from "lucide-react";
 import type { SettingField, SourceSummary } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
-import { Card, Panel, Row, StatusSlot, useStatus } from "./primitives";
+import { Card, Row, StatusSlot, useStatus } from "./primitives";
+/** 每源的一句话接入引导（**源自己的知识**——怎么写进 nc 的 WebUI；未知源不显示，
+ *  将来源多了可由适配器声明下发。用户 2026-10-03：引导是每个源自己的事）。 */
+const SOURCE_HINTS: Record<string, string> = {
+  nc: "填进 nc 的「网络配置 → HTTP 服务器 → 反向 WebSocket / HTTP 上报」，勾选「群消息」；再在下方白名单填群号。",
+};
 
 /** record 值判据：非 null、非数组的对象（键值地图形状）。 */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -163,15 +168,29 @@ function RecordEditor({
   );
 }
 
-/** 单个信源卡（macOS 式分组卡 + 改完即生效）：卡头 = 源名 + 状态；卡内一行一设置。
+/** 单个信源卡（macOS 式分组卡 + 改完即生效）：卡头 = 源名 + 状态；**顶部自带接入地址**（后端下发的
+ *  hookPath，前端零拼接）与该源自己的接入引导；卡内一行一设置。
  *  写语义：与「已存值」不同才写，**发出即以新值为基线**（在飞不再按旧基线重复发），
  *  失败回滚基线并常驻红字；数字清空 = DELETE 回默认；成功一闪「已保存」。 */
 function SourceCard({ summary }: { summary: SourceSummary }) {
+  const { statuses, flash, sticky } = useStatus();
   const [values, setValues] = useState<Record<string, unknown> | null>(null);
   const [initial, setInitial] = useState<Record<string, unknown>>({}); // 已（乐观）落库值（diff 基准）
   const [recordRows, setRecordRows] = useState<Record<string, [string, string][]>>({});
   const [readFailed, setReadFailed] = useState(false);
-  const { statuses, flash, sticky } = useStatus();
+  /** 复制接入地址（剪贴板不可用/失败 → 可见提示，不静默）。 */
+  const copyHook = () => {
+    if (summary.hookPath === null) return;
+    const hookUrl = `${window.location.origin}${summary.hookPath}`;
+    if (navigator.clipboard === undefined) {
+      sticky("hook", "剪贴板不可用——请手动选中复制");
+      return;
+    }
+    navigator.clipboard
+      .writeText(hookUrl)
+      .then(() => flash("hook", "已复制"))
+      .catch(() => sticky("hook", "复制失败——请手动选中复制"));
+  };
 
   useEffect(() => {
     if (summary.settings.length === 0) {
@@ -294,6 +313,20 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
       }
       desc={summary.state === "error" ? summary.lastError : undefined}
     >
+      {/* 接入地址 + 该源自己的引导（hookPath 由后端算好——URL 形状是源的知识，前端零拼接） */}
+      {summary.hookPath !== null && (
+        <Row label="接入地址" description={SOURCE_HINTS[summary.name]} stacked>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="min-w-0 break-all rounded-md border border-line bg-canvas px-2 py-1 text-xs">
+              {window.location.origin}
+              {summary.hookPath}
+            </code>
+            <button className="btn" onClick={copyHook}>
+              复制
+            </button>
+          </div>
+        </Row>
+      )}
       {summary.settings.length === 0 ? (
         <Row label={<span className="text-ink-muted">这个信源没有可配置项</span>} />
       ) : readFailed ? (
@@ -326,7 +359,7 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
               )}
             </Row>
           ))}
-          {/* 状态槽定高常驻（评审 H：条件渲染会跳版）——只换字不换高 */}
+          {/* 状态槽：有保存反馈才出现（无则整槽不渲染——走查 2026-10-03） */}
           <StatusSlot statuses={statuses} />
         </>
       )}
@@ -334,76 +367,37 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
   );
 }
 
-/** 接入地址 + 令牌轮换（FR-008）：令牌嵌在 URL 里——复制即用；泄露一键换新（旧地址即刻失效）。 */
-function TokenRow({
-  sourceToken,
-  onRotated,
+/** 信源列表三态（simplify：平铺 early-return）。空/加载态不套带底色的 Panel（避免在设置里
+ *  像「多出一行空白」）——用与设置其它空态一致的朴素灰字。 */
+function SourcesList({
+  error,
+  sources,
 }: {
-  sourceToken: string;
-  onRotated: (t: string) => void;
+  error: string | null;
+  sources: SourceSummary[] | null;
 }) {
-  const { statuses, flash, sticky } = useStatus();
-  // 站点根（评审修复）：发布形态 = 当前源；开发形态（5173）server 在 3001——vite 只代理 /api，不代理 /hook
-  const siteBase = import.meta.env.DEV
-    ? `http://${window.location.hostname}:3001`
-    : window.location.origin;
-  const hookUrl = `${siteBase}/hook/${sourceToken}/nc/event`;
-
-  /** 复制接入地址（剪贴板不可用/失败 → 可见提示，不静默）。 */
-  const copy = () => {
-    if (navigator.clipboard === undefined) {
-      sticky("token", "剪贴板不可用——请手动选中复制");
-      return;
-    }
-    navigator.clipboard
-      .writeText(hookUrl)
-      .then(() => flash("token", "已复制"))
-      .catch(() => sticky("token", "复制失败——请手动选中复制"));
-  };
-
-  /** 轮换令牌（二次确认）：旧地址即刻失效——须同步更新 nc 配置。 */
-  const rotate = () => {
-    if (!window.confirm("重新生成接入令牌？现有接入地址会立即失效（nc 需改用新地址）。")) return;
-    api
-      .rotateSourceToken()
-      .then(({ sourceToken: next }) => {
-        onRotated(next);
-        flash("token", "已生成新令牌");
-      })
-      .catch((err: unknown) => sticky("token", `轮换失败：${errText(err)}`));
-  };
-
+  if (error !== null) {
+    return <p className="px-0.5 text-sm text-danger">{error}</p>;
+  }
+  if (sources === null) {
+    return <p className="px-0.5 text-sm text-ink-muted">加载信源…</p>;
+  }
+  if (sources.length === 0) {
+    return <p className="px-0.5 text-sm text-ink-muted">还没有接入信源</p>;
+  }
   return (
-    <Panel>
-      <Row label="接入地址" description="把它填进 nc 的上报地址（含你的账户令牌）" stacked>
-        <div className="flex flex-wrap items-center gap-2">
-          <code className="min-w-0 break-all rounded-md border border-line bg-canvas px-2 py-1 text-xs">
-            {hookUrl}
-          </code>
-          <button className="btn" onClick={copy}>
-            复制
-          </button>
-          <button className="btn" onClick={rotate}>
-            重新生成令牌
-          </button>
-        </div>
-      </Row>
-      <StatusSlot statuses={statuses} />
-    </Panel>
+    <div className="space-y-5">
+      {sources.map((s) => (
+        <SourceCard key={s.name} summary={s} />
+      ))}
+    </div>
   );
 }
 
-/** 信源区（D-89 真界面 / 走查修订③ 即时生效）：接入地址（账户令牌）常驻 + GET /api/sources 列信源
- *  → 每源一张分组卡。前端不知道信源名——列表与字段全部由后端给。 */
-export function SourcesSection({
-  sourceToken,
-  onRotated,
-}: {
-  /** 本账户接入令牌（接入地址展示与轮换用）。 */
-  sourceToken: string;
-  /** 轮换成功回调（App 同步 me.sourceToken——重开设置时显示新值）。 */
-  onRotated: (token: string) => void;
-}) {
+/** 信源区（D-89 真界面 / 走查修订③ 即时生效）：GET /api/sources 列信源 → 每源一张分组卡。
+ *  前端不知道信源名——列表与字段全部由后端给。
+ *  （接入地址/令牌轮换已移入**用户卡**——账户级事实不属信源区，用户 2026-10-03 定。） */
+export function SourcesSection() {
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -416,22 +410,7 @@ export function SourcesSection({
 
   return (
     <div className="space-y-5">
-      <TokenRow sourceToken={sourceToken} onRotated={onRotated} />
-      {error !== null ? (
-        <Panel>
-          <Row label={<span className="text-danger">{error}</span>} />
-        </Panel>
-      ) : sources === null ? (
-        <Panel>
-          <Row label={<span className="text-ink-muted">加载信源…</span>} />
-        </Panel>
-      ) : sources.length === 0 ? (
-        <Panel>
-          <Row label={<span className="text-ink-muted">还没有接入信源</span>} />
-        </Panel>
-      ) : (
-        sources.map((s) => <SourceCard key={s.name} summary={s} />)
-      )}
+      <SourcesList error={error} sources={sources} />
     </div>
   );
 }
