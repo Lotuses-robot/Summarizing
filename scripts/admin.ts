@@ -100,6 +100,8 @@ function promptHidden(question: string): Promise<string> {
         const ch = stdinBuffer[0] ?? "";
         stdinBuffer = stdinBuffer.slice(1);
         if (ch === "\r" || ch === "\n") {
+          // CRLF 成对消费（评审修复）：只吃 \r 会把 \n 留给下一个 prompt → 立即空串定局
+          if (ch === "\r" && stdinBuffer.startsWith("\n")) stdinBuffer = stdinBuffer.slice(1);
           settle(() => resolve(current));
           return true;
         }

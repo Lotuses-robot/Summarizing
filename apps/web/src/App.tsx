@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { itemName, type BoardView, type MeView, type UncertainInput } from "@summarizing/shared";
+import {
+  itemName,
+  errText,
+  type BoardView,
+  type MeView,
+  type UncertainInput,
+} from "@summarizing/shared";
 import { api, setOnUnauthorized } from "./api";
 import { ActivityBar } from "./components/ActivityBar";
 import { AuthShell } from "./components/AuthShell";
@@ -29,6 +35,7 @@ function Banner({ text }: { text: string }) {
 export default function App() {
   const [me, setMe] = useState<MeView | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [authProbeError, setAuthProbeError] = useState<string | null>(null);
   const [board, setBoard] = useState<BoardView | null>(null);
   const [uncertain, setUncertain] = useState<UncertainInput[]>([]);
   const [view, setView] = useState<"board" | "uncertain" | "pipeline">("board"); // 主视图切换（D-89 + specs/005 流水）
@@ -45,15 +52,20 @@ export default function App() {
   const [focus, setFocus] = useState<{ id: string; token: number } | null>(null);
   const mainRef = useRef<HTMLDivElement | null>(null);
 
+  /** 会话代次（评审修复）：登出/换号即 ++——在飞响应据此作废（A 的迟到数据不许落到 B 的界面）。 */
+  const genRef = useRef(0);
+
   /** 统一「回到未登录」（单点拦截回调 + 登出共用）：清会话与数据态——并发 401 幂等。 */
   const handleUnauthenticated = useCallback(() => {
+    genRef.current += 1;
     setMe(null);
     setBoard(null);
     setUncertain([]);
     setSettingsOpen(false);
   }, []);
 
-  // 启动探测：me 200 → 主界面；401（未登录的正常首屏路径）→ 认证壳。
+  // 启动探测：me 200 → 主界面；401（未登录的正常首屏路径）→ 认证壳；
+  // 其余错误（网络/5xx）= 后端不可达——在认证壳上如实提示（评审修复：曾与 401 一并吞掉）。
   // 同时把 401 单点拦截接到全局（任何受保护请求 401 都切回认证壳）。
   useEffect(() => {
     let alive = true;
@@ -62,8 +74,10 @@ export default function App() {
       .then((v) => {
         if (alive) setMe(v);
       })
-      .catch(() => {
-        // 未登录——正常首屏路径，不提示（authChecked 置位后渲染认证壳）
+      .catch((err: unknown) => {
+        if (alive && !errText(err).includes("401")) {
+          setAuthProbeError("后端服务未连接——请确认服务已启动（apps/server）");
+        }
       })
       .finally(() => {
         if (alive) setAuthChecked(true);
@@ -75,27 +89,37 @@ export default function App() {
     };
   }, [handleUnauthenticated]);
 
-  /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。 */
+  /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。会话代次守卫：旧会话在飞响应丢弃。 */
   const loadBoard = useCallback(() => {
+    const gen = genRef.current;
     api
       .board()
       .then((b) => {
+        if (genRef.current !== gen) return;
         setBoard(b);
         setError(null); // 恢复连线就撤横幅——错误态不滞留
       })
-      .catch(() => setError("后端服务未连接（apps/server 是否在跑？）"));
+      .catch(() => {
+        if (genRef.current !== gen) return;
+        setError("后端服务未连接（apps/server 是否在跑？）");
+      });
   }, []);
 
   /** 拉存疑库 open 列表（D-89）：审核页数据 + 活动栏徽标计数共用同一份。
    *  失败置可见错误（不静默——否则审核页会拿旧数据/假空态说事，评审 Critical）。 */
   const loadUncertain = useCallback(() => {
+    const gen = genRef.current;
     api
       .uncertain("open")
       .then((list) => {
+        if (genRef.current !== gen) return;
         setUncertain(list);
         setUncertainError(null);
       })
-      .catch(() => setUncertainError("存疑库拉取失败——列表与计数可能已过期"));
+      .catch(() => {
+        if (genRef.current !== gen) return;
+        setUncertainError("存疑库拉取失败——列表与计数可能已过期");
+      });
   }, []);
 
   // 轮询看的是「当前视图」——审核页在前台时暂停拉存疑库（破坏性列表不许在读者手底下位移），
@@ -142,14 +166,13 @@ export default function App() {
   /** 切换对话面板开合。 */
   const toggleChat = () => setChat(!chatOpen);
 
-  /** 退出登录：让服务端清 cookie（失败也照退——本地状态清掉即可；残留 cookie 会被 401 兜住）。 */
+  /** 退出登录（评审修复）：**服务端确认清了 cookie 才回认证壳**——失败如实提示，不装作已退出
+   *  （共用设备上残留会话仍在；旧文案「残留 cookie 会被 401 兜住」在失败场景为假）。 */
   const logout = () => {
     void api
       .logout()
-      .catch(() => {
-        // 清 cookie 失败不阻塞退出（幂等口）
-      })
-      .finally(handleUnauthenticated);
+      .then(handleUnauthenticated)
+      .catch(() => setError("退出失败：服务暂时不可达——当前会话仍未注销，请稍后再试"));
   };
 
   /** 事项 chips 深链（05§三）：切回看板 + 清筛选 + 收起面板（记忆同步）+ 交看板定位展开。 */
@@ -189,7 +212,16 @@ export default function App() {
     return <p className="px-4 py-8 text-sm text-ink-muted">加载中…</p>;
   }
   if (me === null) {
-    return <AuthShell onAuthed={setMe} />;
+    return (
+      <AuthShell
+        onAuthed={(v) => {
+          genRef.current += 1; // 换号代次——旧会话在飞响应作废
+          setAuthProbeError(null);
+          setMe(v);
+        }}
+        notice={authProbeError}
+      />
+    );
   }
 
   return (

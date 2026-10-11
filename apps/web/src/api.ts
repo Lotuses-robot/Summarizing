@@ -24,7 +24,15 @@ import type {
 
 // ── 401 单点拦截（006 / contracts/http.md 前端规约）──
 // 任何**受保护**请求 401 → 全局「未认证」信号（App 切回未登录壳；清状态/停轮询由回调自理）。
-// /api/auth/* 的 401 是业务语义（凭据错 / 启动探测未登录），不进拦截。
+// 豁免仅限：公开三件（register/login/logout）+ 启动探测 me——password/rotate 是受保护端点，
+// 过期会话必须触发切壳（评审修复：曾整段豁免 /api/auth/*，改密失败只报「未登录」不切壳）。
+
+const AUTH_401_EXEMPT = [
+  "/api/auth/register",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/auth/me",
+];
 
 let onUnauthorized: (() => void) | null = null;
 
@@ -33,10 +41,10 @@ export function setOnUnauthorized(fn: (() => void) | null): void {
   onUnauthorized = fn;
 }
 
-/** 受保护请求的统一入口：fetch 后先过 401 哨兵（/api/auth/* 除外），行为与裸 fetch 一致。 */
+/** 受保护请求的统一入口：fetch 后先过 401 哨兵（仅豁免上表），行为与裸 fetch 一致。 */
 async function req(url: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, init);
-  if (res.status === 401 && !url.startsWith("/api/auth/")) onUnauthorized?.();
+  if (res.status === 401 && !AUTH_401_EXEMPT.some((p) => url.startsWith(p))) onUnauthorized?.();
   return res;
 }
 
@@ -51,26 +59,34 @@ function ensureOk(res: Response): void {
   if (!res.ok) throw new Error(`请求失败 ${res.status}`);
 }
 
-/** 认证端点响应：非 2xx 优先抛服务端 error 文案（登录表单要显示「账户已停用」「邀请码无效」等）。 */
-async function toAuth<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    let message = `请求失败 ${res.status}`;
-    try {
-      const body: unknown = await res.json();
-      if (
-        typeof body === "object" &&
-        body !== null &&
-        "error" in body &&
-        typeof body.error === "string"
-      ) {
-        message = body.error;
-      }
-    } catch {
-      // 非 JSON——保留默认文案
+/** 认证端点非 2xx 的错误文案（服务端 {error} 优先，非 JSON 兜底）。 */
+async function authErrorText(res: Response): Promise<string> {
+  try {
+    const body: unknown = await res.json();
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      "error" in body &&
+      typeof body.error === "string"
+    ) {
+      return body.error;
     }
-    throw new Error(message);
+  } catch {
+    // 非 JSON——用兜底文案
   }
+  return `请求失败 ${res.status}`;
+}
+
+/** 认证端点响应（有体）：非 2xx 优先抛服务端 error 文案（登录表单要显示「账户已停用」等）；2xx 解析 JSON。 */
+async function toAuth<T>(res: Response): Promise<T> {
+  if (!res.ok) throw new Error(await authErrorText(res));
   return (await res.json()) as T;
+}
+
+/** 认证端点（成功态无体，如改密 204）：非 2xx 抛服务端文案；2xx 不解析 body
+ *  （评审修复：toAuth 对 204 空体 res.json() 会抛 SyntaxError——改密明明成功了却报失败）。 */
+async function ensureAuthOk(res: Response): Promise<void> {
+  if (!res.ok) throw new Error(await authErrorText(res));
 }
 
 /** 构造 JSON 写请求的 fetch 参数（POST/PUT 共用——C1 教训：方法与后端注册的路由须一致）。 */
@@ -113,9 +129,9 @@ export const api = {
   /** 当前账户（启动探测：401 = 未登录的正常首屏路径，不进单点拦截）。 */
   me: (): Promise<MeView> => req("/api/auth/me").then((r) => to<MeView>(r)),
 
-  /** 修改密码（其余端下线、本端续签）。 */
+  /** 修改密码（其余端下线、本端续签；成功 204 无体）。 */
   changePassword: (oldPassword: string, newPassword: string): Promise<void> =>
-    req("/api/auth/password", put({ oldPassword, newPassword })).then((r) => toAuth<void>(r)),
+    req("/api/auth/password", put({ oldPassword, newPassword })).then((r) => ensureAuthOk(r)),
 
   /** 轮换接入令牌（旧值即刻作废——全部旧接入地址 401）。 */
   rotateSourceToken: (): Promise<RotateTokenResponse> =>

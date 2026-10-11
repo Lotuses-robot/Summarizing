@@ -43,9 +43,10 @@ function parseSession(value: string, secret: string): SessionPayload | null {
   }
 }
 
-/** cookie 属性（contracts/http.md）：httpOnly + SameSite=Lax + Path=/；Secure 由 env 控。
- *  默认开（localhost 是浏览器可信源，现代浏览器可种 Secure cookie）；遇浏览器差异设 SESSION_COOKIE_SECURE=0。 */
-function cookieOpts(): {
+/** cookie 属性（contracts/http.md）：httpOnly + SameSite=Lax + Path=/。
+ *  Secure（评审修复）：按**请求协议**自动——https（Caddy/上线）必开；局域网 http（手机访问）则关，
+ *  否则浏览器丢弃 cookie 且无从得知原因。env `SESSION_COOKIE_SECURE=1` 可显式强制开。 */
+function cookieOpts(secure: boolean): {
   httpOnly: true;
   sameSite: "lax";
   path: "/";
@@ -56,7 +57,7 @@ function cookieOpts(): {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
-    secure: process.env.SESSION_COOKIE_SECURE !== "0",
+    secure,
     maxAge: Math.floor(SESSION_TTL_MS / 1000),
   };
 }
@@ -73,7 +74,8 @@ export function setSessionCookie(
   tokenVersion: number,
   secret: string,
 ): void {
-  reply.setCookie(SESSION_COOKIE, issueSessionValue(uid, tokenVersion, secret), cookieOpts());
+  const secure = reply.request.protocol === "https" || process.env.SESSION_COOKIE_SECURE === "1";
+  reply.setCookie(SESSION_COOKIE, issueSessionValue(uid, tokenVersion, secret), cookieOpts(secure));
 }
 
 /** 清会话 cookie（登出；幂等，未登录调用也 204）。 */

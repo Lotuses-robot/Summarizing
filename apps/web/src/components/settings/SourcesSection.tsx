@@ -343,7 +343,11 @@ function TokenRow({
   onRotated: (t: string) => void;
 }) {
   const { statuses, flash, sticky } = useStatus();
-  const hookUrl = `${window.location.origin}/hook/${sourceToken}/nc/event`;
+  // 站点根（评审修复）：发布形态 = 当前源；开发形态（5173）server 在 3001——vite 只代理 /api，不代理 /hook
+  const siteBase = import.meta.env.DEV
+    ? `http://${window.location.hostname}:3001`
+    : window.location.origin;
+  const hookUrl = `${siteBase}/hook/${sourceToken}/nc/event`;
 
   /** 复制接入地址（剪贴板不可用/失败 → 可见提示，不静默）。 */
   const copy = () => {

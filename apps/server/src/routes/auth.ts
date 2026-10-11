@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   AuthOkSchema,
   ChangePasswordRequestSchema,
+  errText,
   LoginRequestSchema,
   MeViewSchema,
   RegisterRequestSchema,
@@ -9,6 +10,7 @@ import {
 } from "@summarizing/shared";
 import {
   clearLoginFailures,
+  loginIpRateLimited,
   loginKey,
   loginLockRemainingSec,
   recordLoginFailure,
@@ -20,6 +22,7 @@ import {
   getAccountByUid,
   getAccountByUsername,
   redeemInviteAndCreateAccount,
+  rollbackRegistration,
   rotateSourceToken,
   setPasswordHashAndBumpTokenVersion,
   type RegistryDb,
@@ -63,13 +66,28 @@ export function registerAuthPublicRoutes(app: FastifyInstance, deps: AuthPublicD
         ? reply.code(409).send({ error: "用户名已被占用" })
         : reply.code(400).send({ error: "邀请码无效或已过期" });
     }
-    await deps.hub.ensure(result.account.uid); // 空间就绪（新用户库开在此刻）
+    try {
+      await deps.hub.ensure(result.account.uid); // 空间就绪（新用户库开在此刻）
+    } catch (err) {
+      // 装配失败 → 撤回注册（退邀请码，不当一次性码吞掉——评审修复），如实 500
+      req.log.error(`注册后装配空间失败，已撤回：${errText(err)}`);
+      try {
+        rollbackRegistration(deps.registry, result.account.uid, code);
+      } catch (rollbackErr) {
+        req.log.error(`注册撤回失败（需人工核对）：${errText(rollbackErr)}`);
+      }
+      return reply.code(500).send({ error: "服务器暂时不可用，请稍后重试" });
+    }
     setSessionCookie(reply, result.account.uid, result.account.tokenVersion, deps.secret);
     return reply.code(201).send(AuthOkSchema.parse({ username: result.account.username }));
   });
 
-  // 登录：先查锁定（对键）→ 查账户（无此人做哑哈希——不泄露存在性）→ 验密 → 状态 → 发会话
+  // 登录：IP 总量限速（防刷 scrypt）→ 对键锁定 → 查账户（无此人做哑哈希——不泄露存在性）
+  // → 验密 → 状态 → 发会话
   app.post("/api/auth/login", async (req, reply) => {
+    if (loginIpRateLimited(req.ip)) {
+      return reply.code(429).send({ error: "尝试过于频繁，请稍后再试" });
+    }
     const parsed = LoginRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });

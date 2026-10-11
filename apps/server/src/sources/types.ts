@@ -48,9 +48,13 @@ export interface SourceContext {
   reportError(err: unknown, opts?: { fatal?: boolean }): void;
 }
 
+/** 信源 handler 的请求类型：**无 `space`**（webhook 网关在受保护作用域之外）——读了直接编译错，
+ *  防「类型宣称有、运行时没有」的埋伏（评审修复）。 */
+type SourceRouteRequest = Omit<FastifyRequest, "space">;
+
 /** 路由处理体：形态对齐 Fastify——可 `return reply.code(204).send()`（返回值作响应载荷）或只调用
  *  reply；网关按原样透传返回值，不解释。 */
-export type SourceRouteHandler = (req: FastifyRequest, reply: FastifyReply) => unknown;
+export type SourceRouteHandler = (req: SourceRouteRequest, reply: FastifyReply) => unknown;
 
 /** 信源 webhook 登记口（006 收窄，D-96）：只在本源命名空间内登记 HTTP 入口——
  *  **可达地址 = `/hook/<账户令牌>/<源名>/<path>`**（core 网关统一鉴权路由）。

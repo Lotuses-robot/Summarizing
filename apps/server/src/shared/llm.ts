@@ -91,6 +91,18 @@ export function makeOpenAiLlm(
   };
 }
 
+/** 未配置占位客户端（006 评审修复）：构造**不抛**——服务照常启动、界面可用（FR-009「未配置 =
+ *  明确提示未配置」；服务器 .env 留空是部署常态，若在装配期抛会把整站锁死）；
+ *  真正发起调用时才报人话错（消化会把批次标「未处理」；测试连接给明确失败）。 */
+export function makeUnconfiguredLlm(): TaggedLlm {
+  return {
+    modelTag: "未配置",
+    async chat() {
+      throw new Error("尚未配置 AI 接入——去 设置 → AI 填写，或配置 .env 的 OPENAI_*");
+    },
+  };
+}
+
 /** 内部消息格式 → OpenAI SDK 消息格式（含工具调用的双向转换）。 */
 function toOpenAiMessage(msg: ChatMsg): OpenAI.Chat.Completions.ChatCompletionMessageParam {
   switch (msg.role) {

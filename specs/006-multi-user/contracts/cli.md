@@ -28,6 +28,7 @@
 | `passwd:reset <username>` | 重置密码（交互输入）；`token_version` +1 → 该账户全部旧会话下线 | 确认行 |
 | `invite:new [--days N]` | 生成一次性邀请码（默认 7 天） | `code`；若设 env `BASE_URL` 则同时打印完整注册链接 `<BASE_URL>/register?code=<code>` |
 | `invite:revoke <code>` | 作废未使用的邀请码 | 确认行 |
+| `count:accounts` | 输出可用账户数（**内部件**——start.cmd 首启判定用，不在面向用户的用法清单） | 一个数字 |
 
 ## 与服务器并发
 

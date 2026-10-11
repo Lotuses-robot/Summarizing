@@ -246,6 +246,18 @@ function isUniqueViolation(err: unknown): boolean {
   return err.code === "SQLITE_CONSTRAINT_UNIQUE";
 }
 
+/** 注册补偿（006 评审修复）：空间装配失败时撤回已提交的注册——删账户行 + 邀请码退回未用
+ *  （同一事务；补偿自身失败由调用方记日志，如实 500——绝不把一次性码静默吞掉）。 */
+export function rollbackRegistration(db: RegistryDb, uid: string, code: string): void {
+  db.transaction((tx) => {
+    tx.delete(accounts).where(eq(accounts.uid, uid)).run();
+    tx.update(invites)
+      .set({ usedBy: null, usedAt: null })
+      .where(and(eq(invites.code, code), eq(invites.usedBy, uid)))
+      .run();
+  });
+}
+
 // ── meta ──
 
 /** 读 meta 键；不存在返回 null（getSessionSecret 的内部读口）。 */

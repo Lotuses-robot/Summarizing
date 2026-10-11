@@ -27,9 +27,17 @@ if not exist ".env" (
   copy /y ".env.example" ".env" >nul
   echo [summarizing] created .env - open it and fill in your OpenAI-compatible API settings.
 )
-if not exist "data\\system.db" (
+set ACC_COUNT=1
+for /f %%c in ('".\\node\\node.exe" "apps\\server\\dist\\admin.mjs" count:accounts') do set ACC_COUNT=%%c
+if "%ACC_COUNT%"=="0" (
   echo [summarizing] First run - create your account now ^(you will log in with it^).
   ".\\node\\node.exe" "apps\\server\\dist\\admin.mjs" user:add
+  if errorlevel 1 (
+    echo [summarizing] Account setup not completed. Run this first, then start again:
+    echo   node apps\\server\\dist\\admin.mjs user:add
+    pause
+    exit /b 1
+  )
 )
 start /min "" cmd /c "timeout /t 2 /nobreak >nul & explorer http://localhost:3001"
 ".\\node\\node.exe" "apps\\server\\dist\\index.mjs"

@@ -226,8 +226,9 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
       return <SourcesSection sourceToken={token} onRotated={setToken} />;
     }
     render(<Harness />);
-    const oldUrl = `${location.origin}/hook/${TOKEN}/nc/event`;
-    const newUrl = `${location.origin}/hook/${NEW_TOKEN}/nc/event`;
+    // dev 形态（vitest = DEV）站点根指向 server 3001（vite 不代理 /hook——评审修复）
+    const oldUrl = `http://localhost:3001/hook/${TOKEN}/nc/event`;
+    const newUrl = `http://localhost:3001/hook/${NEW_TOKEN}/nc/event`;
     expect(await screen.findByText(oldUrl)).toBeInTheDocument();
 
     // 取消：地址不动

@@ -37,7 +37,7 @@
 
 ## R6 限速（进程内）
 
-- **Decision**: 进程内 Map 滑窗：登录按 `username|来源IP` 连续 5 次失败锁 15 分钟（锁定期内一律 429 + 剩余秒数）；注册按来源 IP 10 次/10 分钟。常量进代码（「系统策略进代码」原则）；重启即重置（可接受，点名）。锁定键为**（用户名, 来源 IP）对**——防「拿别人用户名锁人」的 DoS（受害者从自己 IP 不受影响）。
+- **Decision**: 进程内 Map 滑窗：登录按 `username|来源IP` 连续 5 次失败锁 15 分钟（锁定期内一律 429 + 剩余秒数）；注册按来源 IP 10 次/10 分钟。常量进代码（「系统策略进代码」原则）；重启即重置（可接受，点名）。锁定键为**（用户名, 来源 IP）对**——防「拿别人用户名锁人」的 DoS（受害者从自己 IP 不受影响）；用户名先按查库同口径折叠（NFKC+trim+小写）——防大小写变体各享一份锁定预算（评审修复）。**另加登录按 IP 总量限速 30 次/10 分钟**（评审修复：防随机用户名连刷——每次 miss 都跑真 scrypt）。
 - **Rationale**: 单进程单人运维，不需要持久化/分布式限速。
 - **Alternatives**: `@fastify/rate-limit`——要为"按用户名"定制且引入依赖；不划算。
 
@@ -45,7 +45,7 @@
 
 ## R7 cookie 属性
 
-- **Decision**: `sid`，httpOnly + SameSite=Lax + Path=/ + Max-Age 30 天；Secure 由 env `SESSION_COOKIE_SECURE` 控制（默认 "1"；现代浏览器视 localhost 为可信源可种 Secure cookie，便携包/本机开发如遇浏览器差异设 "0" 即可）。
+- **Decision**: `sid`，httpOnly + SameSite=Lax + Path=/ + Max-Age 30 天；Secure **按请求协议自动**（https → 开——Caddy/上线场景；局域网 http 手机访问则关，评审修复：固定默认开会让手机 http 登录静默失败）；env `SESSION_COOKIE_SECURE=1` 可强制开。
 - **Rationale**: 单站点、无跨站需求；CSRF 基线 = SameSite=Lax + JSON 写请求（全部状态变更均为 POST/PUT/DELETE）——**不做 CSRF token，点名接受**。
 - **Alternatives**: SameSite=Strict——外链进入首跳体验差无收益；CSRF token——本规模过度。
 

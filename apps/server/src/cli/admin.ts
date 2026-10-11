@@ -53,13 +53,22 @@ function mustFind(db: RegistryDb, usernameRaw: string) {
   return account;
 }
 
-/** 交互读两次密码并核对（≥8 字符）。 */
+/** 交互读两次密码并核对（≥8 字符；不一致/过短**重问**，连续 3 轮失败才放弃——contracts/cli.md）。 */
 async function askPasswordTwice(io: AdminIo): Promise<string> {
-  const first = await io.prompt("密码（≥8 字符，不回显）：", { secret: true });
-  if (first.length < 8) throw new Error("密码至少 8 个字符");
-  const second = await io.prompt("再输一次：", { secret: true });
-  if (first !== second) throw new Error("两次输入不一致");
-  return first;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const first = await io.prompt("密码（≥8 字符，不回显）：", { secret: true });
+    if (first.length < 8) {
+      io.log("密码至少 8 个字符，请重试");
+      continue;
+    }
+    const second = await io.prompt("再输一次：", { secret: true });
+    if (first !== second) {
+      io.log("两次输入不一致，请重试");
+      continue;
+    }
+    return first;
+  }
+  throw new Error("密码输入连续 3 次失败，已取消");
 }
 
 /** 执行一条运维命令；失败抛人话错误（入口壳负责打印与退出码）。 */
@@ -117,6 +126,11 @@ export async function runAdmin(argv: string[], deps: AdminDeps): Promise<void> {
         const password = await askPasswordTwice(io);
         setPasswordHashAndBumpTokenVersion(db, account.uid, await hashPassword(password));
         io.log(`账户 ${account.username} 密码已重置（该账户全部旧会话已下线）`);
+        return;
+      }
+      case "count:accounts": {
+        // start.cmd 首启判定用（内部件，不在用法清单）：输出可用账户数——0 才引导建号
+        io.log(String(listAccounts(db).filter((a) => a.status === "active").length));
         return;
       }
       case "invite:new": {

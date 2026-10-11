@@ -8,7 +8,12 @@ import {
   type RegistryDb,
 } from "./storage/registry";
 import { readStoredAi } from "./routes/settings";
-import { envFromAiSettings, makeOpenAiLlm, type TaggedLlm } from "./shared/llm";
+import {
+  envFromAiSettings,
+  makeOpenAiLlm,
+  makeUnconfiguredLlm,
+  type TaggedLlm,
+} from "./shared/llm";
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { sweepOrphanPending } from "./agent0/digest";
 import { errText } from "@summarizing/shared";
@@ -41,6 +46,17 @@ declare module "fastify" {
   }
 }
 
+/** 本库 AI 客户端：设置覆盖优先，回退 .env；两者都缺 → **未配置占位**（构造不抛——服务器 .env
+ *  留空是部署常态，装配期抛会把整站锁死；用到时明确报未配置，FR-009。评审修复）。 */
+function buildLlm(db: Db): TaggedLlm {
+  const stored = readStoredAi(db);
+  try {
+    return stored !== null ? makeOpenAiLlm(envFromAiSettings(stored)) : makeOpenAiLlm();
+  } catch {
+    return makeUnconfiguredLlm();
+  }
+}
+
 /** 装配一个账户的空间：开库（含启动清扫）→ 建 llm 引用（本库设置优先，回退 .env）→ 信源上岗并启动。
  *  `factories` 默认取生产注册表；测试注入替身适配器（不改生产路径）。 */
 async function assembleSpace(
@@ -49,31 +65,37 @@ async function assembleSpace(
   factories: Array<() => SourceAdapter> = allSourceAdapters(),
 ): Promise<Space> {
   const db = makeDb(path.join(dataRoot, "users", `${account.uid}.db`));
-  sweepOrphanPending(db); // 上次中断的孤儿 pending 置「未处理」（与原单库启动清扫同语义，L11）
+  try {
+    sweepOrphanPending(db); // 上次中断的孤儿 pending 置「未处理」（与原单库启动清扫同语义，L11）
 
-  const llmRef: { current: TaggedLlm } = { current: makeOpenAiLlm() };
-  const storedAi = readStoredAi(db);
-  if (storedAi !== null) {
-    llmRef.current = makeOpenAiLlm(envFromAiSettings(storedAi));
+    const llmRef: { current: TaggedLlm } = { current: buildLlm(db) };
+
+    const sourceStates = new Map<string, SourceState>();
+    const webhookRoutes: WebhookRoute[] = [];
+    const assembly = registerSources(
+      { db, llmRef, sourceStates, webhookRoutes },
+      factories.map((make) => make()),
+    );
+    await assembly.start();
+
+    return {
+      uid: account.uid,
+      db,
+      llmRef,
+      tools: makeAgentTools(db),
+      sourceStates,
+      webhookRoutes,
+      stop: () => assembly.stop(),
+    };
+  } catch (err) {
+    // 半装机不留句柄（评审修复）：装配失败关库再抛——ensure 的调用方自会重试装配
+    try {
+      db.$client.close();
+    } catch {
+      // 已关或未开——忽略
+    }
+    throw err;
   }
-
-  const sourceStates = new Map<string, SourceState>();
-  const webhookRoutes: WebhookRoute[] = [];
-  const assembly = registerSources(
-    { db, llmRef, sourceStates, webhookRoutes },
-    factories.map((make) => make()),
-  );
-  await assembly.start();
-
-  return {
-    uid: account.uid,
-    db,
-    llmRef,
-    tools: makeAgentTools(db),
-    sourceStates,
-    webhookRoutes,
-    stop: () => assembly.stop(),
-  };
 }
 
 /** 空间集线器：惰性装配（并发去重）+ 令牌索引 + 全量启停。 */

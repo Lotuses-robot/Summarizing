@@ -102,7 +102,7 @@
 | SameSite | Lax |
 | Path | / |
 | Max-Age | 30 天；剩余 <15 天时随响应续签（滑动） |
-| Secure | env `SESSION_COOKIE_SECURE`，默认 `"1"`（本机/便携包如遇浏览器差异设 `"0"`） |
+| Secure | 按**请求协议**自动（https → 开，Caddy/上线场景；局域网 http 手机访问则关）；env `SESSION_COOKIE_SECURE=1` 可强制开 |
 
 校验失败（无/坏签名/过期/tv 不匹配/uid 不存在/账户停用）一律按"未登录"处理。CSRF：SameSite=Lax + 全部写操作 JSON/POST——不做 CSRF token（点名接受，见 research R7）。
 

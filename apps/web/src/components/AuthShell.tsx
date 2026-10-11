@@ -3,8 +3,15 @@ import { errText, type MeView } from "@summarizing/shared";
 import { api } from "../api";
 
 /** 未登录壳（006）：登录/注册两视图互斥；页脚挂**备案号**——合规要求的公开可达页面即此壳。
- *  `?code=` 预填邀请码（运维把注册链接直接发给朋友）；注册成功即登录（onAuthed 交回 me）。 */
-export function AuthShell({ onAuthed }: { onAuthed: (me: MeView) => void }) {
+ *  `?code=` 预填邀请码（运维把注册链接直接发给朋友）；注册成功即登录（onAuthed 交回 me）。
+ *  `notice`：启动探测的后端不可达提示（评审修复——网络故障与「未登录」不再一并吞掉）。 */
+export function AuthShell({
+  onAuthed,
+  notice = null,
+}: {
+  onAuthed: (me: MeView) => void;
+  notice?: string | null;
+}) {
   const prefillCode = new URLSearchParams(window.location.search).get("code") ?? "";
   const [mode, setMode] = useState<"login" | "register">(prefillCode === "" ? "login" : "register");
   const [username, setUsername] = useState("");
@@ -38,6 +45,11 @@ export function AuthShell({ onAuthed }: { onAuthed: (me: MeView) => void }) {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">
+      {notice !== null && (
+        <p className="w-full max-w-sm rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
+          {notice}
+        </p>
+      )}
       <form
         onSubmit={submit}
         className="w-full max-w-sm space-y-3 rounded-xl border border-line bg-surface p-6 shadow-sm"

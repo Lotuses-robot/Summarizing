@@ -3,6 +3,8 @@
 
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const LOGIN_MAX_FAILS = 5;
+const LOGIN_IP_WINDOW_MS = 10 * 60_000;
+const LOGIN_IP_MAX = 30;
 const REGISTER_WINDOW_MS = 10 * 60_000;
 const REGISTER_MAX = 10;
 
@@ -10,11 +12,13 @@ const REGISTER_MAX = 10;
 const PRUNE_ABOVE_KEYS = 1000;
 
 const loginFails = new Map<string, number[]>();
+const loginIpHits = new Map<string, number[]>();
 const registerHits = new Map<string, number[]>();
 
-/** 登录锁定键：用户名 + 来源 IP 的**对**——防「拿别人用户名锁人」的 DoS（受害者从自己 IP 不受影响）。 */
+/** 登录锁定键：用户名 + 来源 IP 的**对**——防「拿别人用户名锁人」（受害者从自己 IP 不受影响）。
+ *  用户名按查库同口径先折叠（NFKC+trim+小写）——防大小写变体各享一份锁定预算（评审修复）。 */
 export function loginKey(username: string, ip: string): string {
-  return `${username}\u0000${ip}`;
+  return `${username.normalize("NFKC").trim().toLowerCase()}\u0000${ip}`;
 }
 
 /** 清掉窗口外的旧时间戳（就地更新数组）。 */
@@ -55,6 +59,20 @@ export function clearLoginFailures(key: string): void {
   loginFails.delete(key);
 }
 
+/** 登录按 IP 的**总量**限速（评审修复）：防随机用户名连刷——每次 miss 都跑真 scrypt，
+ *  不给对键锁定（每用户名独立）留打满 CPU 的口子。超限 true → 路由 429。 */
+export function loginIpRateLimited(ip: string, now = Date.now()): boolean {
+  const stamps = pruneStamps(loginIpHits.get(ip) ?? [], now, LOGIN_IP_WINDOW_MS);
+  if (stamps.length >= LOGIN_IP_MAX) {
+    loginIpHits.set(ip, stamps);
+    return true;
+  }
+  stamps.push(now);
+  loginIpHits.set(ip, stamps);
+  pruneAllIfHuge(loginIpHits, now, LOGIN_IP_WINDOW_MS);
+  return false;
+}
+
 /** 注册端点限速（按来源 IP）：超出返回 true（路由转 429）——防邀请码枚举。 */
 export function registerRateLimited(ip: string, now = Date.now()): boolean {
   const stamps = pruneStamps(registerHits.get(ip) ?? [], now, REGISTER_WINDOW_MS);
@@ -71,5 +89,6 @@ export function registerRateLimited(ip: string, now = Date.now()): boolean {
 /** 测试用：清空全部限速状态（模块态，用例间隔离）。 */
 export function resetLimitsForTest(): void {
   loginFails.clear();
+  loginIpHits.clear();
   registerHits.clear();
 }

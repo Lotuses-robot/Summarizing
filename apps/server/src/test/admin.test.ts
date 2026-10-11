@@ -61,22 +61,38 @@ describe("运维命令内核（contracts/cli.md）", () => {
     expect(out).toContain(acc.uid);
   });
 
-  it("user:add 无参走交互用户名；密码不一致 / 过短 / 用户名被占 → 人话失败", async () => {
+  it("user:add 无参走交互用户名；密码过短/不一致重问（连续 3 轮才败）；成功后用户名被占人话失败", async () => {
     const root = tmpDataRoot();
     // 无参：交互读用户名
     await runAdmin(["user:add"], {
       dataRoot: root,
       io: scriptedIo(["eve", "pw12345678", "pw12345678"]),
     });
+    // 首轮不一致、次轮成功 → 重问生效
+    await runAdmin(["user:add", "frank"], {
+      dataRoot: root,
+      io: scriptedIo(["pw12345678", "typo-typo-1", "pw12345678", "pw12345678"]),
+    });
+    // 连续 3 轮不一致 / 连续 3 轮过短 → 放弃
     await expect(
       runAdmin(["user:add", "bob"], {
         dataRoot: root,
-        io: scriptedIo(["pw12345678", "different"]),
+        io: scriptedIo([
+          "pw12345678",
+          "different",
+          "pw12345678",
+          "different",
+          "pw12345678",
+          "different",
+        ]),
       }),
-    ).rejects.toThrow("两次输入不一致");
+    ).rejects.toThrow("连续 3 次失败");
     await expect(
-      runAdmin(["user:add", "bob"], { dataRoot: root, io: scriptedIo(["short"]) }),
-    ).rejects.toThrow("密码至少 8 个字符");
+      runAdmin(["user:add", "bob"], {
+        dataRoot: root,
+        io: scriptedIo(["short", "short", "short"]),
+      }),
+    ).rejects.toThrow("连续 3 次失败");
     await runAdmin(["user:add", "bob"], {
       dataRoot: root,
       io: scriptedIo(["pw12345678", "pw12345678"]),
