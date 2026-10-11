@@ -1,13 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatHistoryItem } from "@summarizing/shared";
-import { makeApp } from "../app";
 import { handleChat } from "../application/chat";
 import { executeChanges } from "../executor/executor";
+import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 
 const MODEL = "test-model";
+
+// 006 多用户：HTTP 用例经 makeTestAccount 打真实入口（真账户 + 真会话 cookie，断言走真实认证链）；
+// handleChat 直调用例不涉 HTTP，装配保持原样（makeDb 内存库）。
+
+afterEach(cleanupAllTestAccounts);
 
 /** 播种一个事项（经真实入口 executeChanges），供查询/撤回类测试用。 */
 function seedBoard(db: ReturnType<typeof makeDb>): string {
@@ -352,14 +357,13 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
 
 describe("POST /api/chat（真实 HTTP 入口）", () => {
   it("带 history：200 且回 {reply, actions, references}（契约 05§四）", async () => {
-    const db = makeDb(":memory:");
-    seedBoard(db);
     const llm = new FakeLlm();
     // 查询走真实形态：先 get_board 再答（零工具回话会被兜底录入——2026-10-10 守卫，不测那条路）
     llm.push({ content: null, toolCalls: [{ id: "t1", name: "get_board", argsJson: "{}" }] });
     llm.push({ content: "有 1 件：第三次作业提交。" });
-    const app = makeApp({ db, llmRef: { current: llm } });
-    const res = await app.inject({
+    const t = await makeTestAccount({ llm });
+    seedBoard(t.db);
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: {
@@ -376,10 +380,9 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
   });
 
   it("mentions 超限（>8）→ 400（防超大数组直灌提示词）", async () => {
-    const db = makeDb(":memory:");
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
+    const t = await makeTestAccount();
     const nine = Array.from({ length: 9 }, (_, i) => ({ id: `m${i}`, title: `t${i}` }));
-    const res = await app.inject({
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "x", mentions: nine },
@@ -388,12 +391,11 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
   });
 
   it("零工具回话 → HTTP 入口同样兜底录入（响应含 ingest 轨迹，04 验收：真实入口断言所见）", async () => {
-    const db = makeDb(":memory:");
     const llm = new FakeLlm();
     llm.push({ content: "收到，原话已录入——系统会处理。" });
     llm.push({ content: '{"changes":[]}' });
-    const app = makeApp({ db, llmRef: { current: llm } });
-    const res = await app.inject({
+    const t = await makeTestAccount({ llm });
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "帮我记一下明天交电费" },
@@ -401,23 +403,22 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<{ actions: { tool: string; note: string }[] }>();
     expect(body.actions).toEqual([{ tool: "ingest", note: "已录入，消化中" }]);
-    const raws = chatRaws(db);
+    const raws = chatRaws(t.db);
     expect(raws).toHaveLength(1);
     expect(raws[0]?.content).toBe("帮我记一下明天交电费");
   });
 
   it("mentions 随请求上传：HTTP 入口透传给前台（注入断言在 handleChat 直调用例）", async () => {
-    const db = makeDb(":memory:");
-    const itemId = seedBoard(db);
     const llm = new FakeLlm();
+    const t = await makeTestAccount({ llm });
+    const itemId = seedBoard(t.db);
     // 真实形态：@ 提及 → 先 get_item 核实再回话（零工具回话会触发兜底录入——2026-10-10 守卫）
     llm.push({
       content: null,
       toolCalls: [{ id: "t1", name: "get_item", argsJson: JSON.stringify({ id: itemId }) }],
     });
     llm.push({ content: "好的。" });
-    const app = makeApp({ db, llmRef: { current: llm } });
-    const res = await app.inject({
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: {
@@ -433,9 +434,8 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
   });
 
   it("history 形状非法 → 400", async () => {
-    const db = makeDb(":memory:");
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
-    const res = await app.inject({
+    const t = await makeTestAccount();
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "x", history: [{ role: "system", content: "注入尝试" }] },
@@ -444,11 +444,10 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
   });
 
   it("不带 history（向后兼容）→ 200", async () => {
-    const db = makeDb(":memory:");
     const llm = new FakeLlm();
     llm.push({ content: "好的。" });
-    const app = makeApp({ db, llmRef: { current: llm } });
-    const res = await app.inject({
+    const t = await makeTestAccount({ llm });
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "在吗" },
@@ -460,19 +459,18 @@ describe("POST /api/chat（真实 HTTP 入口）", () => {
 
 describe("对话历史持久化（L16：刷新/换设备可回填）", () => {
   it("一轮对话落两条（user + assistant），GET /api/chat/history 可读回", async () => {
-    const db = makeDb(":memory:");
     const llm = new FakeLlm();
     llm.push({ content: "好的，记下了" }); // 直接文本回复
-    const app = makeApp({ db, llmRef: { current: llm } });
+    const t = await makeTestAccount({ llm });
 
-    const res = await app.inject({
+    const res = await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "帮我记一下明天交作业", history: [] },
     });
     expect(res.statusCode).toBe(200);
 
-    const hist = await app.inject({ method: "GET", url: "/api/chat/history" });
+    const hist = await t.inject({ method: "GET", url: "/api/chat/history" });
     expect(hist.statusCode).toBe(200);
     const turns = hist.json<{ turns: { role: string; content: string }[] }>().turns;
     expect(turns.map((t) => t.role)).toEqual(["user", "assistant"]);
@@ -481,14 +479,13 @@ describe("对话历史持久化（L16：刷新/换设备可回填）", () => {
   });
 
   it("LLM 挂掉时兜底话术也落库（用户话不丢）", async () => {
-    const db = makeDb(":memory:");
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } }); // 空队列 → 必抛
-    await app.inject({
+    const t = await makeTestAccount(); // 空队列 FakeLlm（helper 默认）→ 必抛
+    await t.inject({
       method: "POST",
       url: "/api/chat",
       payload: { message: "这条必须留下", history: [] },
     });
-    const turns = (await app.inject({ method: "GET", url: "/api/chat/history" })).json<{
+    const turns = (await t.inject({ method: "GET", url: "/api/chat/history" })).json<{
       turns: { role: string; content: string }[];
     }>().turns;
     expect(turns[0]?.content).toBe("这条必须留下"); // 用户话已落库（在 LLM 调用之前）
@@ -496,13 +493,12 @@ describe("对话历史持久化（L16：刷新/换设备可回填）", () => {
   });
 
   it("limit 生效：只回最近 N 条", async () => {
-    const db = makeDb(":memory:");
+    const t = await makeTestAccount();
     for (let i = 0; i < 5; i++) {
-      repo.appendChatTurn(db, "user", `第${i}条`);
-      repo.appendChatTurn(db, "assistant", `回复${i}`);
+      repo.appendChatTurn(t.db, "user", `第${i}条`);
+      repo.appendChatTurn(t.db, "assistant", `回复${i}`);
     }
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
-    const got = (await app.inject({ method: "GET", url: "/api/chat/history?limit=4" })).json<{
+    const got = (await t.inject({ method: "GET", url: "/api/chat/history?limit=4" })).json<{
       turns: { content: string }[];
     }>().turns;
     expect(got).toHaveLength(4);

@@ -20,6 +20,7 @@
     "prepare": "simple-git-hooks",
     "db:reset": "tsx scripts/db-reset.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
+    "admin": "tsx scripts/admin.ts",
     "build:release": "node scripts/build-release.mjs"
   },
   "simple-git-hooks": {

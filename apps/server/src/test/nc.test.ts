@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { makeApp, exitAfter, gracefulClose, registerSources, type AppDeps } from "../app";
-import { makeDb } from "../storage/db";
+import type { LightMyRequestResponse } from "fastify";
+import { exitAfter, gracefulClose, SHUTDOWN_TIMEOUT_MS } from "../app";
+import { closeSpacesWithTimeout } from "../spaces";
+import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import { makeNcAdapter, SWEEP_INTERVAL_MS } from "../sources/nc";
+import { SWEEP_INTERVAL_MS } from "../sources/nc";
 import {
   assembleBatch,
   dueGroups,
@@ -14,27 +15,22 @@ import {
 } from "../sources/nc/types";
 import { wallClockFromUnix } from "../shared/time";
 import { FakeLlm } from "./helpers/fakeLlm";
+import { cleanupAllTestAccounts, makeTestAccount, type TestAccount } from "./helpers/app";
 
-// nc 适配器（D-84 §3）：快收 204 / 白名单 fail-closed / 私聊丢 / 重推去重 /
-// 去抖满窗封批 / 窗长 KV 生效 / 图片段占位 / 关闭时强制封批。
+// nc 适配器（D-84 §3；006 起走 `/hook/<令牌>/nc/event` 网关 + 空间装配）：
+// 快收 204 / 白名单 fail-closed / 私聊丢 / 重推去重 / 去抖满窗封批 / 窗长 KV 生效 / 图片段占位 / 关闭时强制封批。
 // 封批经 ctx.setInterval 起的扫描定时器触发——测试用假时钟推进（不等真 5s）；纯函数单独测。
 // 「自动封批防饿死」一个用例**故意用真定时器等 5s**（守卫 unref 饿死回归，见下）。
 
 // 扫描间隔直接 import 自适配器（单一来源）——推进假时钟多于此即触发一次封批。
 
-/** 本文件创建的全部 app——afterEach 统一 close：触发信源 stop + 清理表（清定时器），
- *  否则 handler 与定时器跨用例累积。 */
-const openApps: FastifyInstance[] = [];
-
 afterEach(async () => {
-  vi.useRealTimers(); // 任何用例用过假时钟都恢复，防跨用例污染
-  for (const a of openApps.splice(0)) {
-    await a.close();
-  }
+  vi.useRealTimers(); // 任何用例用过假时钟都恢复（也丢弃未触发的假 interval），防跨用例污染
+  await cleanupAllTestAccounts(); // 关句柄（app+空间+SQLite）再删临时目录——跨用例干净
 });
 
 /** 只假 setInterval/clearInterval（不假 setTimeout/Date/微任务）——封批扫描可被假时钟推进，
- *  而 fastify inject 的内部定时器照常工作（全量假时钟会让 inject 挂死）。 */
+ *  而 fastify inject / waitFor 的内部定时器照常工作（全量假时钟会让 inject 挂死）。 */
 function useSweepFakeTimers(): void {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 }
@@ -44,28 +40,23 @@ function sweepNow(): void {
   vi.advanceTimersByTime(SWEEP_INTERVAL_MS + 1);
 }
 
-/** 造一个带白名单的 nc app（设置直接写库，等价联调 curl）。 */
-function makeNcApp(
+/** 造一个带白名单的 nc 测试账户（设置直接写库，等价联调 curl）。
+ *  ⚠️ 假时钟必须在**空间装配（ensure）之前**起——信源经 ctx.setInterval 起的扫描定时器才会被接管。 */
+async function makeNcApp(
   llm: FakeLlm,
   groups: Record<string, string> | null,
   windowMinutes?: number,
   opts: { fakeTimers?: boolean } = {},
-) {
-  const db = makeDb(":memory:");
+): Promise<TestAccount> {
+  if (opts.fakeTimers !== false) useSweepFakeTimers();
+  const t = await makeTestAccount({ llm }); // 默认适配器 = 生产注册表（nc）
   if (groups !== null) {
-    repo.setSourceSetting(db, "nc", "groups", JSON.stringify(groups));
+    repo.setSourceSetting(t.db, "nc", "groups", JSON.stringify(groups));
   }
   if (windowMinutes !== undefined) {
-    repo.setSourceSetting(db, "nc", "windowMinutes", JSON.stringify(windowMinutes));
+    repo.setSourceSetting(t.db, "nc", "windowMinutes", JSON.stringify(windowMinutes));
   }
-  const adapter = makeNcAdapter();
-  const deps: AppDeps = { db, llmRef: { current: llm } };
-  const app = makeApp(deps);
-  // 先起假定时器再登记信源——信源经 ctx.setInterval 起的扫描定时器才会被假时钟接管（sweepNow 才能推进）
-  if (opts.fakeTimers !== false) useSweepFakeTimers();
-  registerSources(app, deps, [adapter]);
-  openApps.push(app);
-  return { db, app };
+  return t;
 }
 
 /** 造一条群消息事件（默认群 g1、发信人小明）。 */
@@ -91,12 +82,9 @@ function groupEvent(opts: {
   };
 }
 
-/** 投递一条 webhook 事件（返回 inject 响应）。 */
-function emit(
-  app: ReturnType<typeof makeApp>,
-  payload: Record<string, unknown>,
-): Promise<LightMyRequestResponse> {
-  return app.inject({ method: "POST", url: "/api/sources/nc/event", payload });
+/** 投递一条 webhook 事件（经账户令牌网关 `/hook/<令牌>/nc/event`）。 */
+function emit(t: TestAccount, payload: Record<string, unknown>): Promise<LightMyRequestResponse> {
+  return t.app.inject({ method: "POST", url: t.hookUrl("nc", "/event"), payload });
 }
 
 /** 集成断言用的「时:分」显示——现算而非手抄，时区无关（specs/003 三处共用）。 */
@@ -321,66 +309,66 @@ describe("nc 适配器：纯函数", () => {
 
 describe("nc 适配器：webhook 快收", () => {
   it("白名单群消息 → 204 + 入缓冲（不立即落档）", async () => {
-    const { db, app } = makeNcApp(new FakeLlm(), { g1: "英语课官方群" });
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语课官方群" });
     const res = await emit(
-      app,
+      t,
       groupEvent({ groupId: "g1", messageId: "m1", text: "作业通知", time: 1790595828 }),
     );
     expect(res.statusCode).toBe(204);
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0); // 缓冲中，未投递
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0); // 缓冲中，未投递
   });
 
   it("白名单外群 → 204 丢（缓冲与落档都没有）", async () => {
-    const { db, app } = makeNcApp(new FakeLlm(), { g1: "英语群" });
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
     const res = await emit(
-      app,
+      t,
       groupEvent({ groupId: "g999", messageId: "m1", text: "闲聊", time: 1790595828 }),
     );
     expect(res.statusCode).toBe(204);
     sweepNow();
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 
   it("未配置白名单（fail-closed）→ 全丢", async () => {
-    const { db, app } = makeNcApp(new FakeLlm(), null);
+    const t = await makeNcApp(new FakeLlm(), null);
     const res = await emit(
-      app,
+      t,
       groupEvent({ groupId: "g1", messageId: "m1", text: "x", time: 1790595828 }),
     );
     expect(res.statusCode).toBe(204);
     sweepNow();
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 
   it("私聊与非消息事件 → 204 丢", async () => {
-    const { db, app } = makeNcApp(new FakeLlm(), { g1: "英语群" });
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
     const priv = await emit(
-      app,
+      t,
       groupEvent({ groupId: "g1", messageId: "m1", text: "私聊", time: 1, messageType: "private" }),
     );
-    const notice = await emit(app, { post_type: "notice", notice_type: "group_recall" });
+    const notice = await emit(t, { post_type: "notice", notice_type: "group_recall" });
     expect(priv.statusCode).toBe(204);
     expect(notice.statusCode).toBe(204);
     sweepNow();
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 
   it("形状不符的请求体 → 204 静默丢（快收语义，不落档）", async () => {
-    const { db, app } = makeNcApp(new FakeLlm(), { g1: "英语群" });
-    const res = await app.inject({
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
+    const res = await t.app.inject({
       method: "POST",
-      url: "/api/sources/nc/event",
+      url: t.hookUrl("nc", "/event"),
       payload: "not an event",
       headers: { "content-type": "text/plain" },
     });
     expect(res.statusCode).toBe(204); // nc 规范：一律快收，非事件静默丢
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 });
 
 describe("nc 适配器：去抖封批全链路", () => {
   /** 封批并等消化落档（单批次样板收尾——emit 完调它），返回该批（四轮评审：七处样板收敛）。 */
-  async function sealAndWaitDigested(db: ReturnType<typeof makeDb>) {
+  async function sealAndWaitDigested(db: Db) {
     sweepNow();
     await vi.waitFor(
       () => {
@@ -396,18 +384,18 @@ describe("nc 适配器：去抖封批全链路", () => {
   it("静默满窗 sweep → 合并投递 → agent0 消化（弹性的 sourceIdentity）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
-    const { db, app } = makeNcApp(llm, { g1: "英语课官方群" }, 0); // 窗长 0
+    const t = await makeNcApp(llm, { g1: "英语课官方群" }, 0); // 窗长 0
 
     await emit(
-      app,
+      t,
       groupEvent({ groupId: "g1", messageId: "m1", text: "通知：作业", time: 1790595828 }),
     );
     await emit(
-      app,
+      t,
       groupEvent({ groupId: "g1", messageId: "m2", text: "截止10月8日", time: 1790595830 }),
     );
 
-    const raw = await sealAndWaitDigested(db);
+    const raw = await sealAndWaitDigested(t.db);
     expect(raw.sourceType).toBe("nc");
     expect(raw.content).toBe(`[${HM}] 小明: 通知：作业\n[${HM}] 小明: 截止10月8日`); // 组内合并（行协议逐行署名，specs/003）
   });
@@ -415,30 +403,30 @@ describe("nc 适配器：去抖封批全链路", () => {
   it("重推同一 message_id → 只投递一次", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
     const ev = groupEvent({ groupId: "g1", messageId: "m1", text: "唯一一条", time: 1790595828 });
-    await emit(app, ev);
-    await emit(app, ev); // 重推
-    await sealAndWaitDigested(db); // 恰好一批（helper 内 waitFor 即精确断言 1）
+    await emit(t, ev);
+    await emit(t, ev); // 重推
+    await sealAndWaitDigested(t.db); // 恰好一批（helper 内 waitFor 即精确断言 1）
   });
 
   it("已在缓冲的消息重推 → 不重复入缓冲（组内只一条）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
     const ev = groupEvent({ groupId: "g1", messageId: "m1", text: "一次", time: 1790595828 });
-    await emit(app, ev);
-    await emit(app, ev);
-    const raw = await sealAndWaitDigested(db);
+    await emit(t, ev);
+    await emit(t, ev);
+    const raw = await sealAndWaitDigested(t.db);
     expect(raw.content).toBe(`[${HM}] 小明: 一次`); // 只有一条，未重复
   });
 
   it("图片段 → [图片](url) 占位（base64 不进 content）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
     await emit(
-      app,
+      t,
       groupEvent({
         groupId: "g1",
         messageId: "m1",
@@ -450,7 +438,7 @@ describe("nc 适配器：去抖封批全链路", () => {
         ],
       }),
     );
-    const raw = await sealAndWaitDigested(db);
+    const raw = await sealAndWaitDigested(t.db);
     expect(raw.content).toBe(`[${HM}] 小明: 看这个[图片](https://cdn.example/x.jpg)`);
     expect(raw.content).not.toContain("base64");
   });
@@ -458,19 +446,19 @@ describe("nc 适配器：去抖封批全链路", () => {
   it("raw 归档列：nc 原事件数组落库（D-84 §3.2 原始载荷留底——曾断线：适配器不传 raw）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
     const event = groupEvent({
       groupId: "g1",
       messageId: "m1",
       text: "留底测试",
       time: 1790595828,
     });
-    await emit(app, event);
-    await sealAndWaitDigested(db);
+    await emit(t, event);
+    await sealAndWaitDigested(t.db);
     // 直查 DB 的 raw 列（RawInput 类型不含它——归档字段只进不出，D-84）
     const row = z
       .object({ raw: z.string().nullable() })
-      .parse(db.$client.prepare("SELECT raw FROM raw_inputs WHERE source_type='nc'").get());
+      .parse(t.db.$client.prepare("SELECT raw FROM raw_inputs WHERE source_type='nc'").get());
     expect(row.raw).not.toBeNull();
     const parsed: unknown = JSON.parse(row.raw ?? "null");
     expect(Array.isArray(parsed)).toBe(true); // 原事件数组
@@ -480,9 +468,9 @@ describe("nc 适配器：去抖封批全链路", () => {
   it("全空消息批次 → 留痕丢弃不进消化（specs/003 评审修正：行协议前缀不得救活空批）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' }); // 若守卫失效，这里会被垃圾批次消耗
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
     await emit(
-      app,
+      t,
       groupEvent({
         groupId: "g1",
         messageId: "m1",
@@ -494,15 +482,15 @@ describe("nc 适配器：去抖封批全链路", () => {
     sweepNow();
     // 消化链是纯微任务（FakeLlm 同步、无定时器）——一跳宏任务即确定性排干（三轮评审：换掉墙钟 sleep）
     await new Promise((r) => setImmediate(r));
-    expect(repo.listRawInputsByState(db, "digested")).toHaveLength(0);
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "digested")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 
   it("sender 可选字段发 null → 事件照收不炸 schema（specs/003 三轮评审）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0);
-    await emit(app, {
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
+    await emit(t, {
       post_type: "message",
       message_type: "group",
       group_id: "g1",
@@ -512,7 +500,7 @@ describe("nc 适配器：去抖封批全链路", () => {
       time: 1790595828,
       sender: { user_id: null, nickname: null, card: null, role: null },
     });
-    const raw = await sealAndWaitDigested(db);
+    const raw = await sealAndWaitDigested(t.db);
     expect(raw.content).toBe(`[${HM}] 未知: null 字段也收`); // 全 null → 显示名兜「未知」
   });
 });
@@ -521,16 +509,16 @@ describe("nc 适配器：窗长与关闭", () => {
   it("扫描定时器自动封批（真实等 5s 周期，不推进假时钟）——防 unref 饿死回归", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 0, { fakeTimers: false }); // 真定时器
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0, { fakeTimers: false }); // 真定时器
     await emit(
-      app,
+      t,
       groupEvent({ groupId: "g1", messageId: "m1", text: "定时器测试", time: 1790595828 }),
     );
 
     // 关键：不推进假时钟——等 setInterval 自己跑（曾因 timer.unref() 被饿死永不封批）
     await vi.waitFor(
       () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
+        expect(repo.listRawInputsByState(t.db, "digested")).toHaveLength(1);
       },
       { timeout: 8000 },
     );
@@ -538,29 +526,26 @@ describe("nc 适配器：窗长与关闭", () => {
 
   it("窗长设置生效：设 60 分钟则最近消息不封批（扫描在跑也不封）", async () => {
     const llm = new FakeLlm();
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 60); // 60 分钟窗
+    const t = await makeNcApp(llm, { g1: "英语群" }, 60); // 60 分钟窗
     // 用「刚刚」的事件时刻——否则固定过去时间会立即满窗（去抖从消息时刻起算）
     const nowSec = Math.floor(Date.now() / 1000);
-    await emit(app, groupEvent({ groupId: "g1", messageId: "m1", text: "还在等", time: nowSec }));
+    await emit(t, groupEvent({ groupId: "g1", messageId: "m1", text: "还在等", time: nowSec }));
     sweepNow(); // 推进一次扫描——未满窗，不封
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0); // 仍在缓冲
-    expect(repo.listRawInputsByState(db, "digested")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0); // 仍在缓冲
+    expect(repo.listRawInputsByState(t.db, "digested")).toHaveLength(0);
   });
 
-  it("关闭（app.close）时强制封批全部组——SIGINT 归 core，信源 stop 收尾", async () => {
+  it("空间关停（closeAll）时强制封批全部组——SIGINT 归 core，信源 stop 收尾", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 60); // 60 分钟窗（远未到期）
-    await emit(
-      app,
-      groupEvent({ groupId: "g1", messageId: "m1", text: "急着走", time: 1790595828 }),
-    );
+    const t = await makeNcApp(llm, { g1: "英语群" }, 60); // 60 分钟窗（远未到期）
+    await emit(t, groupEvent({ groupId: "g1", messageId: "m1", text: "急着走", time: 1790595828 }));
 
-    // 触发 onClose → 信源 stop() 强制封批（SIGINT 归 core 的 index.ts，此处只验 stop）
-    await app.close();
+    // 触发空间关停 → 信源 stop() 强制封批（SIGINT 归 core 的 index.ts，此处只验 stop 链）
+    await t.hub.closeAll();
     await vi.waitFor(
       () => {
-        expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
+        expect(repo.listRawInputsByState(t.db, "digested")).toHaveLength(1);
       },
       { timeout: 3000 },
     );
@@ -569,25 +554,26 @@ describe("nc 适配器：窗长与关闭", () => {
   it("SIGINT 关停内核：封批后显式 exit(0)，close 失败也保底退出（Ctrl-C 停得掉——评审 C1 回归守卫）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const { db, app } = makeNcApp(llm, { g1: "英语群" }, 60); // 60 分钟窗（远未到期）
-    await emit(
-      app,
-      groupEvent({ groupId: "g1", messageId: "m1", text: "急着走", time: 1790595828 }),
-    );
+    const t = await makeNcApp(llm, { g1: "英语群" }, 60); // 60 分钟窗（远未到期）
+    await emit(t, groupEvent({ groupId: "g1", messageId: "m1", text: "急着走", time: 1790595828 }));
 
     // exit 的返回类型是 never——桩用 throw 真实满足它（零类型断言）；
-    // exitAfter(gracefulClose(app)) 就是 index.ts 的 SIGINT 处理内核，await 它让桩抛出可被接住。
+    // exitAfter(gracefulClose(app) → 空间关停) 就是 index.ts 的 SIGINT 处理内核，await 它让桩抛出可被接住。
     /** exit 桩：抛出代表「被调用」。 */
     function fakeExit(code?: string | number | null): never {
       throw new Error(`exit:${code ?? 0}`);
     }
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(fakeExit);
     try {
-      await expect(exitAfter(gracefulClose(app))).rejects.toThrow("exit:0");
+      await expect(
+        exitAfter(
+          gracefulClose(t.app).then(() => closeSpacesWithTimeout(t.hub, SHUTDOWN_TIMEOUT_MS)),
+        ),
+      ).rejects.toThrow("exit:0");
       expect(exitSpy).toHaveBeenCalledWith(0); // 封批后显式退出——否则 Ctrl-C 停不掉进程
       await vi.waitFor(
         () => {
-          expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1); // 缓冲封批已落库
+          expect(repo.listRawInputsByState(t.db, "digested")).toHaveLength(1); // 缓冲封批已落库
         },
         { timeout: 3000 },
       );

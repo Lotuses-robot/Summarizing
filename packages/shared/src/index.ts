@@ -639,3 +639,70 @@ export const PipelineRunDetailSchema = z.object({
   events: z.array(PipelineEventSchema),
 });
 export type PipelineRunDetail = z.infer<typeof PipelineRunDetailSchema>;
+
+// ──────────────── 多用户认证（006 批次，D-96）────────────────
+
+/** 用户名规范：NFKC 归一 + trim 后 2~20 字符，字母/数字/下划线/连字符（含 CJK）。
+ *  归一在边界一次做（注册/登录/CLI 共用同一份）——防全角形近字双占（006 脏形态表）。 */
+export const UsernameSchema = z
+  .string()
+  .transform((v) => v.normalize("NFKC").trim())
+  .pipe(
+    z
+      .string()
+      .min(2, "用户名至少 2 个字符")
+      .max(20, "用户名最多 20 个字符")
+      .regex(/^[\p{L}\p{N}_-]+$/u, "用户名只能包含字母/数字/下划线/连字符"),
+  );
+
+/** 密码规范（注册/改密用）：8~200 字符。上限防超长输入；空白/全角原样哈希不裁剪（密码是原样秘密）。 */
+export const PasswordSchema = z
+  .string()
+  .min(8, "密码至少 8 个字符")
+  .max(200, "密码最多 200 个字符");
+
+/** 邀请码规范：10 位无歧义 base32（Crockford 字母表，去 I/L/O/U）；大小写归一 + 容忍首尾空白。 */
+export const InviteCodeSchema = z
+  .string()
+  .transform((v) => v.toUpperCase().trim())
+  .pipe(z.string().regex(/^[0-9A-HJKMNP-TV-Z]{10}$/, "邀请码格式不正确"));
+
+export const RegisterRequestSchema = z.object({
+  code: InviteCodeSchema,
+  username: UsernameSchema,
+  password: PasswordSchema,
+});
+export type RegisterRequest = z.infer<typeof RegisterRequestSchema>;
+
+/** 登录请求：密码只要求非空（不套 PasswordSchema）——格式不符与凭据错误同在 401 统一话术里，
+ *  不给「这密码格式不对」这种存在性/状态旁路（006 失败矩阵）。 */
+export const LoginRequestSchema = z.object({
+  username: UsernameSchema,
+  password: z.string().min(1),
+});
+export type LoginRequest = z.infer<typeof LoginRequestSchema>;
+
+export const ChangePasswordRequestSchema = z.object({
+  oldPassword: z.string().min(1),
+  newPassword: PasswordSchema,
+});
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
+
+/** GET /api/auth/me 视图：当前账户 + 信源接入令牌（设置区渲染完整接入地址用）。 */
+export const MeViewSchema = z.object({
+  username: z.string(),
+  sourceToken: z.string(),
+});
+export type MeView = z.infer<typeof MeViewSchema>;
+
+/** POST /api/auth/source-token/rotate 响应：新令牌（旧值即刻作废）。 */
+export const RotateTokenResponseSchema = z.object({
+  sourceToken: z.string(),
+});
+export type RotateTokenResponse = z.infer<typeof RotateTokenResponseSchema>;
+
+/** 注册/登录成功响应（两者同形；会话在 Set-Cookie 里）。 */
+export const AuthOkSchema = z.object({
+  username: z.string(),
+});
+export type AuthOk = z.infer<typeof AuthOkSchema>;

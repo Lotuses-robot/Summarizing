@@ -1,13 +1,24 @@
-// 演示数据种子（公开：`npm run seed:demo`）——清空当前库并写入一套**虚构**样例：
+// 演示数据种子（公开：`npm run seed:demo`）——为**演示账户**重建一套**虚构**样例：
 // 大学生场景的 8 个事项 / 8 条批次原文 / 2 条存疑 / 4 轮对话 / 信源设置。
-// 用途：截图、演示、新机器体验。⚠️ 会清空现有数据（先自行备份：data/backup/）。
+// 用途：截图、演示、新机器体验。⚠️ 只清演示账户自己的库（006 多用户）；账户与密码见文末输出。
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { SettingFieldSchema } from "@summarizing/shared";
 import { makeDb } from "../apps/server/src/storage/db";
 import * as repo from "../apps/server/src/storage/repo";
 import { makeNcAdapter } from "../apps/server/src/sources/nc";
+import {
+  createAccount,
+  getAccountByUsername,
+  makeRegistryDb,
+} from "../apps/server/src/storage/registry";
+import { hashPassword } from "../apps/server/src/auth/password";
 
-const DB_PATH = "data/summarizing.db";
+const ROOT = path.resolve(import.meta.dirname, "..");
+const DATA = path.join(ROOT, "data");
+/** 演示账户（已存在则复用其 uid；不存在则创建）。 */
+const DEMO_USER = "demo";
+const DEMO_PASSWORD = "demo-password-123";
 const MODEL = "deepseek-flash";
 const BY = { actor: "agent0", model: MODEL };
 
@@ -25,7 +36,16 @@ function wallClockAgo(ms: number): string {
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
-const db = makeDb(DB_PATH);
+// 演示账户落登记（已存在则复用）；库固定为该账户自己的用户库（清空重建在下面按表删）
+const registry = makeRegistryDb(path.join(DATA, "system.db"));
+const account =
+  getAccountByUsername(registry, DEMO_USER) ??
+  createAccount(registry, {
+    username: DEMO_USER,
+    passwordHash: await hashPassword(DEMO_PASSWORD),
+  });
+
+const db = makeDb(path.join(DATA, "users", `${account.uid}.db`));
 const client = db.$client;
 
 // ── 清空（顺序无关，无外键约束）──
@@ -491,4 +511,7 @@ repo.setAppSetting(
 );
 
 db.$client.close();
-console.log("演示数据已写入：8 事项 / 8 批次 / 2 存疑 / 4 轮对话 / nc 设置 + 虚构 AI 配置");
+console.log(
+  `演示数据已写入账户 ${account.username}（密码 ${DEMO_PASSWORD}）：8 事项 / 8 批次 / 2 存疑 / 4 轮对话 / nc 设置 + 虚构 AI 配置`,
+);
+console.log("登录：npm run dev 后打开 http://localhost:5173（或发布包 start.cmd）");

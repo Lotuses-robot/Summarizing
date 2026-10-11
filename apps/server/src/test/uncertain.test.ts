@@ -1,16 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ChangeListSchema, type Item, type RawInput } from "@summarizing/shared";
-import { makeApp } from "../app";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { digestRawInput } from "../agent0/digest";
 import { executeChanges } from "../executor/executor";
 import { sweepUncertainLibrary } from "../agent0/sweep";
 import { makeAgentTools } from "../agent0/tools";
+import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { FakeLlm } from "./helpers/fakeLlm";
 
 // 存疑信息库（D-85）：park_uncertain 入库 / resolve_uncertain 流转 / 查询端点排序 /
 // 词表 -mark_doubt。库是信息层池子——不生成事项、不挂候选。
+// 006 起端点类用例经 makeTestAccount 打真实入口（真会话 cookie）；纯造数用例保持内存库。
+
+afterEach(cleanupAllTestAccounts);
 
 /** 经真实入口播种一条批次。 */
 function seedRaw(db: ReturnType<typeof makeDb>, content = "原始通知"): RawInput {
@@ -198,11 +201,10 @@ describe("存疑信息库（D-85）", () => {
 
 describe("GET /api/uncertain（查询端点，人工通道排序）", () => {
   it("按状态筛 + needsHuman 倒序、破平新到旧", async () => {
-    const db = makeDb(":memory:");
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
-    const raw = seedRaw(db);
+    const t = await makeTestAccount({ llm: new FakeLlm() });
+    const raw = seedRaw(t.db);
     executeChanges(
-      db,
+      t.db,
       raw,
       [
         { action: "park_uncertain", content: "低", needsHuman: 10, reason: "r" },
@@ -212,17 +214,15 @@ describe("GET /api/uncertain（查询端点，人工通道排序）", () => {
       { actor: "agent0", model: "test" },
     );
 
-    const res = await app.inject({ method: "GET", url: "/api/uncertain" });
+    const res = await t.inject({ method: "GET", url: "/api/uncertain" });
     expect(res.statusCode).toBe(200);
     const body = res.json<{ content: string; needsHuman: number }[]>();
     expect(body.map((e) => e.content)).toEqual(["高", "中", "低"]); // 最需要人工处理的浮前
   });
 
   it("POST /api/uncertain/sweep：空库 → 200 且 evaluated 0（清扫循环已接线）", async () => {
-    const db = makeDb(":memory:");
-    const llm = new FakeLlm();
-    const app = makeApp({ db, llmRef: { current: llm } });
-    const res = await app.inject({ method: "POST", url: "/api/uncertain/sweep" });
+    const t = await makeTestAccount({ llm: new FakeLlm() });
+    const res = await t.inject({ method: "POST", url: "/api/uncertain/sweep" });
     expect(res.statusCode).toBe(200);
     expect(res.json<{ evaluated: number }>().evaluated).toBe(0);
   });
@@ -430,26 +430,24 @@ describe("存疑库人工移除端点（D-88 T4：PUT /api/uncertain/:id）", ()
   }
 
   it("open 条目 → 204，状态置 discarded（resolvedRef=manual）", async () => {
-    const db = makeDb(":memory:");
-    const id = seedOpen(db);
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
-    const res = await app.inject({ method: "PUT", url: `/api/uncertain/${id}` });
+    const t = await makeTestAccount({ llm: new FakeLlm() });
+    const id = seedOpen(t.db);
+    const res = await t.inject({ method: "PUT", url: `/api/uncertain/${id}` });
     expect(res.statusCode).toBe(204);
-    const entry = repo.getUncertainInput(db, id);
+    const entry = repo.getUncertainInput(t.db, id);
     expect(entry?.status).toBe("discarded");
     expect(entry?.resolvedRef).toBe("manual");
     expect(entry?.resolvedAt).not.toBeNull();
   });
 
   it("不存在的 id → 404；已处置的条目再移除 → 409（不复活不覆盖）", async () => {
-    const db = makeDb(":memory:");
-    const id = seedOpen(db);
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
-    const missing = await app.inject({ method: "PUT", url: "/api/uncertain/nope" });
+    const t = await makeTestAccount({ llm: new FakeLlm() });
+    const id = seedOpen(t.db);
+    const missing = await t.inject({ method: "PUT", url: "/api/uncertain/nope" });
     expect(missing.statusCode).toBe(404);
 
-    await app.inject({ method: "PUT", url: `/api/uncertain/${id}` }); // 第一次处置
-    const again = await app.inject({ method: "PUT", url: `/api/uncertain/${id}` });
+    await t.inject({ method: "PUT", url: `/api/uncertain/${id}` }); // 第一次处置
+    const again = await t.inject({ method: "PUT", url: `/api/uncertain/${id}` });
     expect(again.statusCode).toBe(409);
   });
 });

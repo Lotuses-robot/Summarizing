@@ -1,23 +1,17 @@
-// 数据库回档脚本：把 data/summarizing.db 恢复成空库（表结构完整）。
-// 首次运行时在 data/backup/summarizing.empty.db 生成空库备份；之后回档 = 从该备份复制。
+// 数据库回档脚本：把多用户数据恢复成空（系统库重建 + 用户库清空）。
+// 旧单机库 data/summarizing.db **不动**（D5 不做收编——要导走 manual 流程见 specs/006 quickstart 附录）。
 // 用法：npm run db:reset
-import { existsSync, cpSync, mkdirSync, rmSync } from "node:fs";
-import { makeDb } from "../apps/server/src/storage/db";
+import { rmSync } from "node:fs";
+import path from "node:path";
+import { makeRegistryDb } from "../apps/server/src/storage/registry";
 
-const LIVE = "data/summarizing.db";
-const BACKUP = "data/backup/summarizing.empty.db";
+const ROOT = path.resolve(import.meta.dirname, "..");
+const DATA = path.join(ROOT, "data");
+const REGISTRY = path.join(DATA, "system.db");
 const SUFFIXES = ["", "-wal", "-shm"] as const;
 
-if (!existsSync(BACKUP)) {
-  mkdirSync("data/backup", { recursive: true });
-  makeDb(BACKUP); // makeDb 幂等建表——备份永远与当前 schema 同源
-  console.log("已生成空库备份:", BACKUP);
-}
-
-for (const suffix of SUFFIXES) {
-  rmSync(LIVE + suffix, { force: true });
-  const backupSide = BACKUP + suffix;
-  if (existsSync(backupSide)) cpSync(backupSide, LIVE + suffix);
-}
-makeDb(LIVE); // 打开验证 + 完成初始化
-console.log("已回档：data/summarizing.db = 空库（表结构完整，无数据）");
+for (const suffix of SUFFIXES) rmSync(REGISTRY + suffix, { force: true });
+rmSync(path.join(DATA, "users"), { recursive: true, force: true });
+makeRegistryDb(REGISTRY); // 重建 + 验证（幂等建表；session_secret 重新播种）
+console.log("已回档：data/system.db 重建为空（账户清空、users/ 已删）");
+console.log("下一步：npm run admin -- user:add <你的用户名> 建账户");

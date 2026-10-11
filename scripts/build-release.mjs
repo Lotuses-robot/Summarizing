@@ -27,6 +27,10 @@ if not exist ".env" (
   copy /y ".env.example" ".env" >nul
   echo [summarizing] created .env - open it and fill in your OpenAI-compatible API settings.
 )
+if not exist "data\\system.db" (
+  echo [summarizing] First run - create your account now ^(you will log in with it^).
+  ".\\node\\node.exe" "apps\\server\\dist\\admin.mjs" user:add
+)
 start /min "" cmd /c "timeout /t 2 /nobreak >nul & explorer http://localhost:3001"
 ".\\node\\node.exe" "apps\\server\\dist\\index.mjs"
 pause
@@ -40,20 +44,37 @@ const README_TXT = `Summarizing · 便携版（Windows）
        OPENAI_BASE_URL=...   （OpenAI 兼容接口，须带 /v1）
        OPENAI_MODEL=...
        OPENAI_API_KEY=...
-  2. 双击 start.cmd。
+  2. 双击 start.cmd —— 首次会引导你创建自己的账户（用户名 + 密码）。
+  3. 之后在浏览器里登录使用。
 
 二、之后每次
   双击 start.cmd。浏览器会自动打开 http://localhost:3001
   黑色窗口 = 服务本体，别关；关闭窗口即停止。
 
 三、数据在哪
-  data\\ 文件夹——单一 SQLite 文件，拷走即备份。删掉即重来。
+  data\\ 文件夹——system.db（账户登记）+ users\\<uid>.db（每人一个库）。
+  整目录拷走即备份；删掉即重来。
 
 四、试一下
   在右侧对话里丢一句「10月8日前交数据结构作业」，看它变成看板上的一条事项。
   （不配 AI 也能打开界面，只是没法消化信息。）
 
-五、端口
+五、运维命令（可选）
+  建账户 / 发邀请码 / 停用账户等一律走命令行：
+    node apps\\server\\dist\\admin.mjs user:add 你的名字
+    node apps\\server\\dist\\admin.mjs invite:new        （生成一次性邀请码）
+    node apps\\server\\dist\\admin.mjs user:list          （列出账户，含 uid）
+  完整用法：node apps\\server\\dist\\admin.mjs
+
+六、从旧版（v0.1）升级？
+  旧数据是 data\\summarizing.db（单一库）；新版每人一个库 data\\users\\<uid>.db。
+  迁移步骤（先关掉服务）：
+    1) node apps\\server\\dist\\admin.mjs user:add 你的名字
+    2) node apps\\server\\dist\\admin.mjs user:list   → 抄下你的 uid
+    3) 把旧 data\\summarizing.db 复制为 data\\users\\<uid>.db
+    4) 重新 start.cmd，登录后数据就都在了。
+
+七、端口
   默认 3001；被占用时可在启动前设置环境变量 PORT。
 `;
 
@@ -82,6 +103,21 @@ await esbuild.build({
   external: ["better-sqlite3"],
   logLevel: "warning",
   // CJS 依赖（fastify 生态）在 ESM 产物里的 require 垫片：定义真 require，否则动态 require 抛错
+  banner: {
+    js: 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);',
+  },
+});
+
+// 运维命令入口（admin.mjs；start.cmd 首启引导 + 手动运维——同一份 scripts/admin.ts）
+await esbuild.build({
+  entryPoints: [path.join(root, "scripts/admin.ts")],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  outfile: path.join(out, "apps/server/dist/admin.mjs"),
+  external: ["better-sqlite3"],
+  logLevel: "warning",
   banner: {
     js: 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);',
   },

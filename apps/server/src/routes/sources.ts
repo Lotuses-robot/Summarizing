@@ -1,25 +1,16 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { SettingFieldSchema, SourceSummarySchema, type SettingField } from "@summarizing/shared";
-import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import type { SourceState } from "../sources/types";
 
-// 信源设置路由（D-84/D-88）：core 只知道「有什么设置」，不解释内容——通用 KV 读写口。
-// 值是任意 JSON；联调期 curl 改白名单/窗长（docs/07 检查单③），设置界面随后端端点之后的前端批次。
+// 信源设置路由（D-84/D-88；006 起依赖来自请求上下文）：core 只知道「有什么设置」，不解释内容——
+// 通用 KV 读写口。值是任意 JSON；库与状态表都从 req.space 取（每个账户一套自己的信源）。
 
 /** 信源声明的设置 schema 在设置 KV 里的保留键——不属于「设置值」，读值端点须过滤掉（D-88 T3）。 */
 export const SOURCE_SCHEMA_KEY = "__schema__";
 
 const NameParamsSchema = z.object({ name: z.string().min(1) });
 const KeyParamsSchema = z.object({ name: z.string().min(1), key: z.string().min(1) });
-
-/** 本组路由的窄依赖（不 import app.ts → 无循环）。 */
-export interface SourceRouteDeps {
-  db: Db;
-  /** 信源状态表（makeApp 挂空表，registerSources 填充）——`GET /api/sources` 读它。 */
-  sourceStates: Map<string, SourceState>;
-}
 
 /** 把存储的 JSON 串读回值；坏串原样返回（core 不解释也不静默丢——读得到原串就能发现坏了）。 */
 function parseStored(text: string): unknown {
@@ -55,19 +46,20 @@ function parseSchema(source: string, text: string | null): SettingField[] {
 }
 
 /** 注册信源路由：GET 列表+schema（前端不知道信源名，按 schema 渲染）/ GET 全键值 / PUT 单键 / DELETE 单键。 */
-export function registerSourceRoutes(app: FastifyInstance, deps: SourceRouteDeps): void {
+export function registerSourceRoutes(app: FastifyInstance): void {
   // 列表：每个信源的名字、运行状态（含最近错误）、设置 schema——前端据此渲染通用设置表单
   //（core 不解释内容）。仅在库里有设置行、未上岗的源按 ok 兜底（乐观；UI 收口可给第三态）。
-  app.get("/api/sources", async () => {
-    const names = new Set<string>(deps.sourceStates.keys());
-    for (const row of repo.listSourceNames(deps.db)) names.add(row);
+  app.get("/api/sources", async (req) => {
+    const states = req.space.sourceStates;
+    const names = new Set<string>(states.keys());
+    for (const row of repo.listSourceNames(req.space.db)) names.add(row);
     return [...names].map((name) =>
       SourceSummarySchema.parse({
         name,
-        state: deps.sourceStates.get(name)?.state ?? "ok",
-        lastError: deps.sourceStates.get(name)?.lastError,
-        lastOkAt: deps.sourceStates.get(name)?.lastOkAt,
-        settings: parseSchema(name, repo.getSourceSetting(deps.db, name, SOURCE_SCHEMA_KEY)),
+        state: states.get(name)?.state ?? "ok",
+        lastError: states.get(name)?.lastError,
+        lastOkAt: states.get(name)?.lastOkAt,
+        settings: parseSchema(name, repo.getSourceSetting(req.space.db, name, SOURCE_SCHEMA_KEY)),
       }),
     );
   });
@@ -75,7 +67,7 @@ export function registerSourceRoutes(app: FastifyInstance, deps: SourceRouteDeps
   app.get("/api/sources/:name/settings", async (req) => {
     const { name } = NameParamsSchema.parse(req.params);
     const out: Record<string, unknown> = {};
-    for (const row of repo.listSourceSettings(deps.db, name)) {
+    for (const row of repo.listSourceSettings(req.space.db, name)) {
       if (row.key === SOURCE_SCHEMA_KEY) continue; // schema 不属于设置值，不回吐
       out[row.key] = parseStored(row.value);
     }
@@ -89,13 +81,13 @@ export function registerSourceRoutes(app: FastifyInstance, deps: SourceRouteDeps
     if (req.body === undefined) {
       return reply.code(400).send({ error: "请求体必须是 JSON 值" });
     }
-    repo.setSourceSetting(deps.db, name, key, JSON.stringify(req.body));
+    repo.setSourceSetting(req.space.db, name, key, JSON.stringify(req.body));
     return reply.code(204).send();
   });
 
   app.delete("/api/sources/:name/settings/:key", async (req, reply) => {
     const { name, key } = KeyParamsSchema.parse(req.params);
-    repo.deleteSourceSetting(deps.db, name, key);
+    repo.deleteSourceSetting(req.space.db, name, key);
     return reply.code(204).send();
   });
 }

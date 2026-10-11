@@ -1,12 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
-import { makeApp } from "../app";
 import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
 import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
+import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { makeAgentTools } from "../agent0/tools";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
+
+afterEach(async () => {
+  await cleanupAllTestAccounts();
+});
 
 const MODEL = "test-model";
 const PASTE = "数据结构 老师说下周要交第三次作业 好像还要交实验报告？";
@@ -518,12 +522,11 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
 
 describe("POST /api/ingest（真实 HTTP 入口）", () => {
   it("原文先落盘（逐字一致）→ 202 → 异步消化完成", async () => {
-    const db = makeDb(":memory:");
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const app = makeApp({ db, llmRef: { current: llm } });
+    const t = await makeTestAccount({ llm });
 
-    const res = await app.inject({
+    const res = await t.inject({
       method: "POST",
       url: "/api/ingest",
       payload: {
@@ -535,28 +538,27 @@ describe("POST /api/ingest（真实 HTTP 入口）", () => {
     });
     expect(res.statusCode).toBe(202);
     const body = res.json<{ id: string }>();
-    const raw = repo.getRawInput(db, body.id);
+    const raw = repo.getRawInput(t.db, body.id);
     if (!raw) throw new Error("RawInput 未落盘");
     expect(raw.content).toBe(PASTE);
 
     await vi.waitFor(
       () => {
-        expect(repo.getRawInput(db, body.id)?.digestState).toBe("digested");
+        expect(repo.getRawInput(t.db, body.id)?.digestState).toBe("digested");
       },
       { timeout: 3000 },
     );
   });
 
   it("请求体不合法 → 400，不落盘", async () => {
-    const db = makeDb(":memory:");
-    const app = makeApp({ db, llmRef: { current: new FakeLlm() } });
-    const res = await app.inject({
+    const t = await makeTestAccount({ llm: new FakeLlm() });
+    const res = await t.inject({
       method: "POST",
       url: "/api/ingest",
       payload: { content: "", sourceType: "paste", sourceIdentity: { sourceLabel: "x" } },
     });
     expect(res.statusCode).toBe(400);
-    expect(repo.listRawInputsByState(db, "pending")).toHaveLength(0);
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 });
 

@@ -1,322 +1,189 @@
 import Fastify from "fastify";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import cookie from "@fastify/cookie";
 import { z } from "zod";
-import {
-  ChatRequestSchema,
-  errText,
-  IngestRequestSchema,
-  SettingFieldSchema,
-} from "@summarizing/shared";
-import type { Db } from "./storage/db";
+import { ChatRequestSchema, errText, IngestRequestSchema } from "@summarizing/shared";
+import { getSessionSecret, type RegistryDb } from "./storage/registry";
 import * as repo from "./storage/repo";
-import { nowLocalWallClock } from "./shared/time";
 import { retryRawInput } from "./agent0/digest";
-import { sweepUncertainLibrary } from "./agent0/sweep";
-import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { ingestBatch } from "./application/ingest";
 import { handleChat } from "./application/chat";
 import { buildBoard } from "./application/board";
+import { makeSessionAuth } from "./auth/session";
+import { registerAuthPublicRoutes, registerAuthSessionRoutes } from "./routes/auth";
 import { registerItemRoutes } from "./routes/items";
 import { registerPipelineRoutes } from "./routes/pipeline";
-import { registerSourceRoutes, SOURCE_SCHEMA_KEY } from "./routes/sources";
+import { registerSourceRoutes } from "./routes/sources";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerUncertainRoutes } from "./routes/uncertain";
-import type { TaggedLlm } from "./shared/llm";
-import type { SourceAdapter, SourceBatch, SourceContext, SourceState } from "./sources/types";
+import type { SpaceHub } from "./spaces";
 
-// Fastify 实例上的信源状态表（D-88）：makeApp 挂空表、registerSources 填、GET /api/sources 读。
-declare module "fastify" {
-  interface FastifyInstance {
-    sourceStates: Map<string, SourceState>;
-  }
-}
+// 装配 HTTP 应用（006 多用户重构）：
+// ① 公开面 = 认证三端点（register/login/logout）+ webhook 网关（令牌鉴权）——除此之外全部 401；
+// ② 受保护面 = 一个**封装作用域**：作用域级 preHandler 验会话并挂 `req.space`——路由只读
+//    `req.space.db`，结构上不可能「某条路由漏挂鉴权」（漏挂的路由根本访问不到数据）。
+// 信源不认识本文件（D-88）：装配在 spaces.ts 按空间进行，webhook 经网关分发。
 
-/** 应用装配的窄依赖——**不含信源**（D-88 三时机分离）：makeApp 只装 core，信源由 registerSources 上岗。 */
-export interface AppDeps {
-  db: Db;
-  /** 可换客户端的委托引用（05§五 热切换）：路由逐请求解构取 llm+modelTag，禁止 makeApp 时缓存——
-   *  否则切换后 modelTag 依旧值进 agent0: 署名，审计说谎。 */
-  llmRef: { current: TaggedLlm };
-}
+/** 关停超时：close 挂起时按超时继续走保底退出——与信源 start 的 START_TIMEOUT_MS 对称：
+ *  任何一侧挂起都不许拖住 Ctrl-C。（空间 stop 由 index 的 closeAll 走同一超时。） */
+export const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 /** URL 路径里的批次 id 参数（重试口）。与 shared 的 GetItemArgsSchema 分开是刻意的：
  *  那是 get_item 工具的跨边界契约（住 shared），这只是 server 内部 HTTP 细节——schema 住在使用它的边界。 */
 const RawIdParamsSchema = z.object({ id: z.string() });
-
-/** start() 的隔离超时：超过即按失败处理（标该信源 error、继续 listen），不给挂起的 start 拖垮整服的机会。
- *  导出给测试 import（推进假时钟用同一来源，杜绝「改常量忘改测试」）。 */
-export const START_TIMEOUT_MS = 10_000;
-
-/** 关停超时：close（含各信源 stop 与清理表）挂起时按超时继续走保底退出——
- *  与 start 路径的 START_TIMEOUT_MS 对称：任何一侧挂起都不许拖住 Ctrl-C。 */
-export const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 /** 对话历史查询参数（L16）：limit = 回填多少轮，默认 50、上限 200。 */
 const ChatHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
-/** 造一个信源的 ctx（D-88 八件套）：进站走与 HTTP 路由同一条 ingestBatch；设置读写限定本源命名空间；
- *  日志统一前缀；清理/定时器登记进传入的登记表；错误写进本源的 state。
- *  刻意无 db——信源不摸数据库，core 只提供手段。 */
-function makeSourceContext(
-  deps: AppDeps,
-  tools: AgentTools,
-  name: string,
-  cleanups: (() => void | Promise<void>)[],
-  state: SourceState,
-): SourceContext {
-  /** 统一日志前缀（信源不再自己写 stderr；core 一处收集/过滤）。 */
-  const log =
-    (level: string) =>
-    (msg: string): void => {
-      process.stderr.write(`[source:${name}] ${level} ${msg}\n`);
-    };
-  return {
-    name,
-    ingest(batch: SourceBatch): { ok: true; id: string } | { ok: false; reason: string } {
-      try {
-        // 适配器组装的批次在边界过同一份 schema——信源 bug 在此响亮表达（降级可观测），不静默落库
-        const parsed = IngestRequestSchema.parse(batch);
-        const { raw } = ingestBatch(
-          deps.db,
-          deps.llmRef,
-          tools,
-          { ...parsed, raw: batch.raw },
-          `source:${name}`,
-        );
-        // 落地成功即恢复正常（reportError 置的 error 不能粘滞——「最近出错」语义要能翻篇）
-        state.state = "ok";
-        state.lastOkAt = nowLocalWallClock();
-        return { ok: true, id: raw.id };
-      } catch (err) {
-        // 不抛（D-88）：信源要能感知「落地失败」，自己决定重试/丢弃；抛出去只会污染主进程
-        return { ok: false, reason: errText(err) };
-      }
-    },
-    setSetting(key: string, value: unknown): void {
-      repo.setSourceSetting(deps.db, name, key, JSON.stringify(value));
-    },
-    getSetting(key: string): unknown {
-      const raw = repo.getSourceSetting(deps.db, name, key);
-      if (raw === null) return undefined;
-      try {
-        const value: unknown = JSON.parse(raw);
-        return value;
-      } catch {
-        process.stderr.write(`[source:${name}] 设置 ${key} 不是合法 JSON，按未设置处理\n`);
-        return undefined;
-      }
-    },
-    log: {
-      debug: log("debug"),
-      info: log("info"),
-      warn: log("warn"),
-      error: log("error"),
-    },
-    onCleanup(fn: () => void | Promise<void>): void {
-      cleanups.push(fn);
-    },
-    setInterval(fn: () => void, ms: number): void {
-      const timer = setInterval(fn, ms);
-      cleanups.push(() => clearInterval(timer));
-    },
-    reportError(err: unknown, opts?: { fatal?: boolean }): void {
-      const reason = errText(err);
-      state.state = "error";
-      state.lastError = reason;
-      process.stderr.write(
-        `[source:${name}] reportError${opts?.fatal === true ? "（致命）" : ""}：${reason}\n`,
-      );
-    },
-  };
+/** webhook 网关参数：token 定空间、source + 通配定处理器。 */
+const HookParamsSchema = z.object({ token: z.string(), source: z.string(), "*": z.string() });
+
+/** 日志用 URL 脱敏：令牌段整体替换为 `***`（FR-008：令牌不进日志明文）。导出给测试断言同一出处。 */
+export function redactHookUrl(url: string): string {
+  return url.replace(/^\/hook\/[^/?#]+/, "/hook/***");
 }
 
-/** 装配 HTTP 应用：ingest（先落盘后异步消化）/ chat（前台）/ board 走此文件；
- *  items / settings / sources 三组资源路由在 routes/（D-73：第二资源组即拆）。
- *  **只装 core**——不含信源（D-88）；信源由 `registerSources` 上岗、`startSources` 启动。 */
-export function makeApp(deps: AppDeps) {
-  const app = Fastify({ logger: true });
-  const tools = makeAgentTools(deps.db);
+/** webhook 网关（唯一信源 HTTP 入口，FR-008）：token 定空间（含 active 校验）→
+ *  (源名, method, 相对路径) 定处理器。无/错/停用令牌 → 401 且**零落库**（先鉴权后路由）；
+ *  未登记的源/路径 → 404。令牌在 URL 路径——其上日志脱敏见 serializer。 */
+function registerWebhookGateway(app: FastifyInstance, hub: SpaceHub): void {
+  app.route({
+    method: ["GET", "POST", "PUT", "DELETE"],
+    url: "/hook/:token/:source/*",
+    handler: async (req, reply) => {
+      const parsed = HookParamsSchema.safeParse(req.params);
+      if (!parsed.success) return reply.code(404).send({ error: "Not Found" });
+      const space = await hub.byToken(parsed.data.token);
+      if (space === undefined) {
+        req.log.warn("webhook 接入令牌无效（无匹配或账户停用）");
+        return reply.code(401).send({ error: "接入令牌无效" });
+      }
+      const path = `/${parsed.data["*"]}`;
+      const route = space.webhookRoutes.find(
+        (r) => r.source === parsed.data.source && r.method === req.method && r.path === path,
+      );
+      if (route === undefined) return reply.code(404).send({ error: "Not Found" });
+      return route.handler(req, reply);
+    },
+  });
+}
 
-  // 信源状态表（D-88）：core 装配期先挂空表，registerSources 上岗时填充——GET /api/sources 读它。
-  // 挂在 app 上而非模块级，防多实例（测试）串状态。
-  const sourceStates = new Map<string, SourceState>();
-  app.decorate("sourceStates", sourceStates);
+/** 装配 HTTP 应用（只装 core——不认识信源；信源在空间装配里上岗）。 */
+export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
+  const app = Fastify({
+    logger: {
+      serializers: {
+        // 请求日志：/hook 令牌脱敏；其余字段维持 Fastify 默认形状
+        req(request: FastifyRequest) {
+          return {
+            method: request.method,
+            url: redactHookUrl(request.url),
+            host: request.hostname,
+            remoteAddress: request.ip,
+          };
+        },
+      },
+    },
+    // Caddy 反代后取真实来源 IP（限速用）；前提：应用端口绝不可直暴公网（部署注意 R12）
+    trustProxy: process.env.TRUST_PROXY === "1",
+  });
+  void app.register(cookie);
+  const secret = getSessionSecret(deps.registry);
 
-  app.post("/api/ingest", async (req, reply) => {
-    const parsed = IngestRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
-    }
-    // 进站装配唯一出处（application/ingest.ts）：先落盘后异步消化
-    const { raw, digestState } = ingestBatch(
-      deps.db,
-      deps.llmRef,
-      tools,
-      parsed.data,
-      "ingest-api",
-      (msg) => req.log.error(msg),
+  // 基础安全头（006 安全审视）：nosniff / Referrer-Policy: same-origin（防邀请码经 referrer 出站）/
+  // 禁嵌框；API 响应 no-store（防共享设备浏览器缓存残留）。CSP 留批次 3（需对 Vite 产物实测）。
+  app.addHook("onSend", async (req, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "same-origin");
+    reply.header("X-Frame-Options", "DENY");
+    if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
+    return payload;
+  });
+
+  // ── 公开面 ──
+  registerAuthPublicRoutes(app, { registry: deps.registry, hub: deps.hub, secret });
+  registerWebhookGateway(app, deps.hub);
+
+  // ── 受保护面（封装作用域：preHandler 一次挂全；路由只读 req.space）──
+  void app.register(async (scope) => {
+    scope.addHook(
+      "preHandler",
+      makeSessionAuth({
+        registry: deps.registry,
+        secret,
+        ensureSpace: (uid) => deps.hub.ensure(uid),
+      }),
     );
-    // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
-    return reply.code(202).send({ id: raw.id, digestState });
-  });
 
-  app.get("/api/board", async () => buildBoard(deps.db));
+    scope.post("/api/ingest", async (req, reply) => {
+      const parsed = IngestRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
+      }
+      // 进站装配唯一出处（application/ingest.ts）：先落盘后异步消化
+      const space = req.space;
+      const { raw, digestState } = ingestBatch(
+        space.db,
+        space.llmRef,
+        space.tools,
+        parsed.data,
+        "ingest-api",
+        (msg) => req.log.error(msg),
+      );
+      // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
+      return reply.code(202).send({ id: raw.id, digestState });
+    });
 
-  // 对话历史回填（L16）：持久化的轮次，前端启动时拉回——解「刷新/换设备对话即失」。
-  app.get("/api/chat/history", async (req) => {
-    const { limit } = ChatHistoryQuerySchema.parse(req.query);
-    return { turns: repo.listRecentChatTurns(deps.db, limit) };
-  });
+    scope.get("/api/board", async (req) => buildBoard(req.space.db));
 
-  app.post("/api/chat", async (req, reply) => {
-    const parsed = ChatRequestSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
-    }
-    const client = deps.llmRef.current;
-    return handleChat(
-      deps.db,
-      client,
-      client.modelTag,
-      parsed.data.message,
-      parsed.data.history,
-      parsed.data.mentions,
-    );
-  });
+    // 对话历史回填（L16）：持久化的轮次，前端启动时拉回——解「刷新/换设备对话即失」。
+    scope.get("/api/chat/history", async (req) => {
+      const { limit } = ChatHistoryQuerySchema.parse(req.query);
+      return { turns: repo.listRecentChatTurns(req.space.db, limit) };
+    });
 
-  // 失败批次重试（D-71）：领域函数拥有 failed→pending 跃迁与「仅 failed」前置；
-  // 路由只做参数解析与状态码映射（404 不存在 / 409 非 failed / 202 受理）。
-  app.post("/api/raw/:id/retry", async (req, reply) => {
-    const { id } = RawIdParamsSchema.parse(req.params);
-    const client = deps.llmRef.current;
-    const result = retryRawInput(deps.db, client, tools, client.modelTag, id);
-    if (!result.ok) {
-      return result.reason === "not_found"
-        ? reply.code(404).send({ error: "批次不存在" })
-        : reply.code(409).send({ error: "只有「未处理」批次可以重试" });
-    }
-    // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
-    return reply.code(202).send({ id, digestState: result.digestState });
-  });
+    scope.post("/api/chat", async (req, reply) => {
+      const parsed = ChatRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
+      }
+      const client = req.space.llmRef.current;
+      return handleChat(
+        req.space.db,
+        client,
+        client.modelTag,
+        parsed.data.message,
+        parsed.data.history,
+        parsed.data.mentions,
+      );
+    });
 
-  registerItemRoutes(app, { db: deps.db });
-  registerPipelineRoutes(app, { db: deps.db });
-  registerSettingsRoutes(app, { db: deps.db, llmRef: deps.llmRef });
-  registerSourceRoutes(app, { db: deps.db, sourceStates });
-  registerUncertainRoutes(app, {
-    db: deps.db,
-    sweep: () =>
-      sweepUncertainLibrary(deps.db, deps.llmRef.current, deps.llmRef.current.modelTag, "api"),
+    // 失败批次重试（D-71）：领域函数拥有 failed→pending 跃迁与「仅 failed」前置；
+    // 路由只做参数解析与状态码映射（404 不存在 / 409 非 failed / 202 受理）。
+    scope.post("/api/raw/:id/retry", async (req, reply) => {
+      const { id } = RawIdParamsSchema.parse(req.params);
+      const client = req.space.llmRef.current;
+      const result = retryRawInput(req.space.db, client, req.space.tools, client.modelTag, id);
+      if (!result.ok) {
+        return result.reason === "not_found"
+          ? reply.code(404).send({ error: "批次不存在" })
+          : reply.code(409).send({ error: "只有「未处理」批次可以重试" });
+      }
+      // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
+      return reply.code(202).send({ id, digestState: result.digestState });
+    });
+
+    registerAuthSessionRoutes(scope, { registry: deps.registry, secret });
+    registerItemRoutes(scope);
+    registerPipelineRoutes(scope);
+    registerSettingsRoutes(scope);
+    registerSourceRoutes(scope);
+    registerUncertainRoutes(scope);
   });
 
   return app;
-}
-
-/** 信源上岗（D-88 三时机之②，**同步**）：为每个信源造 ctx（登记其清理表 + 状态）、调一次 `register`
- *  挂路由/定时器，并把 `stop` 与清理表挂到 `onClose`（app.close() 时反向撤销）；有 `settings()` 则
- *  把声明的 schema 落库 `__schema__`（前端经 `GET /api/sources` 拿它渲染通用表单）。
- *  只有 index.ts 调用——makeApp 不认识信源。重复名跳过（防一实例注册两次导致定时器/监听器叠加）。
- *  状态写进 app.sourceStates（唯一通道——GET /api/sources 与 startSources 都从它读）。 */
-export function registerSources(
-  app: FastifyInstance,
-  deps: AppDeps,
-  adapters: SourceAdapter[],
-): void {
-  const tools = makeAgentTools(deps.db);
-  const states = app.sourceStates;
-  for (const adapter of adapters) {
-    if (states.has(adapter.name)) continue; // 防重复（P7）
-    const state: SourceState = { state: "ok", lastOkAt: nowLocalWallClock() };
-    const cleanups: (() => void | Promise<void>)[] = [];
-    const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state);
-    adapter.register(ctx, app);
-    if (adapter.settings !== undefined) {
-      // 声明在**产生处**校验：坏声明启动即响（走「最近出错」通道可见），
-      // 不让它静默穿过到 GET 时才被逐条丢弃（altitude 根修；parseSchema 退化为手改库兜底）
-      const parsed = SettingFieldSchema.array().safeParse(adapter.settings());
-      if (parsed.success) {
-        repo.setSourceSetting(
-          deps.db,
-          adapter.name,
-          SOURCE_SCHEMA_KEY,
-          JSON.stringify(parsed.data),
-        );
-      } else {
-        // 坏声明：删陈旧 __schema__（不让上一次的旧表单继续对外供货——评审 M1），并走「最近出错」
-        repo.deleteSourceSetting(deps.db, adapter.name, SOURCE_SCHEMA_KEY);
-        const first = parsed.error.issues[0];
-        ctx.reportError(
-          new Error(
-            `设置声明不合法，已忽略：${first ? `${first.path.join(".")} ${first.message}` : "未知问题"}`,
-          ),
-        );
-      }
-    }
-    app.addHook("onClose", async () => {
-      // 先 stop（信源的运行态收尾，如强制封批缓冲），再反向跑清理表（单源内后注册先撤销）。
-      // ⚠️ 逐项隔离：任一项失败只留痕继续——一个信源收尾炸掉不得跳过自己的剩余清理、
-      // 更不得让 close 整体 reject（否则 index 的保底退出之外，其它信源的清理也被跳过）。
-      try {
-        await adapter.stop?.();
-      } catch (err) {
-        process.stderr.write(`[source:${adapter.name}] stop 失败（继续清理表）：${errText(err)}\n`);
-      }
-      for (const fn of [...cleanups].reverse()) {
-        try {
-          await fn();
-        } catch (err) {
-          process.stderr.write(`[source:${adapter.name}] 清理失败（继续）：${errText(err)}\n`);
-        }
-      }
-    });
-    states.set(adapter.name, state);
-  }
-}
-
-/** 信源启动（D-88 三时机之③，**可异步**）：逐个 await `start?.()`，失败或**挂起**（超时）只把
- *  本信源标 error，不拖垮其它信源、不影响 listen。只有 index.ts 调用。 */
-export async function startSources(app: FastifyInstance, adapters: SourceAdapter[]): Promise<void> {
-  const states = app.sourceStates;
-  for (const adapter of adapters) {
-    try {
-      await startWithTimeout(adapter, START_TIMEOUT_MS);
-      // 只清「因启动过程产生」的错误；无 start 的信源保持 register 期错误（如坏设置声明）可见
-      if (adapter.start === undefined) continue;
-      const state = states.get(adapter.name);
-      if (state !== undefined) {
-        state.state = "ok";
-        state.lastError = undefined;
-        state.lastOkAt = nowLocalWallClock();
-      }
-    } catch (err) {
-      const reason = errText(err);
-      const state = states.get(adapter.name);
-      if (state !== undefined) {
-        state.state = "error";
-        state.lastError = reason;
-      }
-      process.stderr.write(`[source:${adapter.name}] 启动失败：${reason}\n`);
-    }
-  }
-}
-
-/** start() 的隔离超时：抛错与**永不 resolve**（如无超时 connect）同判为失败——
- *  否则一个挂起的 start 会让 await startSources 卡死，listen 永不执行，整个服务起不来。 */
-async function startWithTimeout(adapter: SourceAdapter, ms: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      Promise.resolve(adapter.start?.()),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`start 超时(${ms / 1000}s，按失败隔离)`)), ms);
-        timer.unref(); // 进程活着只为等 start——race 结束后它不许拖住退出
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
 }
 
 /** 关停收尾（D-88「SIGINT 归 core」的可测内核）：**永不无限等待、永不 reject**——

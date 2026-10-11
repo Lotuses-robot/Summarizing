@@ -1,5 +1,4 @@
-import type { FastifyInstance } from "fastify";
-import type { SettingField, SourceAdapter, SourceContext } from "../types";
+import type { SettingField, SourceAdapter, SourceContext, SourceRouter } from "../types";
 import { wallClockFromUnix } from "../../shared/time";
 import {
   assembleBatch,
@@ -71,8 +70,9 @@ function senderName(ev: NcEvent): string {
   );
 }
 
-/** nc 只读适配器：register 里挂 webhook 路由 + 起封批扫描定时器（经 ctx.setInterval 自动登记）。
- *  停止时（core 关闭）`stop()` 强制封批全部组；SIGINT 归 core，信源不自己监听信号。 */
+/** nc 只读适配器：register 里登记 webhook（`/event` → 可达 `/hook/<令牌>/nc/event`）+ 起封批扫描
+ *  定时器（经 ctx.setInterval 自动登记）。停止时（空间关停）`stop()` 强制封批全部组；
+ *  SIGINT 归 core，信源不自己监听信号。 */
 export function makeNcAdapter(): SourceAdapter {
   // 缓冲与去重集合是适配器实例级私有态（跨 register 调用保留；测试用工厂隔离）
   const buffers = new Map<string, GroupBuffer>();
@@ -138,7 +138,7 @@ export function makeNcAdapter(): SourceAdapter {
   return {
     name: NC_SOURCE_NAME,
 
-    register(ctx: SourceContext, app: FastifyInstance): void {
+    register(ctx: SourceContext, router: SourceRouter): void {
       /** 读窗长（设置覆盖默认；非法值兜默认）。 */
       const windowMinutes = (): number => {
         const v = ctx.getSetting("windowMinutes");
@@ -147,7 +147,7 @@ export function makeNcAdapter(): SourceAdapter {
       runtime = { ctx, windowMinutes };
 
       // 快收：白名单过滤 → 规范化 → 入缓冲 → 204（nc 规范：无需响应体）
-      app.post("/api/sources/nc/event", async (req, reply) => {
+      router.post("/event", async (req, reply) => {
         const parsed = NcEventSchema.safeParse(req.body);
         if (!parsed.success) return reply.code(204).send(); // 非群消息/形状不符 → 静默丢
         const ev = parsed.data;

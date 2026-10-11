@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyRequest, FastifyReply } from "fastify";
 import type { IngestRequest, SettingField } from "@summarizing/shared";
 
 // 信源适配器契约（D-84 立，D-88 重设计）：core 交出「八件套」手段，把变数全部留在信源内
@@ -48,13 +48,29 @@ export interface SourceContext {
   reportError(err: unknown, opts?: { fatal?: boolean }): void;
 }
 
-/** 信源适配器：一个源一个模块，注册表加一行（docs/07 接新源检查单）。 */
+/** 路由处理体：形态对齐 Fastify——可 `return reply.code(204).send()`（返回值作响应载荷）或只调用
+ *  reply；网关按原样透传返回值，不解释。 */
+export type SourceRouteHandler = (req: FastifyRequest, reply: FastifyReply) => unknown;
+
+/** 信源 webhook 登记口（006 收窄，D-96）：只在本源命名空间内登记 HTTP 入口——
+ *  **可达地址 = `/hook/<账户令牌>/<源名>/<path>`**（core 网关统一鉴权路由）。
+ *  路径为**纯字面段**（不支持 `:param`——需要参数走 query/body；参数段支持等真有源需要再加）。
+ *  收窄理由：①Fastify listen 后不能再注册路由 → 运行中新账户必须走网关；②信源不得挂全局路由
+ *  （多用户下=鉴权旁路，直接排除）。拉型源（SSE 等出站客户端）不用它——走 `start()`。 */
+export interface SourceRouter {
+  post(path: string, handler: SourceRouteHandler): void;
+  get(path: string, handler: SourceRouteHandler): void;
+  put(path: string, handler: SourceRouteHandler): void;
+  delete(path: string, handler: SourceRouteHandler): void;
+}
+
+/** 信源适配器：一个源一个模块，注册表加一个**工厂**（每空间各造一份实例——私有态天然隔离）。 */
 export interface SourceAdapter {
   /** 源的唯一短名——sourceType、信源设置命名空间、from 排障标记共用。 */
   readonly name: string;
-  /** 上岗（装配期，**同步**）：挂路由、起定时器、存引用——不阻塞、不连外部。
-   *  清理走 `ctx.onCleanup`（不再返回清理函数，D-88）。core 的 `registerSources` 调用。 */
-  register(ctx: SourceContext, app: FastifyInstance): void;
+  /** 上岗（装配期，**同步**）：登记 webhook（`router`）、起定时器、存引用——不阻塞、不连外部。
+   *  ⚠️ 006 起装配按**空间**（每账户）各跑一次。清理走 `ctx.onCleanup`（不再返回清理函数，D-88）。 */
+  register(ctx: SourceContext, router: SourceRouter): void;
   /** 启动（运行期，**可异步、可失败**，可选）：连外部、拉校验……core 的 `startSources` 在真正
    *  listen 前 await 它；失败只标记本信源 error，不拖垮别的。**不需要异步启动的信源不写**（如 nc）。 */
   start?(): void | Promise<void>;

@@ -13,9 +13,8 @@ export function parseWallClock(text: string): number {
   return Date.parse(text);
 }
 
-/** 当前**本地墙钟**时间戳（`YYYY-MM-DDTHH:mm:ss`，无时区标记）——落库时间统一走它（D-64）。 */
-export function nowLocalWallClock(): string {
-  const d = new Date();
+/** Date → 本地墙钟串（格式化**唯一出处**：now/Unix/过期时刻计算共用；批次 2 将改固定 +08:00）。 */
+export function wallClockFromDate(d: Date): string {
   /** 两位数补零（月份/日期/时分秒）。 */
   const p = (n: number): string => String(n).padStart(2, "0");
   return (
@@ -24,13 +23,12 @@ export function nowLocalWallClock(): string {
   );
 }
 
+/** 当前**本地墙钟**时间戳（`YYYY-MM-DDTHH:mm:ss`，无时区标记）——落库时间统一走它（D-64）。 */
+export function nowLocalWallClock(): string {
+  return wallClockFromDate(new Date());
+}
+
 /** Unix 秒 → 本地墙钟（D-84：nc 等外部事件自带 unix 秒时刻，转成本库统一格式）。 */
 export function wallClockFromUnix(seconds: number): string {
-  const d = new Date(seconds * 1000);
-  /** 两位数补零（月份/日期/时分秒）。 */
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
-    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-  );
+  return wallClockFromDate(new Date(seconds * 1000));
 }
