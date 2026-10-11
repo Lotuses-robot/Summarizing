@@ -1,15 +1,25 @@
+# ── 依赖与构建产物 ──
 node_modules/
 dist/
-build/
+release/
+summarizing-portable-*.zip
+
+# ── 本地数据与密钥（固定不进仓库）──
+data/
 .env
 .env.*
 !.env.example
 *.local
-__pycache__/
-.DS_Store
-data/
 *.log
 .vitest/
-release/
-summarizing-portable-*.zip
+
+# ── 本机工具状态（每台机器私物，不进仓库）──
 .serena/
+# CodeGraph 索引：db / 日志 / pid 全在这；整目录不追踪（含其自带的标记文件）
+.codegraph/
+# Claude Code 运行时工作树与本机工作方式配置（如跨机共享需求出现再改为提交）
+.claude/worktrees/
+.claude/settings.json
+
+# ── 操作系统杂项 ──
+.DS_Store
