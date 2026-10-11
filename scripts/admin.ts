@@ -16,70 +16,109 @@ function findRoot(): string {
   return candidates.find((c) => existsSync(path.join(c, ".env.example"))) ?? candidates[1] ?? ".";
 }
 
-/** 明文回显读一行（用户名等非密输入；便携包首启引导用）。 */
+/** 跨 prompt 的 stdin 残留缓冲：管道喂多行（密码+确认）时一个 data 事件可能含多行——
+ *  逐行消费；当前 prompt 拿走一行后，剩余留在缓冲里等下一个 prompt（曾因丢弃残行致静默失败）。 */
+let stdinBuffer = "";
+
+/** 从缓冲取一行（无换行可取的返回 null）；成功则消费掉该行。 */
+function takeLine(): string | null {
+  const nl = stdinBuffer.indexOf("\n");
+  if (nl < 0) return null;
+  const line = stdinBuffer.slice(0, nl).replace(/\r$/, "");
+  stdinBuffer = stdinBuffer.slice(nl + 1);
+  return line;
+}
+
+/** 明文回显读一行（用户名等非密输入；便携包首启引导用；管道输入同样可用）。 */
 function promptVisible(question: string): Promise<string> {
   return new Promise((resolve, reject) => {
     process.stdout.write(question);
     const stdin = process.stdin;
-    stdin.resume();
-    let buf = "";
-    /** 收到一段输入：按行切分（首行即答案）。 */
+    const buffered = takeLine();
+    if (buffered !== null) {
+      resolve(buffered);
+      return;
+    }
+    /** 清理监听并定局（三个出口共用）。 */
+    const settle = (fn: () => void): void => {
+      stdin.removeListener("data", onData);
+      stdin.removeListener("end", onEnd);
+      stdin.pause();
+      fn();
+    };
+    /** 收到一段输入：缓冲并尝试成行。 */
     const onData = (chunk: Buffer): void => {
-      const s = chunk.toString("utf8");
-      buf += s;
-      const nl = buf.indexOf("\n");
-      if (nl >= 0) {
-        stdin.removeListener("data", onData);
-        stdin.pause();
-        resolve(buf.slice(0, nl).replace(/\r$/, ""));
+      stdinBuffer += chunk.toString("utf8");
+      if (stdinBuffer.includes("\u0003")) {
+        settle(() => reject(new Error("已取消")));
         return;
       }
-      if (s.includes("\u0003")) {
-        stdin.removeListener("data", onData);
-        stdin.pause();
-        reject(new Error("已取消"));
-      }
+      const line = takeLine();
+      if (line !== null) settle(() => resolve(line));
     };
+    /** EOF：剩余缓冲（无换行结尾）作一行交回（不悬置进程——曾因未决 promise 静默退出）。 */
+    const onEnd = (): void => {
+      const rest = stdinBuffer.replace(/\r$/, "");
+      stdinBuffer = "";
+      settle(() => resolve(rest));
+    };
+    stdin.resume();
     stdin.on("data", onData);
+    stdin.once("end", onEnd);
   });
 }
 
-/** 隐藏回显读一行（密码用；Ctrl-C 或退格处理）。 */
+/** 隐藏回显读一行（密码用；退格编辑、Ctrl-C 取消；管道输入同样可用）。 */
 function promptHidden(question: string): Promise<string> {
   return new Promise((resolve, reject) => {
     process.stdout.write(question);
     const stdin = process.stdin;
     const wasRaw = stdin.isRaw;
     if (stdin.isTTY) stdin.setRawMode(true);
-    stdin.resume();
-    let buf = "";
-    /** 收到一段输入：逐字符处理（回车提交、退格删、Ctrl-C 取消；成对增删不回显）。 */
-    const onData = (chunk: Buffer): void => {
-      for (const ch of chunk.toString("utf8")) {
+    let current = "";
+    /** 收尾：还原终端、清监听、换行收束提示行。 */
+    function settle(fn: () => void): void {
+      stdin.removeListener("data", onData);
+      stdin.removeListener("end", onEnd);
+      if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
+      stdin.pause();
+      process.stdout.write("\n");
+      fn();
+    }
+    /** 收到一段输入：缓冲并继续消费。 */
+    function onData(chunk: Buffer): void {
+      stdinBuffer += chunk.toString("utf8");
+      drain();
+    }
+    /** EOF：当前行（可能为空）交回——空密码会在 ≥8 校验处响亮失败，不悬置。 */
+    function onEnd(): void {
+      settle(() => resolve(current));
+    }
+    /** 消费缓冲字符直到成行/取消/耗尽；返回是否已定局（EOF 前的残行留在缓冲供下一个 prompt）。 */
+    function drain(): boolean {
+      while (stdinBuffer !== "") {
+        const ch = stdinBuffer[0] ?? "";
+        stdinBuffer = stdinBuffer.slice(1);
         if (ch === "\r" || ch === "\n") {
-          stdin.removeListener("data", onData);
-          if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
-          stdin.pause();
-          process.stdout.write("\n");
-          resolve(buf);
-          return;
+          settle(() => resolve(current));
+          return true;
         }
         if (ch === "\u0003") {
-          stdin.removeListener("data", onData);
-          if (stdin.isTTY) stdin.setRawMode(false);
-          stdin.pause();
-          process.stdout.write("\n");
-          reject(new Error("已取消"));
-          return;
+          settle(() => reject(new Error("已取消")));
+          return true;
         }
         if (ch === "\u007f" || ch === "\b") {
-          buf = buf.slice(0, -1);
+          current = current.slice(0, -1);
           continue;
         }
-        buf += ch;
+        current += ch;
       }
-    };
+      return false;
+    }
+    if (drain()) return; // 缓冲里已有整行（管道喂多行的场景）——直接定局，不必等新事件
+    stdin.resume();
     stdin.on("data", onData);
+    stdin.once("end", onEnd);
   });
 }
 

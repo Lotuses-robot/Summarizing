@@ -26,8 +26,8 @@
   <a href="#"><img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind v4" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/SQLite-单文件-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-221%20passing-brightgreen?style=flat-square" alt="tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/SQLite-每账户一库-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-296%20passing-brightgreen?style=flat-square" alt="tests" /></a>
 </p>
 
 ## 它解决什么
@@ -46,7 +46,8 @@
 - **存疑信息库**：拿不准的先存进库里，之后可以合并、丢弃，也可以让 AI 定期复核。不确定就不猜。
 - **修改留痕**：每次改动都追加一份完整快照，历史随时可查。
 - **信源可扩展**：新的消息来源按统一契约接入（[开发信源 →](SOURCE-GUIDE.md)）；信源自己声明设置项，界面自动渲染表单。
-- **单机自托管**：SQLite 单文件，数据全在本地；AI 走 OpenAI 兼容接口，可接本地模型。
+- **多账户（邀请制）**：每个账户一套独立的看板/对话/信源/数据（每人一库，构造隔离）；AI key 各用各的。单机自用 = 一个账户的实例。
+- **自托管**：SQLite 单文件数据（`data/users/<uid>.db`），拷走即备份；AI 走 OpenAI 兼容接口，可接本地模型。
 - **深色模式**，手机也能用。
 
 ## 上手
@@ -56,16 +57,18 @@
 ```bash
 npm install
 cp .env.example .env      # 填一个 OpenAI 兼容接入（如 DeepSeek / 本地模型）
-npm run seed:demo          # 可选：载入一套虚构演示数据（会清空当前库）
-npm run dev                # web: http://localhost:5173 · server: http://localhost:3001
+npm run admin -- user:add 你的名字   # 建账户（交互输密码；第一个账户就是管理员/你自己）
+npm run dev                # 打开 http://localhost:5173 登录 · server: http://localhost:3001
 ```
 
-不想配环境？到 [Releases](https://github.com/Lotuses-robot/Summarizing/releases) 下载 **Windows 便携包**（内置运行时，解压双击 `start.cmd` 即可）。
+不想配环境？到 [Releases](https://github.com/Lotuses-robot/Summarizing/releases) 下载 **Windows 便携包**（内置运行时，解压双击 `start.cmd`，首次会自动引导建账户）。
+
+想先看看长什么样：`npm run seed:demo` 会为演示账户载入一套虚构数据（登录 `demo`，密码见命令输出）。
 
 装完之后，常用检查：
 
 ```bash
-npm test              # vitest（221 个用例）
+npm test              # vitest（296 个用例）
 npm run check         # 类型 + 代码规范 + 测试
 npm run check:dead    # 死代码检查
 npm run build -w @summarizing/web
@@ -108,7 +111,7 @@ flowchart LR
     G --> U["存疑信息库<br/>等你决定"]
     G --> V[("item_versions<br/>全量快照链 · 可回看可撤回")]
     B <--> C["前台对话<br/>多轮工具循环"]
-    R --- F[("SQLite 单文件")]
+    R --- F[("SQLite · 每账户一库")]
 ```
 
 - **原文先行**：一切先落 `raw_inputs` 原文档案；AI 的输出永远只是派生结果，可回溯到原话。
@@ -126,7 +129,7 @@ apps/server        Fastify + SQLite：存储 / 消化裁决（agent0）/ 信源�
 apps/web           React 19 + Tailwind v4：看板 / 存疑审核 / 对话 / 设置
 packages/shared    跨边界契约（zod schema 单一来源）
 docs/              设计文档：数据契约 / 规格 / 决策台账 / 信源开发指南…
-scripts/           db:reset / seed:demo 等运维脚本
+scripts/           admin（运维命令：建账户/发邀请码/停用…）/ db:reset / seed:demo 等
 ```
 
 ## 设计文档
@@ -143,7 +146,7 @@ scripts/           db:reset / seed:demo 等运维脚本
 | `docs/07-接新源检查单.md` | 信源的内部检查单（面向 core 维护者） |
 | `docs/08-nc对接指南.md` | 群机器人信源对接操作手册 |
 
-本项目定位单机自用：多用户、云同步、原生移动 App 不在当前范围内。
+单实例多账户：自己一个人用是默认形态，也可以邀请几位熟人各用各的（邀请制注册，每人独立数据库）。云同步、原生移动 App 不在当前范围内。
 
 ## License
 
