@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { itemName, type BoardView, type UncertainInput } from "@summarizing/shared";
-import { api } from "./api";
+import { itemName, type BoardView, type MeView, type UncertainInput } from "@summarizing/shared";
+import { api, setOnUnauthorized } from "./api";
 import { ActivityBar } from "./components/ActivityBar";
+import { AuthShell } from "./components/AuthShell";
 import { FilterBar, type BoardFilter } from "./components/FilterBar";
 import { Board } from "./components/Board";
 import { UncertainReview } from "./components/UncertainReview";
@@ -22,9 +23,12 @@ function Banner({ text }: { text: string }) {
   );
 }
 
-/** 应用外壳（05§一 布局）：最左活动栏（主视图切换）+ 顶部整栏筛选 + 主区（看板/存疑库审核/流水）+ 右侧停靠对话面板。
+/** 应用外壳（05§一 布局；006 起前置认证闸门）：未登录只有认证壳（备案号挂那）、登录后进主界面。
+ *  主界面 = 最左活动栏（主视图切换）+ 顶部整栏筛选 + 主区（看板/存疑库审核/流水）+ 右侧停靠对话面板。
  *  录入统一走对话输入（投递条已砍）；未选标签收在筛选栏下方的「标签」栏（默认折叠）。 */
 export default function App() {
+  const [me, setMe] = useState<MeView | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [board, setBoard] = useState<BoardView | null>(null);
   const [uncertain, setUncertain] = useState<UncertainInput[]>([]);
   const [view, setView] = useState<"board" | "uncertain" | "pipeline">("board"); // 主视图切换（D-89 + specs/005 流水）
@@ -40,6 +44,36 @@ export default function App() {
   const [filter, setFilter] = useState<BoardFilter>({ query: "", tags: [] });
   const [focus, setFocus] = useState<{ id: string; token: number } | null>(null);
   const mainRef = useRef<HTMLDivElement | null>(null);
+
+  /** 统一「回到未登录」（单点拦截回调 + 登出共用）：清会话与数据态——并发 401 幂等。 */
+  const handleUnauthenticated = useCallback(() => {
+    setMe(null);
+    setBoard(null);
+    setUncertain([]);
+    setSettingsOpen(false);
+  }, []);
+
+  // 启动探测：me 200 → 主界面；401（未登录的正常首屏路径）→ 认证壳。
+  // 同时把 401 单点拦截接到全局（任何受保护请求 401 都切回认证壳）。
+  useEffect(() => {
+    let alive = true;
+    api
+      .me()
+      .then((v) => {
+        if (alive) setMe(v);
+      })
+      .catch(() => {
+        // 未登录——正常首屏路径，不提示（authChecked 置位后渲染认证壳）
+      })
+      .finally(() => {
+        if (alive) setAuthChecked(true);
+      });
+    setOnUnauthorized(handleUnauthenticated);
+    return () => {
+      alive = false;
+      setOnUnauthorized(null);
+    };
+  }, [handleUnauthenticated]);
 
   /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。 */
   const loadBoard = useCallback(() => {
@@ -66,11 +100,14 @@ export default function App() {
 
   // 轮询看的是「当前视图」——审核页在前台时暂停拉存疑库（破坏性列表不许在读者手底下位移），
   // 看板数据照刷；离开审核页后下个周期自然恢复。用 ref 取最新视图，防 effect 重建定时器。
+  // 登录态门：未登录不轮询（401 单点拦截会把界面切回认证壳，轮询没有对象）。
+  const authed = me !== null;
   const viewRef = useRef(view);
   useEffect(() => {
     viewRef.current = view; // 渲染期不写 ref（React 约定），effect 里同步
   }, [view]);
   useEffect(() => {
+    if (!authed) return;
     loadBoard();
     loadUncertain();
     // agent0 消化是异步的：看板定时刷新让结果自动浮出来；并拉存疑库（徽标计数）
@@ -79,7 +116,7 @@ export default function App() {
       if (viewRef.current !== "uncertain") loadUncertain();
     }, 10_000);
     return () => clearInterval(timer);
-  }, [loadBoard, loadUncertain]);
+  }, [authed, loadBoard, loadUncertain]);
 
   // Esc 分层退出：审核页处于前台时 Esc → 回看板（05§六；设置/悬浮窗等层压在它之上）
   useEffect(() => {
@@ -104,6 +141,16 @@ export default function App() {
   };
   /** 切换对话面板开合。 */
   const toggleChat = () => setChat(!chatOpen);
+
+  /** 退出登录：让服务端清 cookie（失败也照退——本地状态清掉即可；残留 cookie 会被 401 兜住）。 */
+  const logout = () => {
+    void api
+      .logout()
+      .catch(() => {
+        // 清 cookie 失败不阻塞退出（幂等口）
+      })
+      .finally(handleUnauthenticated);
+  };
 
   /** 事项 chips 深链（05§三）：切回看板 + 清筛选 + 收起面板（记忆同步）+ 交看板定位展开。 */
   const requestFocus = (id: string) => {
@@ -136,6 +183,14 @@ export default function App() {
       title: itemName(r.item.elements),
     }));
   }, [board]);
+
+  // 认证闸门（hooks 全部就位之后的分支渲染）
+  if (!authChecked) {
+    return <p className="px-4 py-8 text-sm text-ink-muted">加载中…</p>;
+  }
+  if (me === null) {
+    return <AuthShell onAuthed={setMe} />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -268,7 +323,15 @@ export default function App() {
         </aside>
       )}
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        me={me}
+        onLogout={logout}
+        onTokenRotated={(token) =>
+          setMe((cur) => (cur === null ? cur : { ...cur, sourceToken: token }))
+        }
+      />
     </div>
   );
 }

@@ -6,10 +6,11 @@ import {
   Loader2,
   Palette as PaletteIcon,
   Rss,
+  UserRound,
   X,
   type LucideIcon,
 } from "lucide-react";
-import type { AiSettings, AiSettingsView, AiTestResult } from "@summarizing/shared";
+import type { AiSettings, AiSettingsView, AiTestResult, MeView } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
@@ -52,9 +53,10 @@ const DENSITY_NAMES: Record<Density, string> = { comfortable: "舒适", compact:
 
 // 左侧分类栏（用户 2026-09-27 定：左导航 + 右侧内容，点击定位）。
 // 右侧内容 = 分组卡（macOS 系统设置式，用户 2026-09-30 走查定：一行一设置、控件右对齐、**改完即生效**）。
-type SectionId = "appearance" | "ai" | "data" | "sources";
+type SectionId = "account" | "appearance" | "ai" | "data" | "sources";
 type SectionMeta = { id: SectionId; label: string; icon: LucideIcon };
 const SECTIONS: SectionMeta[] = [
+  { id: "account", label: "账户", icon: UserRound },
   { id: "appearance", label: "外观", icon: PaletteIcon },
   { id: "ai", label: "AI", icon: Bot },
   { id: "data", label: "数据", icon: Database },
@@ -66,7 +68,22 @@ const SECTIONS: SectionMeta[] = [
  *  交互总则（走查修订③）：**改完即生效**——下拉/色板/开关点一下即存，输入框失焦即存，
  *  卡尾状态行一闪「已保存」；失败常驻红字（不静默）。整页无「保存」按钮。
  *  ⚠️ 关闭前先 blur（评审 H1）：Esc 不产生焦点转移，「失焦即存」必须在卸载前落一次。 */
-export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SettingsModal({
+  open,
+  onClose,
+  me,
+  onLogout,
+  onTokenRotated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** 当前账户（用户名/接入令牌展示用）。 */
+  me: MeView;
+  /** 退出登录（App 清态回认证壳）。 */
+  onLogout: () => void;
+  /** 接入令牌轮换成功回调（App 同步 me.sourceToken）。 */
+  onTokenRotated: (token: string) => void;
+}) {
   const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearance);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
@@ -217,6 +234,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         </nav>
 
         <div className="flex-1 space-y-7 overflow-y-auto px-6 py-5">
+          <AccountCard me={me} onLogout={onLogout} />
+
           <Card
             id="settings-appearance"
             icon={PaletteIcon}
@@ -277,7 +296,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             footnote={
               ai !== null ? (
                 <>
-                  ⚠ Key 以明文存在本机 SQLite（单机自部署，知情选择）；当前生效：
+                  ⚠ Key 以明文存在你的账户库（其他用户不可见；运维技术上可见——如实托管）；当前生效：
                   {ai.overridden ? "设置覆盖" : ".env"} · 模型 {ai.model}
                 </>
               ) : undefined
@@ -348,10 +367,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             )}
           </Card>
 
-          <Card id="settings-data" icon={Database} title="数据" desc="单文件 SQLite——拷走即备份">
+          <Card
+            id="settings-data"
+            icon={Database}
+            title="数据"
+            desc="你的账户独立数据库——拷贝即备份"
+          >
             <Row
               label="数据文件"
-              description="仓库根 data/summarizing.db，点右侧在线导出（不影响使用）"
+              description="你的账户库（data/users/<uid>.db），点右侧在线导出（不影响使用）"
             >
               <a className="btn" href="/api/backup">
                 下载备份
@@ -367,7 +391,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             bare
             footnote="对话输入始终可用——把信息发给前台即录入。"
           >
-            <SourcesSection />
+            <SourcesSection sourceToken={me.sourceToken} onRotated={onTokenRotated} />
           </Card>
         </div>
       </div>
@@ -382,4 +406,68 @@ function toBody(form: { baseUrl: string; model: string; apiKey: string }): AiSet
     model: form.model.trim(),
     ...(form.apiKey !== "" ? { apiKey: form.apiKey } : {}),
   };
+}
+
+/** 账户卡（006）：用户名展示 + 修改密码（显式按钮——这是「操作」不是「偏好」，不进即存管道）+ 退出登录。 */
+function AccountCard({ me, onLogout }: { me: MeView; onLogout: () => void }) {
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { statuses, flash, sticky } = useStatus();
+
+  /** 提交改密：成功清输入并提示（其余端已下线；本端 cookie 由服务端续签）。 */
+  const submit = () => {
+    if (busy) return;
+    setBusy(true);
+    api
+      .changePassword(oldPassword, newPassword)
+      .then(() => {
+        setOldPassword("");
+        setNewPassword("");
+        flash("pwd", "密码已修改（其他设备已下线）");
+      })
+      .catch((err: unknown) => sticky("pwd", `修改失败：${errText(err)}`))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Card id="settings-account" icon={UserRound} title="账户" desc="登录与安全">
+      <Row label="用户名">
+        <span className="text-sm">{me.username}</span>
+      </Row>
+      <Row label="修改密码" description="修改后其他设备自动下线">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="input w-[10rem]"
+            type="password"
+            placeholder="原密码"
+            autoComplete="current-password"
+            value={oldPassword}
+            onChange={(e) => setOldPassword(e.target.value)}
+          />
+          <input
+            className="input w-[10rem]"
+            type="password"
+            placeholder="新密码（≥8）"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+          <button
+            className="btn"
+            disabled={busy || oldPassword === "" || newPassword === ""}
+            onClick={submit}
+          >
+            {busy ? "修改中…" : "修改"}
+          </button>
+        </div>
+      </Row>
+      <Row label="退出登录" description="仅清除本设备会话">
+        <button className="btn" onClick={onLogout}>
+          退出登录
+        </button>
+      </Row>
+      <StatusSlot statuses={statuses} />
+    </Card>
+  );
 }

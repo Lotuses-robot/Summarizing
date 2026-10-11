@@ -9,6 +9,12 @@ import "@testing-library/jest-dom/vitest";
 // 设置弹层的交互守卫（设置重排 review 轮补）：AI 保存走 PUT（C1）、Esc 关闭前 flush（H1）、
 // 在飞期间的后续失焦补发（H2）、读失败有错误面（M）。
 // ⚠️ SettingsModal 用 document.activeElement.blur() 做关闭前 flush——测试须先 fireEvent.focus 真聚焦。
+// 006 起需 me / onLogout / onTokenRotated 三 prop（账户区与信源接入地址区）。
+
+/** 测试账户视图。 */
+const ME = { username: "tester", sourceToken: "f".repeat(32) };
+/** 空操作桩（默认回调）。 */
+const noop = () => {};
 
 /** fetch 替身：/api/settings/ai 的 GET/PUT + /api/sources 空列表；deferFirstPut = 首条 PUT 挂起。
  *  写请求拦截记录（不打真后端）。 */
@@ -66,7 +72,7 @@ describe("设置弹层：AI 即时生效管道（设置重排 review 轮）", ()
 
   it("保存走 PUT（评审 C1：曾 POST 打 404——AI 设置全线存不进）", async () => {
     const { calls } = stubAi();
-    render(<SettingsModal open onClose={() => {}} />);
+    render(<SettingsModal open onClose={() => {}} me={ME} onLogout={noop} onTokenRotated={noop} />);
     const input = await screen.findByDisplayValue("http://x/v1");
     fireEvent.change(input, { target: { value: "http://y/v1" } });
     fireEvent.blur(input);
@@ -78,7 +84,7 @@ describe("设置弹层：AI 即时生效管道（设置重排 review 轮）", ()
   it("Esc 关闭前先 flush：未失焦的编辑在卸载前落库（评审 H1）", async () => {
     const { calls } = stubAi();
     const onClose = vi.fn();
-    render(<SettingsModal open onClose={onClose} />);
+    render(<SettingsModal open onClose={onClose} me={ME} onLogout={noop} onTokenRotated={noop} />);
     const input = await screen.findByDisplayValue("http://x/v1");
     input.focus(); // 真聚焦（fireEvent.focus 不设 activeElement，closeWithFlush 的 blur() 会打空）
     fireEvent.change(input, { target: { value: "http://z/v1" } });
@@ -91,7 +97,7 @@ describe("设置弹层：AI 即时生效管道（设置重排 review 轮）", ()
 
   it("在飞期间的后续失焦补发：busy 不再静默吞保存（评审 H2）", async () => {
     const { calls, releaseFirstPut } = stubAi({ deferFirstPut: true });
-    render(<SettingsModal open onClose={() => {}} />);
+    render(<SettingsModal open onClose={() => {}} me={ME} onLogout={noop} onTokenRotated={noop} />);
     const base = await screen.findByDisplayValue("http://x/v1");
     const model = screen.getByDisplayValue("m1");
 
@@ -109,7 +115,7 @@ describe("设置弹层：AI 即时生效管道（设置重排 review 轮）", ()
 
   it("读失败有错误面（不拿旧表单冒充）（评审 M）", async () => {
     stubAi({ failGet: true });
-    render(<SettingsModal open onClose={() => {}} />);
+    render(<SettingsModal open onClose={() => {}} me={ME} onLogout={noop} onTokenRotated={noop} />);
     expect(await screen.findByText(/读不到当前设置/)).toBeInTheDocument();
     expect(screen.queryByDisplayValue("http://x/v1")).not.toBeInTheDocument();
   });

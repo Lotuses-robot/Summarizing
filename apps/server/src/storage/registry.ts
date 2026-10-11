@@ -14,7 +14,7 @@ import { nowLocalWallClock, wallClockFromDate } from "../shared/time";
 // ── 表结构（与 00 契约 §十二 一一对应；DDL 在 ensureRegistrySchema，COLLATE 等以 DDL 为准）──
 
 /** 账户：uid 随机不可推导（库名来源）；username NOCASE 唯一；密码 scrypt 自描述哈希。 */
-export const accounts = sqliteTable("accounts", {
+const accounts = sqliteTable("accounts", {
   uid: text("uid").primaryKey(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
@@ -38,7 +38,7 @@ export const invites = sqliteTable(
 );
 
 /** 系统键值：session_secret（会话签名密钥，首建生成）/ schema_version（版本号机制属批次 2）。 */
-export const meta = sqliteTable("meta", {
+const meta = sqliteTable("meta", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
@@ -100,7 +100,7 @@ function newUid(): string {
 }
 
 /** 生成一把新接入令牌（建号与轮换共用同一出处）。 */
-export function newSourceToken(): string {
+function newSourceToken(): string {
   return randomBytes(16).toString("hex");
 }
 
@@ -248,18 +248,10 @@ function isUniqueViolation(err: unknown): boolean {
 
 // ── meta ──
 
-/** 读 meta 键；不存在返回 null。 */
-export function getMeta(db: RegistryDb, key: string): string | null {
+/** 读 meta 键；不存在返回 null（getSessionSecret 的内部读口）。 */
+function getMeta(db: RegistryDb, key: string): string | null {
   const row = db.select().from(meta).where(eq(meta.key, key)).get();
   return row?.value ?? null;
-}
-
-/** 写 meta 键（UPSERT——存在即覆盖）。 */
-export function setMeta(db: RegistryDb, key: string, value: string): void {
-  db.insert(meta)
-    .values({ key, value })
-    .onConflictDoUpdate({ target: meta.key, set: { value } })
-    .run();
 }
 
 /** 读会话签名密钥（首建已播种；此处只读不生成）。 */

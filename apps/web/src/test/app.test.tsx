@@ -21,6 +21,10 @@ function stubApp(opts: { uncertainFail?: boolean } = {}): {
     vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = fetchUrl(input);
       const method = init?.method ?? "GET";
+      if (url.includes("/api/auth/me")) {
+        // 006：App 启动先探登录态——给已登录让主界面照旧
+        return Promise.resolve(jsonResponse({ username: "tester", sourceToken: "a".repeat(32) }));
+      }
       if (url.includes("/api/settings/ai")) {
         if (method === "PUT") writes.push({ method, url });
         return Promise.resolve(

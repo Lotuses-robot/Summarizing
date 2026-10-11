@@ -26,7 +26,7 @@ const closers: Array<() => Promise<void>> = [];
 
 /** 关闭本文件已建的全部测试实例：app.close + 空间 closeAll + **显式关 SQLite 句柄**
  *  （Windows 禁止删除被打开的文件——句柄不关，临时目录清理必挂 EPERM）。幂等（closers 一次性）。 */
-export async function closeAllTestAccounts(): Promise<void> {
+async function closeAllTestAccounts(): Promise<void> {
   for (const close of closers.splice(0)) {
     try {
       await close();

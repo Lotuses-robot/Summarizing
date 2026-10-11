@@ -1,9 +1,21 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SourcesSection } from "../components/settings/SourcesSection";
 import { emptyResponse, fetchUrl, jsonResponse } from "./helpers/http";
 import "@testing-library/jest-dom/vitest";
+
+/** 测试令牌（006：SourcesSection 需令牌 prop——接入地址展示/轮换用）。 */
+const TOKEN = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";
+const NEW_TOKEN = "deadbeefdeadbeefdeadbeefdeadbeef";
+/** 空操作桩（默认回调）。 */
+const noop = () => {};
+
+/** 渲染信源区（带令牌；onRotated 可注入——轮换用例用）。 */
+function renderSection(onRotated: (t: string) => void = noop) {
+  return render(<SourcesSection sourceToken={TOKEN} onRotated={onRotated} />);
+}
 
 /** fetch 替身：按 URL/method 分流（列表 / 读值 / 写值）；记录写调用与读值次数。
  *  writeFail = 写操作拒绝（模拟后端故障——失败必须可见）。 */
@@ -20,6 +32,9 @@ function stubApi(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = fetchUrl(input);
+      if (url.includes("/api/auth/source-token/rotate")) {
+        return Promise.resolve(jsonResponse({ sourceToken: NEW_TOKEN }));
+      }
       if (init?.method === "PUT" || init?.method === "DELETE") {
         if (opts.writeFail === true) return Promise.reject(new Error("网络挂了"));
         const body: unknown = typeof init.body === "string" ? JSON.parse(init.body) : undefined;
@@ -62,7 +77,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("渲染：卡头=源名+状态+最近出错；行=左标签右控件；record 行编辑、number 现值", async () => {
     stubApi({ groups: { "123": "英语课官方群" }, windowMinutes: 5 });
-    render(<SourcesSection />);
+    renderSection();
     expect(await screen.findByText("nc")).toBeInTheDocument();
     expect(screen.getByText("最近出错")).toBeInTheDocument();
     expect(screen.getByText(/封批失败（群 123）/)).toBeInTheDocument();
@@ -78,7 +93,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("改 number 失焦即存：PUT 改动键 + 一闪「已保存」", async () => {
     const { writes } = stubApi({ windowMinutes: 5 });
-    render(<SourcesSection />);
+    renderSection();
     const num = await screen.findByDisplayValue("5");
     fireEvent.change(num, { target: { value: "8" } });
     expect(writes).toHaveLength(0); // 输入中不写
@@ -95,7 +110,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("清空 number 失焦 = DELETE 回默认：输入变空 + placeholder 3 + 「已恢复默认」", async () => {
     const { writes } = stubApi({ windowMinutes: 5 });
-    render(<SourcesSection />);
+    renderSection();
     const num = await screen.findByDisplayValue("5");
     fireEvent.change(num, { target: { value: "" } });
     fireEvent.blur(num);
@@ -109,7 +124,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("record 改值失焦整对象 PUT；加一行（先值后键）最终一次写含新键；空行不写", async () => {
     const { writes } = stubApi({ groups: { "123": "英语课官方群" } });
-    render(<SourcesSection />);
+    renderSection();
     // 改既有行备注 → 失焦即存整对象
     const rec = await screen.findByDisplayValue("英语课官方群");
     fireEvent.change(rec, { target: { value: "英语群" } });
@@ -138,7 +153,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("写失败 → 常驻红字（不静默）", async () => {
     stubApi({ windowMinutes: 5 }, { writeFail: true });
-    render(<SourcesSection />);
+    renderSection();
     const num = await screen.findByDisplayValue("5");
     fireEvent.change(num, { target: { value: "8" } });
     fireEvent.blur(num);
@@ -147,7 +162,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("无声明设置的源不发废 GET", async () => {
     const { readCount } = stubApi({}, { settingsSchema: [] });
-    render(<SourcesSection />);
+    renderSection();
     await screen.findByText("这个信源没有可配置项");
     expect(readCount()).toBe(0);
   });
@@ -163,7 +178,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
         ],
       },
     );
-    const { container } = render(<SourcesSection />);
+    const { container } = renderSection();
     const box = await screen.findByRole("checkbox");
     fireEvent.click(box);
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -183,7 +198,7 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("清空回默认后再失焦：不重复 DELETE（基线乐观清理的守门）", async () => {
     const { writes } = stubApi({ windowMinutes: 5 });
-    render(<SourcesSection />);
+    renderSection();
     const num = await screen.findByDisplayValue("5");
     fireEvent.change(num, { target: { value: "" } });
     fireEvent.blur(num);
@@ -195,11 +210,41 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
 
   it("删行按钮 → 整对象落库（写请求不含被删行）", async () => {
     const { writes } = stubApi({ groups: { "123": "英语课官方群" } });
-    render(<SourcesSection />);
+    renderSection();
     await screen.findByDisplayValue("英语课官方群");
     fireEvent.click(screen.getByTitle("删这一行"));
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]?.method).toBe("PUT");
     expect(writes[0]?.body).toEqual({});
+  });
+
+  it("接入地址含令牌；轮换（确认后）→ 地址换新、旧令牌不再出现；取消则不动", async () => {
+    stubApi({});
+    /** 带状态宿主：onRotated 接回 prop（与 App 行为同构）。 */
+    function Harness() {
+      const [token, setToken] = useState(TOKEN);
+      return <SourcesSection sourceToken={token} onRotated={setToken} />;
+    }
+    render(<Harness />);
+    const oldUrl = `${location.origin}/hook/${TOKEN}/nc/event`;
+    const newUrl = `${location.origin}/hook/${NEW_TOKEN}/nc/event`;
+    expect(await screen.findByText(oldUrl)).toBeInTheDocument();
+
+    // 取消：地址不动
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => false),
+    );
+    fireEvent.click(screen.getByText("重新生成令牌"));
+    expect(screen.getByText(oldUrl)).toBeInTheDocument();
+
+    // 确认：轮换 → 新地址（旧令牌消失）
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    fireEvent.click(screen.getByText("重新生成令牌"));
+    expect(await screen.findByText(newUrl)).toBeInTheDocument();
+    expect(screen.queryByText(oldUrl)).not.toBeInTheDocument();
   });
 });

@@ -34,8 +34,8 @@ export interface AdminDeps {
   baseUrl?: string;
 }
 
-/** 用法文本（未知命令与 --help 共用）。 */
-export const ADMIN_USAGE = `用法（运维命令）：
+/** 用法文本（未知命令分支打它）。 */
+const ADMIN_USAGE = `用法（运维命令）：
   user:add <username>        创建账户（交互输入密码；首个账户即由它诞生；用户名可省略走交互）
   user:list                  列出全部账户（username / status / createdAt / uid）
   user:disable <username>    停用（下一请求即生效：登录拒 / 会话断 / webhook 令牌失效）

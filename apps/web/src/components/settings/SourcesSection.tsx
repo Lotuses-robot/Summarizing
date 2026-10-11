@@ -334,9 +334,72 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
   );
 }
 
-/** 信源区（D-89 真界面 / 走查修订③ 即时生效）：GET /api/sources 列信源 → 每源一张分组卡。
- *  前端不知道信源名——列表与字段全部由后端给。 */
-export function SourcesSection() {
+/** 接入地址 + 令牌轮换（FR-008）：令牌嵌在 URL 里——复制即用；泄露一键换新（旧地址即刻失效）。 */
+function TokenRow({
+  sourceToken,
+  onRotated,
+}: {
+  sourceToken: string;
+  onRotated: (t: string) => void;
+}) {
+  const { statuses, flash, sticky } = useStatus();
+  const hookUrl = `${window.location.origin}/hook/${sourceToken}/nc/event`;
+
+  /** 复制接入地址（剪贴板不可用/失败 → 可见提示，不静默）。 */
+  const copy = () => {
+    if (navigator.clipboard === undefined) {
+      sticky("token", "剪贴板不可用——请手动选中复制");
+      return;
+    }
+    navigator.clipboard
+      .writeText(hookUrl)
+      .then(() => flash("token", "已复制"))
+      .catch(() => sticky("token", "复制失败——请手动选中复制"));
+  };
+
+  /** 轮换令牌（二次确认）：旧地址即刻失效——须同步更新 nc 配置。 */
+  const rotate = () => {
+    if (!window.confirm("重新生成接入令牌？现有接入地址会立即失效（nc 需改用新地址）。")) return;
+    api
+      .rotateSourceToken()
+      .then(({ sourceToken: next }) => {
+        onRotated(next);
+        flash("token", "已生成新令牌");
+      })
+      .catch((err: unknown) => sticky("token", `轮换失败：${errText(err)}`));
+  };
+
+  return (
+    <Panel>
+      <Row label="接入地址" description="把它填进 nc 的上报地址（含你的账户令牌）" stacked>
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="min-w-0 break-all rounded-md border border-line bg-canvas px-2 py-1 text-xs">
+            {hookUrl}
+          </code>
+          <button className="btn" onClick={copy}>
+            复制
+          </button>
+          <button className="btn" onClick={rotate}>
+            重新生成令牌
+          </button>
+        </div>
+      </Row>
+      <StatusSlot statuses={statuses} />
+    </Panel>
+  );
+}
+
+/** 信源区（D-89 真界面 / 走查修订③ 即时生效）：接入地址（账户令牌）常驻 + GET /api/sources 列信源
+ *  → 每源一张分组卡。前端不知道信源名——列表与字段全部由后端给。 */
+export function SourcesSection({
+  sourceToken,
+  onRotated,
+}: {
+  /** 本账户接入令牌（接入地址展示与轮换用）。 */
+  sourceToken: string;
+  /** 轮换成功回调（App 同步 me.sourceToken——重开设置时显示新值）。 */
+  onRotated: (token: string) => void;
+}) {
   const [sources, setSources] = useState<SourceSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -347,32 +410,24 @@ export function SourcesSection() {
       .catch(() => setError("拉取信源列表失败（后端是否在跑？）"));
   }, []);
 
-  if (error !== null) {
-    return (
-      <Panel>
-        <Row label={<span className="text-danger">{error}</span>} />
-      </Panel>
-    );
-  }
-  if (sources === null) {
-    return (
-      <Panel>
-        <Row label={<span className="text-ink-muted">加载信源…</span>} />
-      </Panel>
-    );
-  }
-  if (sources.length === 0) {
-    return (
-      <Panel>
-        <Row label={<span className="text-ink-muted">还没有接入信源</span>} />
-      </Panel>
-    );
-  }
   return (
     <div className="space-y-5">
-      {sources.map((s) => (
-        <SourceCard key={s.name} summary={s} />
-      ))}
+      <TokenRow sourceToken={sourceToken} onRotated={onRotated} />
+      {error !== null ? (
+        <Panel>
+          <Row label={<span className="text-danger">{error}</span>} />
+        </Panel>
+      ) : sources === null ? (
+        <Panel>
+          <Row label={<span className="text-ink-muted">加载信源…</span>} />
+        </Panel>
+      ) : sources.length === 0 ? (
+        <Panel>
+          <Row label={<span className="text-ink-muted">还没有接入信源</span>} />
+        </Panel>
+      ) : (
+        sources.map((s) => <SourceCard key={s.name} summary={s} />)
+      )}
     </div>
   );
 }

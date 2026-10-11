@@ -43,7 +43,7 @@ declare module "fastify" {
 
 /** 装配一个账户的空间：开库（含启动清扫）→ 建 llm 引用（本库设置优先，回退 .env）→ 信源上岗并启动。
  *  `factories` 默认取生产注册表；测试注入替身适配器（不改生产路径）。 */
-export async function assembleSpace(
+async function assembleSpace(
   account: AccountRow,
   dataRoot: string,
   factories: Array<() => SourceAdapter> = allSourceAdapters(),
