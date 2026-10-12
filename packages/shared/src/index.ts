@@ -204,7 +204,9 @@ export const IngestRequestSchema = z.object({
   content: z.string().min(1),
   sourceType: z.string().min(1),
   sourceIdentity: SourceIdentitySchema,
-  eventTime: z.string().nullable().default(null),
+  // 事件时间：合法即**北京墙钟串**或 null（无事件时间）——入口与 dueDate 出口同口径（D-97 走查收紧：
+  // 裸 string 会放脏串进库、被 digest 当相对日期锚点喂 LLM；带 Z/偏移的串更会与库内 +08 口径混时区）。
+  eventTime: wallClockSchema.nullable().default(null),
 });
 export type IngestRequest = z.infer<typeof IngestRequestSchema>;
 
