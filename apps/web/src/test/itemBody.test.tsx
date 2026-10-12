@@ -114,11 +114,12 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
   });
 
   it("ddl 附相对时间（shared relativeDueText）与推断说明", async () => {
-    // 90 小时后到期（>2 天档）→ ceil(3.75) = 「还有 4 天」；用动态日期避免墙钟漂移
-    const due = new Date(Date.now() + 90 * 60 * 60_000);
+    // 90 小时后到期（>2 天档）→ ceil(3.75) = 「还有 4 天」；用动态日期避免墙钟漂移。
+    // ddl 串按北京墙钟生成（epoch+8h 的 UTC 分量——本地 getter 在 UTC 机器上会偏 8h，CI 实测）
+    const due = new Date(Date.now() + 90 * 60 * 60_000 + 8 * 60 * 60_000);
     /** 数字补零成两位（墙钟格式用）。 */
     const pad = (n: number): string => String(n).padStart(2, "0");
-    const ddl = `${due.getFullYear()}-${pad(due.getMonth() + 1)}-${pad(due.getDate())} ${pad(due.getHours())}:${pad(due.getMinutes())}`;
+    const ddl = `${due.getUTCFullYear()}-${pad(due.getUTCMonth() + 1)}-${pad(due.getUTCDate())} ${pad(due.getUTCHours())}:${pad(due.getUTCMinutes())}`;
     stubFetch(
       makeDetail({
         item: {

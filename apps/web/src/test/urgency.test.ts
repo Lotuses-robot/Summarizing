@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { wallClockToEpoch } from "@summarizing/shared";
 import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urgency";
 
 // 浓淡曲线的数值口径（终轮验证 L2：urgencyStrength 此前零覆盖——「唯一出处」只钉了一半）。
+// NOW 用北京墙钟显式构造（无时区串 Date.parse 会按机器本地解析——CI 的 UTC 上整体偏 8h）。
 
-const NOW = Date.parse("2026-09-30T12:00:00");
+const NOW = wallClockToEpoch("2026-09-30T12:00:00");
 const HOUR = 60 * 60_000;
 
 describe("urgencyStrength（待办临近渐强）", () => {

@@ -13,7 +13,7 @@ import {
   type BufferedEvent,
   type GroupBuffer,
 } from "../sources/nc/types";
-import { wallClockFromUnix } from "../shared/time";
+import { parseWallClock, wallClockFromUnix } from "../shared/time";
 import { FakeLlm } from "./helpers/fakeLlm";
 import { cleanupAllTestAccounts, makeTestAccount, type TestAccount } from "./helpers/app";
 
@@ -127,7 +127,7 @@ describe("nc 适配器：纯函数", () => {
       ["g1", { groupId: "g1", events: [], lastAt: "2026-09-28T10:00:00" }], // 距今 4 分钟
       ["g2", { groupId: "g2", events: [], lastAt: "2026-09-28T10:02:30" }], // 距今 1 分半
     ]);
-    const nowMs = Date.parse("2026-09-28T10:04:00");
+    const nowMs = parseWallClock("2026-09-28T10:04:00");
     expect(dueGroups(buffers, nowMs, 3).map((b) => b.groupId)).toEqual(["g1"]);
   });
 

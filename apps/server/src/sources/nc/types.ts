@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { parseWallClock } from "../../shared/time";
 
 // nc 事件形状（只读对接，D-84 §3.1）：只收群消息，其余 204 丢弃。
 // schema 住边界——nc 协议私有，不进 packages/shared（那是跨边界契约层）。
@@ -93,7 +94,9 @@ export function dueGroups(
   const windowMs = windowMinutes * 60_000;
   const due: GroupBuffer[] = [];
   for (const buf of buffers.values()) {
-    const lastMs = Date.parse(buf.lastAt);
+    // lastAt 是北京墙钟串：必须 parseWallClock（+08:00）——裸 Date.parse 按机器本地解析，
+    // 在 UTC 服务器上整串判晚 8h → nowMs−lastMs 恒负 → 组永不到期、封批去抖失效（2026-10-12 CI 逮出）。
+    const lastMs = parseWallClock(buf.lastAt);
     if (!Number.isNaN(lastMs) && nowMs - lastMs >= windowMs) due.push(buf);
   }
   return due;

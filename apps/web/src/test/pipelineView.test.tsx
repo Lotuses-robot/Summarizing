@@ -51,13 +51,15 @@ const DETAIL_EVENTS = [
   },
 ];
 
-/** 北京墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）——供「刚完成/页开后到达」用例构造。
- *  显式补零（不依赖 ICU locale——sv-SE 在 small-icu 运行时会静默变格式）。 */
+/** 当前北京墙钟串（与 receivedAt 同格式）——供「刚完成/页开后到达」用例构造。
+ *  D-97：**机器时区无关**——取 epoch+8h 的 UTC 分量（getHours 等本地 getter 在 UTC 机器上偏 8h，CI 实测）。 */
 function localNowStr(): string {
-  const d = new Date();
+  const d = new Date(Date.now() + 8 * 60 * 60_000);
+  /** 两位数补零。 */
+  const p = (n: number): string => String(n).padStart(2, "0");
   return (
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` +
-    `T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
   );
 }
 

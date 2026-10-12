@@ -4,6 +4,7 @@ import { executeChanges } from "../executor/executor";
 import { sweepOrphanPending } from "../agent0/digest";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
+import { parseWallClock } from "../shared/time";
 
 /** 造一条标准 RawInput 夹具。 */
 function seedRaw(db: ReturnType<typeof makeDb>): RawInput {
@@ -285,7 +286,7 @@ describe("版本史排序（同秒多版本）", () => {
 
   it("同一秒连写多条：deriveHistory 按 rowid 稳定排序（顺序 = 插入序）", () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-26T10:00:00"));
+    vi.setSystemTime(parseWallClock("2026-09-26T10:00:00"));
     try {
       const db = makeDb(":memory:");
       const itemId = seedThreeVersions(db);

@@ -27,7 +27,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # --ignore-scripts：better-sqlite3 自带预编译，禁 node-gyp 编译（Windows runner 缺 VS 工具链）
+      - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run build:release
       - uses: actions/upload-artifact@v4

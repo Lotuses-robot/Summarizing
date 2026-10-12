@@ -6,8 +6,11 @@ import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { FakeLlm } from "./helpers/fakeLlm";
+import { parseWallClock } from "../shared/time";
 
 // 006：HTTP 用例统一经 makeTestAccount 打真实入口（真账户 + 真会话 cookie，断言走真实认证链）。
+// 时间播种一律走 parseWallClock（无时区串按 +08:00 解析）——new Date(裸串) 会按机器本地时区解释，
+// 在非北京机器（如 CI 的 UTC）上 seeded「现在」整体偏 8h（2026-10-12 CI 实测）。
 
 afterEach(cleanupAllTestAccounts);
 
@@ -54,7 +57,7 @@ function createItem(
 describe("buildBoard（状态制五段，D-80）", () => {
   it("四段互斥：日期未知、已排期按 ddl 升序（时间钉死防墙钟漂移）；doubtNote 不再影响分段（D-89）", () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-26T12:00:00"));
+    vi.setSystemTime(parseWallClock("2026-09-26T12:00:00"));
     try {
       const db = makeDb(":memory:");
       const raw = seedRaw(db);
@@ -147,7 +150,7 @@ describe("buildBoard（状态制五段，D-80）", () => {
   it("已完成段按完成时刻倒序（最新在上，D-83 二轮）", () => {
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date("2026-09-27T08:00:00"));
+      vi.setSystemTime(parseWallClock("2026-09-27T08:00:00"));
       const db = makeDb(":memory:");
       const raw = seedRaw(db);
       createItem(db, raw, { name: "早完成" });
@@ -157,7 +160,7 @@ describe("buildBoard（状态制五段，D-80）", () => {
       const late = items.find((i) => i.elements[0]?.text === "晚完成");
       if (!early || !late) throw new Error("播种失败");
 
-      vi.setSystemTime(new Date("2026-09-27T08:30:00"));
+      vi.setSystemTime(parseWallClock("2026-09-27T08:30:00"));
       repo.appendItemVersion(db, {
         itemId: early.id,
         action: "complete_item",
@@ -165,7 +168,7 @@ describe("buildBoard（状态制五段，D-80）", () => {
         snapshot: { ...early, status: "done" },
         by: { actor: "用户", model: null },
       });
-      vi.setSystemTime(new Date("2026-09-27T20:00:00"));
+      vi.setSystemTime(parseWallClock("2026-09-27T20:00:00"));
       repo.appendItemVersion(db, {
         itemId: late.id,
         action: "complete_item",
@@ -328,7 +331,7 @@ describe("事项读写接口（真实 HTTP 入口）", () => {
   it("撤回归档（D-83 二轮）：done 项归档后撤回归档 → 仍是 done（完成状态保留）", async () => {
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date("2026-09-27T08:00:00"));
+      vi.setSystemTime(parseWallClock("2026-09-27T08:00:00"));
       const t = await makeTestAccount({ llm: new FakeLlm("t") });
       const raw = seedRaw(t.db);
       createItem(t.db, raw, { name: "先完成后归档" });

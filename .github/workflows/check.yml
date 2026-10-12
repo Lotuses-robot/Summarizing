@@ -17,6 +17,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # npm ci 会跑根 package.json 的 prepare=simple-git-hooks（devDep 在、命令可用，无需跳过）
-      - run: npm ci
+      # --ignore-scripts：better-sqlite3 自带预编译二进制，禁脚本免 node-gyp 编译
+      #（Linux runner 能编但慢；Windows runner 缺 VS 工具链直接失败——2026-10-12 实测）
+      - run: npm ci --ignore-scripts
       - run: npm run check

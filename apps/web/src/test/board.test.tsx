@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { wallClockToEpoch } from "@summarizing/shared";
 import { Board } from "../components/Board";
 import { doneFadeStrength } from "../lib/urgency";
 import { makeRow, view } from "./helpers/board-fixtures";
@@ -9,7 +10,7 @@ import "@testing-library/jest-dom/vitest";
 describe("Board（四段看板，D-89）", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-09-26 12:00:00"));
+    vi.setSystemTime(wallClockToEpoch("2026-09-26T12:00:00"));
     // 展开体挂载会拉详情——测试环境直接给失败应答，落在「加载中…」占位（不试真网络）
     vi.stubGlobal(
       "fetch",
@@ -74,7 +75,7 @@ describe("Board（四段看板，D-89）", () => {
   });
 
   it("完成淡出数值口径（U3 走查修订）：刚完成满格 ×40%；12 小时前 ≈29%（低于 40 封顶）", () => {
-    const now = Date.parse("2026-09-30T12:00:00");
+    const now = wallClockToEpoch("2026-09-30T12:00:00");
     // 刚完成 → 强度 1 → 40%（= 待办渐强同档最大；「刚完成最亮」由此成立）
     expect(Math.round(doneFadeStrength("2026-09-30 12:00:00", now) * 40)).toBe(40);
     // 12 小时前：p = 1−12/120 = 0.9 → 0.729 → 29%

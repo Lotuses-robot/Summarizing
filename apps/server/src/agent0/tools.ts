@@ -22,6 +22,7 @@ import {
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ToolDef } from "../shared/llm";
+import { parseWallClock } from "../shared/time";
 
 // agent0 的检索工具（01§4.14）：全部真代码检索，LLM 永不裸操作存储。
 // search_recent_raws / search_uncertain 归信源阶段（D-85）：前者找碎片兄弟，后者查存疑库复原。
@@ -147,7 +148,8 @@ function sameIdentity(a: SourceIdentity, b: SourceIdentity): boolean {
 /** 按与当前批次的信源接近度排序（同源 > 时间临近 > 新入库）——给 agent0 找「另一半」用。
  *  时间临近 = 离**当前批次时刻**最近的排前（不是单纯的新到旧；ctx.eventTime 缺席时回退新到旧）。 */
 function byProximity(ctx: ToolContext) {
-  const ctxT = ctx.eventTime === null ? Number.NaN : Date.parse(ctx.eventTime);
+  // 时刻串一律 parseWallClock（+08:00 显式解析，机器时区无关——裸 Date.parse 是 D-97 泄漏形态）
+  const ctxT = ctx.eventTime === null ? Number.NaN : parseWallClock(ctx.eventTime);
   return (
     a: { sourceIdentity: SourceIdentity; eventTime: string | null; createdAt: string },
     b: typeof a,
@@ -156,8 +158,8 @@ function byProximity(ctx: ToolContext) {
     const bSame = b.sourceIdentity["sourceLabel"] === ctx.sourceIdentity["sourceLabel"] ? 1 : 0;
     if (aSame !== bSame) return bSame - aSame; // 同源优先
     if (!Number.isNaN(ctxT)) {
-      const aT = Date.parse(a.eventTime ?? a.createdAt);
-      const bT = Date.parse(b.eventTime ?? b.createdAt);
+      const aT = parseWallClock(a.eventTime ?? a.createdAt);
+      const bT = parseWallClock(b.eventTime ?? b.createdAt);
       if (!Number.isNaN(aT) && !Number.isNaN(bT)) {
         const d = Math.abs(aT - ctxT) - Math.abs(bT - ctxT);
         if (d !== 0) return d; // 与当前批次时刻差越小越前
