@@ -72,21 +72,22 @@
 - 每个独立函数首行前必须有 **JSDoc 人话描述**（`jsdoc/require-jsdoc` 强制）——写意图与依据，不复述函数名；描述要能让只读函数名的人看懂结构
 - 🔴 **【边界加固三规矩】（2026-10-09 specs/003 六轮评审复盘，详见 .specify 宪法）**：①修边界字段（schema/协议/输入口）先列**脏形态枚举表**（null/数字/空串/大小写/多行/缺席/超长）一次修全——只修点名场景 = 同洞多轮返工（role 修三轮的教训）；②**结构容错 ≠ 语义兜底**——字段缺失保持缺失（null 直通），绝不顺手编造语义默认值，尤其当下游是 AI 判断依据（time null 曾被兜成接收时刻，踩 01§5.3）；③**改任何值的形状 → grep 全部消费者**回查依赖旧形状的不变式（行协议前缀曾 silently 击穿「content 非空」的空批守卫）
 
-## 当前状态（2026-10-10 · 走查批次完成并入 main；上云 9 决策已拍；下一站 = 多用户 spec-kit 立项）
+## 当前状态（2026-10-13 · 006 多用户批次交付并入 main；下一站 = 批次 2 代码侧上云项）
 
-- **路线（D-74；D-87 修订）**：S1 ✅ → S2 ✅ → UI 重搓 ✅ → 信源阶段 ✅ → 后端加固 ✅（D-87/D-88）→ UI 收口 ✅（D-89）→ **spec-kit 试用批次 ✅（specs/001–005：对话滚动锚点 / 服务端目录重组 D-90 / nc 行协议 D-91 / 流水数据层 D-92 / 流水读口+视图 D-93·D-95）** → **走查批次 ✅（2026-10-09~10：流水视图两轮 review+simplify 收口 + 前台兜底守卫 D-94；265 测试）** → **正式测试使用** → **多用户（单实例多账户）spec-kit 立项（2026-10-10 晚拍板；加源顺延）** → **上云试水** → 知识库。撤回功能暂缓（D-79）；搁置流延后（L-17）。
+- **路线（D-74；D-87 修订）**：S1 ✅ → S2 ✅ → UI 重搓 ✅ → 信源阶段 ✅ → 后端加固 ✅（D-87/D-88）→ UI 收口 ✅（D-89）→ **spec-kit 试用批次 ✅（specs/001–005）** → **走查批次 ✅（D-94/D-95；265 测试）** → **多用户批次 ✅（specs/006：单机→邀请制多账户服务，304 测试；D-96 立项 / D-98 交付 / D-99 用户卡）** → **批次 2 代码侧上云项（Docker/CI/版本/schema 迁移/时区+08:00）** → 批次 3 服务器落地 → 批次 4 运营面 → 批次 5 上线 runbook → 知识库。撤回功能暂缓（D-79）；搁置流延后（L-17）；账户删除/导出延后（L-25）。
 - **上云 9 决策（2026-10-10 晚全拍，详见 docs/11 总表）**：形态 A 国内（服务器 = 阿里云轻量 2C2G + 域名已自备；**备案已有**——粤ICP备2026147541号-1 · lotuses.cn，上线前：页脚挂备案号 + 核对接入商）；首批 3~5 熟人；对外 = **开源**（除配套付费服务外免费；用户机制一并开源；托管现阶段邀请制注册）；运维可见如实写进一份《简单协议》；预发 = 本地全绿 + 服务器灰度一天；数据导出暂不承诺；容量不设硬线。
 - **走查批次产物（D-94/D-95）**：①流水视图形态定稿——常驻大展示状态卡（消化中/完成卡底色随主题色派生、大 H1「消化中/已完成/空闲/排队中」、轮次进度条、渐隐轨迹、完成闪示 3s）+ 单一时间线（最新在上）+ 展开详情随轮询刷新；轮询自适应 3s/10s ②前台**零工具调用/假声称兜底录入**（回复称「已录入」而库无批次 → 按 D-14 真录；读工具掩护的同型形态一并收住；01§4.14 兜底执法）③全站短时间格式统一、补齐位数（`lib/time` 单出处；详情时间线带秒）④日期未知行细框删除（段头已标明）。
 - **UI 收口产物（D-89）**：①看板**四段**（存疑段/行内琥珀条/解除按钮/`board.doubts`/`api.confirm` 全删干净；存量挂疑已真实入口解除）②推断说明折叠（与证据同款）③完成淡出封顶 40%（走查修订②：与待办渐强同档最大，「刚完成最亮」成立） ④对话历史启动回填（`GET /api/chat/history`，chips 不回填=L20；上传实为 16 轮同源上限 `CHAT_HISTORY_MAX_ITEMS`）⑤**存疑库审核页**（活动栏 ⚠ 主视图 + 徽标计数=轮询并拉 uncertain + 只读倒序列表 + **移动确认移除**：点图标→原位变 X、左弹勾、移到勾上点击才 PUT）⑥引文旁标 `sourceLabel`（hover 全身份串）⑦设置**信源区真界面**（`GET /api/sources` 按 schema 渲染通用表单：六型；record=键值对行编辑；逐键 diff PUT；lastError 显示「最近出错」；secret 掩码备案 L21）⑧`GET /api/sources` 类型上移 shared（D-52）。
-- **待办（用户）**：多用户开工（spec-kit 立项）；上云基建后续（服务器 TLS/加固/备份/告警 + 备案号挂页脚/接入商核对——docs/11 阶段 1）；04§五·五 U1–U8 沿革项（多轮实时走查已覆盖大部；Ctrl-C 真实停服复验未做）；weflow 搁置（D-91 已备行协议，解搁照此）。
+- **待办（用户）**：批次 2 代码侧上云项（Docker/CI/版本/schema 迁移/时区+08:00）；批次 3 服务器落地（服务器 TLS/加固/备份/告警 + 备案号挂页脚/接入商核对——docs/11 阶段 1）；04§五·五 U1–U8 沿革项（多轮实时走查已覆盖大部；Ctrl-C 真实停服复验未做）；weflow 搁置（D-91 已备行协议，解搁照此）。
 - ⚠️ **术语（D-88）**：**「信源」= 源适配器**（nc/chat/…）；**「插件」留给未来的更大扩展体系**。
 - **信源基建**：`apps/server/src/sources/`（types/registry/nc；八件套 + 三时机分离 makeApp/registerSources/startSources；SIGINT 与关停归 core，关停/启动都有 10s 隔离超时）；`source_settings` 表；`sourceIdentity` 弹性字典（保留键 sourceLabel）；版本署名 `{actor, model}`（Provenance）。docs：`07 信源开发指南` + `08 nc 对接指南`。
 - **UI 选型（D-81）**：Tailwind v4 + shadcn 风格（clsx+cn、lucide-react；无黑盒组件库）。**web 自测基建**：happy-dom + @testing-library（`apps/web/src/test/*.test.tsx`，首行 `// @vitest-environment happy-dom`），fetch 替身喂真实 api.ts。
-- 启动：`npm run dev`（web http://localhost:5173，server:3001）；停止/重置：`npm run stop` / `npm run db:reset`。
+- **多用户（006；D-98）**：系统库 `data/system.db`（账户登记）+ 每账户一库 `data/users/<uid>.db`；认证（scrypt/签名 cookie 会话/限速）；`Space`+`SpaceHub`（每账户运行时容器：db+llmRef+信源实例+webhook 处理器表）；信源网关 `/hook/<token>/<source>/*`（`SourceRouter` 收窄）；运维命令（`npm run admin -- …`：建号/发码/列表/停启/重置）；前端认证壳（登录/注册同壳 + 备案号页脚 + 401 单点拦截）+ **独立用户卡**（D-99）。**AI key 每人自带、无 `.env` 兜底**。
+- 启动：`npm run dev`（web http://localhost:5173，server:3001）；停止/重置：`npm run stop` / `npm run db:reset`；建账户：`npm run admin -- user:add 你的名字`。
 - 质量门：`npm run check`（tsc+eslint+vitest）/ `npm run check:dead`（knip）/ `npm run build -w @summarizing/web`。
-- `.env` 与 `data/` 都固定在仓库根，代码里按绝对路径解析；`OPENAI_BASE_URL` 必须带 `/v1`（缺则全批 404）。
-- 技术栈：React+Vite / Fastify / Drizzle+SQLite（单文件）/ Vitest / openai SDK（OpenAI 兼容协议，01§8.4）。
-- **开放问题**：Q1–Q25 已决（仅 Q20 挂起到知识库开工前）；延后项至 L1–L24。文档为本阶段权威。
+- `data/` 固定在仓库根，代码里按绝对路径解析。`.env` 只放**环境变量**（`PORT`/`TRUST_PROXY`/`SESSION_COOKIE_SECURE`/`BASE_URL`）——**AI 接入不在 `.env`**（每账户在设置里配）。
+- 技术栈：React+Vite / Fastify / Drizzle+SQLite（每账户一库）/ Vitest / openai SDK（OpenAI 兼容协议，01§8.4）。
+- **开放问题**：Q1–Q25 已决（仅 Q20 挂起到知识库开工前）；延后项至 L1–L26。文档为本阶段权威。
 - **工作流**：spec-kit 已引入（`.specify/` 宪法 + 模板；新特性走 `specs/NNN-*` 三件套——plan 必含影响面清单、tasks 必含 Phase 0 脏形态枚举）。
 - 工作协议：任何超出 01 范围的改动先停下来问。
 
