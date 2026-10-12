@@ -30,9 +30,14 @@ await hub.ensureAll();
 // SIGINT 归 core（D-88 修正 D-84 遗留）：信源不再自己 process.on。
 // gracefulClose（app.close）→ 空间 stop（各信源 stop + 清理表；套 SHUTDOWN_TIMEOUT_MS 隔离）→
 // exitAfter 保底退出——任一环挂起都不许拖住 Ctrl-C（守卫测试在 nc.test / sources.test）。
-process.on("SIGINT", () => {
+// SIGTERM 同款（批次 2 / Docker）：容器里 node 即 PID 1，内核不代它执行默认「收到即终止」——
+// 无处理器 = docker stop / compose down 的 SIGTERM 被忽略、10s 宽限后 SIGKILL，优雅关停永不执行。
+/** 优雅关停（SIGINT/SIGTERM 共用）：先关 HTTP，再停全部空间（含信源封批），exitAfter 保底退出。 */
+const onShutdown = (): void => {
   void exitAfter(gracefulClose(app).then(() => closeSpacesWithTimeout(hub, SHUTDOWN_TIMEOUT_MS)));
-});
+};
+process.on("SIGINT", onShutdown);
+process.on("SIGTERM", onShutdown);
 
 // 前端静态合并（发布包形态）：web/dist 存在就把前端并到同一端口——一个口出 UI + API。
 // 路径：src 与打包后 dist 同层深（apps/server/{src,dist}），../../web/dist 两边都命中 apps/web/dist。

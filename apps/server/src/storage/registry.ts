@@ -38,7 +38,7 @@ export const invites = sqliteTable(
   (t) => [index("invites_used_idx").on(t.usedBy)],
 );
 
-/** 系统键值：session_secret（会话签名密钥，首建生成）/ schema_version（版本号机制属批次 2）。 */
+/** 系统键值：session_secret（会话签名密钥，首建生成）。 */
 const meta = sqliteTable("meta", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -56,13 +56,24 @@ export function makeRegistryDb(file: string) {
   if (file !== ":memory:") {
     sqlite.pragma("journal_mode = WAL");
   }
-  runSchemaGate(sqlite, file, () => ensureRegistrySchema(sqlite));
+  // 版本门控：落后先备份后迁移；持平/领先跑幂等 DDL 自愈（migrate.ts 单出处，同用户库）。
+  // 门控失败关句柄再抛——启动失败与按请求重试都不会泄漏连接。
+  try {
+    runSchemaGate(sqlite, file, () => ensureRegistrySchema(sqlite));
+  } catch (err) {
+    try {
+      sqlite.close(); // 半开不留句柄
+    } catch {
+      // 已关/未开——忽略，别盖住原始错误
+    }
+    throw err;
+  }
   return drizzle(sqlite, { schema: { accounts, invites, meta } });
 }
 
 export type RegistryDb = ReturnType<typeof makeRegistryDb>;
 
-/** 幂等建表（IF NOT EXISTS）+ 首建播种（session_secret / schema_version）。 */
+/** 幂等建表（IF NOT EXISTS）+ 首建播种（session_secret）。 */
 function ensureRegistrySchema(sqlite: Database.Database): void {
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
@@ -91,7 +102,6 @@ function ensureRegistrySchema(sqlite: Database.Database): void {
   sqlite
     .prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('session_secret', ?)")
     .run(randomBytes(32).toString("hex"));
-  sqlite.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1')").run();
 }
 
 // ── 账户 ──

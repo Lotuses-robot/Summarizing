@@ -7,10 +7,14 @@ services:
     # 生产用 CI 推的镜像（如阿里云 ACR）；本地开发用 build: .
     # image: registry.cn-shenzhen.aliyuncs.com/<ns>/summarizing:v0.x.y
     restart: unless-stopped
-    env_file: .env
+    # .env 可缺席（新机器没复制 .env.example 也起得来；老写法 env_file: .env 会硬拒启动）
+    env_file:
+      - path: .env
+        required: false
     environment:
       - PORT=3001
-      # 反代（Caddy）后取真实来源 IP 供限速用；前提：本端口不直暴公网（见下 ports）
+      # 反代（Caddy）后取真实来源 IP 供限速用；前提：本端口不直暴公网（见下 ports）。
+      # 配套：XFF 由 Caddyfile 覆写为直连客户端 IP——防客户端自带伪造头（trustProxy 信任全部跳数）
       - TRUST_PROXY=1
     volumes:
       # 唯一有状态的东西：整目录 bind mount（system.db + users/<uid>.db）——宿主机可直接备份

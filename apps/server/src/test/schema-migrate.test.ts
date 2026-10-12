@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { makeDb } from "../storage/db";
-import { SCHEMA_VERSION, readSchemaVersion, restoreFromBackup } from "../storage/migrate";
+import { SCHEMA_VERSION, readSchemaVersion } from "../storage/migrate";
 
-// schema 迁移三件套（批次 2）：版本号门控 + 迁移前自动备份 + 保留 N 份 + 恢复。
+// schema 迁移三件套（批次 2）：版本号门控 + 迁移前自动备份 + 保留 N 份。
 // 用临时文件真库验证（":memory:" 无文件、不触发备份）。
 
 const dirs: string[] = [];
@@ -36,7 +36,7 @@ describe("schema 版本门控 + 迁移前备份", () => {
 
   it("落后版本的老库：迁移前自动备份（文件名带旧版本）+ 迁移后写新版本", () => {
     const file = path.join(tmpDir(), "old.db");
-    // 造一个「版本 0」的老库（无表——门控会补建）
+    // 造一个「版本 0、有表」的老库（有表 = 有数据可备；门控补建新表）
     const raw = new Database(file);
     raw.pragma("journal_mode = WAL");
     raw.pragma("user_version = 0");
@@ -90,35 +90,29 @@ describe("schema 版本门控 + 迁移前备份", () => {
     expect(left.length).toBe(5);
   });
 
-  it("restoreFromBackup：备份拷回目标并清 WAL 残留", () => {
-    const dir = tmpDir();
-    const file = path.join(dir, "live.db");
-    const db = makeDb(file);
-    db.$client.close();
-    // 造一个备份（当前库即内容）
-    const bak = path.join(dir, "backup-snapshot.db");
-    copy(file, bak);
-    // 破坏 live（删内容后恢复）
-    rmSync(file, { force: true });
-    expect(existsSync(file)).toBe(false);
-    restoreFromBackup(bak, file);
-    expect(existsSync(file)).toBe(true);
-    // 恢复后是合法 SQLite
-    const check = new Database(file, { readonly: true });
-    expect(
-      check
-        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='item_versions'")
-        .get(),
-    ).not.toBeUndefined();
-    check.close();
-  });
+  it("并发读者令 checkpoint busy：中止迁移、不产出假备份", () => {
+    const file = path.join(tmpDir(), "busy.db");
+    const raw = new Database(file);
+    raw.pragma("journal_mode = WAL");
+    raw.pragma("user_version = 0");
+    raw.exec("CREATE TABLE legacy (id TEXT)");
+    raw.exec("INSERT INTO legacy (id) VALUES ('x')");
+    // 另一连接持读事务（快照开放）——TRUNCATE checkpoint 等满 busy_timeout（默认 5s）后返回 busy=1
+    const reader = new Database(file, { readonly: true });
+    reader.exec("BEGIN");
+    reader.prepare("SELECT * FROM legacy").get();
+
+    expect(() => makeDb(file)).toThrow(/checkpoint/);
+    // 中止发生在建 backup 目录之前——不留误导性的空备份目录
+    expect(existsSync(path.join(path.dirname(file), "backup"))).toBe(false);
+
+    reader.exec("COMMIT");
+    reader.close();
+    raw.close();
+  }, 15_000); // 覆盖 checkpoint 等满 busy_timeout(5s) 的时间
 });
 
 /** 递归建目录（测试小工具）。 */
 function mkdirp(p: string): void {
   mkdirSync(p, { recursive: true });
-}
-/** 拷文件（测试小工具）。 */
-function copy(from: string, to: string): void {
-  copyFileSync(from, to);
 }

@@ -19,8 +19,18 @@ export function makeDb(file: string) {
   if (file !== ":memory:") {
     sqlite.pragma("journal_mode = WAL");
   }
-  // 版本门控：落后先在备份后迁移；持平/领先直接跑幂等 DDL 自愈（migrate.ts 单出处）
-  runSchemaGate(sqlite, file, () => ensureSchema(sqlite));
+  // 版本门控：落后先在备份后迁移；持平/领先直接跑幂等 DDL 自愈（migrate.ts 单出处）。
+  // 门控失败（备份 busy / DDL 错）关句柄再抛——按请求重试装配时否则会逐次泄漏连接。
+  try {
+    runSchemaGate(sqlite, file, () => ensureSchema(sqlite));
+  } catch (err) {
+    try {
+      sqlite.close(); // 半开不留句柄
+    } catch {
+      // 已关/未开——忽略，别盖住原始错误
+    }
+    throw err;
+  }
   return drizzle(sqlite, { schema });
 }
 

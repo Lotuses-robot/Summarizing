@@ -45,7 +45,7 @@ data/
 | key | 说明 |
 |---|---|
 | `session_secret` | 32B hex，系统库首建时生成——重启后会话不失效；换值 = 全体下线 |
-| `schema_version` | 占位（批次 2 的版本号机制接手，本批只写值 1） |
+| `schema_version` | ~~占位（批次 2 接手）~~ 已删（2026-10-12 评审 #9）：版本号机制定为 `PRAGMA user_version`（migrate.ts 单出处），meta 行只写不读、新旧并存已清除 |
 
 ## 运行时对象（不持久）
 

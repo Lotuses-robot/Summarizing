@@ -33,15 +33,18 @@ COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-# --omit=dev：只装生产依赖（better-sqlite3 的 linux-x64 预编译随 npm 包一并安装，无需编译）
-RUN npm ci --omit=dev && npm cache clean --force
+# --omit=dev：只装生产依赖。--ignore-scripts 必需：根 package.json 的 prepare=simple-git-hooks
+# 在 --omit=dev 下仍会执行（命令已被剔除 → npm ci exit 1，镜像构建必挂，实测复现）；
+# 运行依赖无需脚本——better-sqlite3 v13 无 install 脚本、prebuilds 随包下发（含 linux-x64），实测可用。
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # 从构建阶段取产物：服务端单文件 + 前端静态
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 
-# data/ 目录（运行时会 bind mount 到宿主机；容器内只作挂载点）
-RUN mkdir -p /app/data
+# data/ 目录（运行时会 bind mount 到宿主机；容器内只作挂载点）。
+# chown 给 node：命名卷场景属主从镜像初始化；bind mount 场景宿主机目录需可写（见 docs/11 部署注意）
+RUN mkdir -p /app/data && chown node:node /app/data
 VOLUME ["/app/data"]
 
 # 非 root 运行（安全）：node 镜像自带 uid 1000 的 node 用户

@@ -4,13 +4,13 @@
 # 部署前确认：
 #   - 域名已解析到本机公网 IP；80/443 已开（ACME 需 80 或 443 可达）
 #   - app 容器只在 compose 网络内（compose 未给 app 映射端口）——TLS 对外唯一入口是 Caddy
+#   - 起容器后看一眼 Caddy 日志无 adapt 报错（本配置未在本机 docker 预验——首次部署时验证）
 sum.lotuses.cn {
 	encode zstd gzip
 
-	# 反代到 app 容器（compose 服务名即主机名）
-	reverse_proxy app:3001
-
-	# 访问日志：默认不记 /hook（令牌在路径里，脱敏见 docs/11 R12-2 / 应用侧日志已脱敏）
+	# 访问日志：/hook 不记（令牌在路径里——R12-2；log_skip 命中即跳过本条 access log）
+	@hook path /hook/*
+	log_skip @hook
 	log {
 		output file /data/access.log {
 			roll_size 10MiB
@@ -26,5 +26,12 @@ sum.lotuses.cn {
 		X-Frame-Options DENY
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
+	}
+
+	# 反代到 app 容器（compose 服务名即主机名）。
+	# XFF 覆写为直连客户端 IP：应用 trustProxy=true 信任全部跳数、取 XFF 最左值——保留客户端自带
+	# 的 XFF 等于拿伪造头当真实 IP（登录/注册限速桶可被绕过）。Caddy 是唯一入口，直连 IP 即真实 IP。
+	reverse_proxy app:3001 {
+		header_up X-Forwarded-For {remote_host}
 	}
 }

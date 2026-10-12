@@ -12,6 +12,8 @@ const SUFFIXES = ["", "-wal", "-shm"] as const;
 
 for (const suffix of SUFFIXES) rmSync(REGISTRY + suffix, { force: true });
 rmSync(path.join(DATA, "users"), { recursive: true, force: true });
+// 迁移备份一并清（system-v*.db 含账户凭据与 webhook 令牌——「清空」必须清干净，评审修复）
+rmSync(path.join(DATA, "backup"), { recursive: true, force: true });
 makeRegistryDb(REGISTRY); // 重建 + 验证（幂等建表；session_secret 重新播种）
-console.log("已回档：data/system.db 重建为空（账户清空、users/ 已删）");
+console.log("已回档：data/system.db 重建为空（账户清空、users/ 与 backup/ 已删）");
 console.log("下一步：npm run admin -- user:add <你的用户名> 建账户");
