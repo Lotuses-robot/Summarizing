@@ -38,7 +38,6 @@ RUN mkdir -p /app/data && chown node:node /app/data
 VOLUME ["/app/data"]
 
 # 非 root 运行（安全）：node 镜像自带 uid 1000 的 node 用户
-# data 属主由 compose 的 bind mount 决定——宿主机目录需可写（见 docs/11 部署注意）
 USER node
 
 # PORT 由 compose 设（默认 3001 见 index.ts）；EXPOSE 仅文档化

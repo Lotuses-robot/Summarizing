@@ -1,0 +1,22 @@
+name: check
+
+# 质量门：每次 push 到 main 与每个 PR 都跑 tsc + eslint + vitest（npm run check）。
+# 只做验证，不出制品——制品见 release.yml（tag 触发）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # npm ci 会跑根 package.json 的 prepare=simple-git-hooks（devDep 在、命令可用，无需跳过）
+      - run: npm ci
+      - run: npm run check

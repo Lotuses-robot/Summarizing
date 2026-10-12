@@ -64,12 +64,12 @@ export function openGatedDb(
  * - 库内版本**持平** → 不备份、直接跑幂等 DDL（自愈），**不动版本**；
  * - 库内版本**领先**（降级旧二进制）→ 同持平处理，但往 stderr 留痕（红线「不许静默」）。
  *
- * 调用时机：由 openGatedDb 在建表前调用（备份要在改动落盘前完成）。
+ * 调用时机：由 openGatedDb 在建表前调用（备份要在改动落盘前完成）——本模块外请用 openGatedDb。
  * @param sqlite 已打开的库句柄
  * @param file 库文件路径（":memory:" 跳过备份——测试内存库无文件）
  * @param applyDdl 幂等建表 + 存量迁移的回调（本库自己的 ensureSchema 主体）
  */
-export function runSchemaGate(sqlite: Database.Database, file: string, applyDdl: () => void): void {
+function runSchemaGate(sqlite: Database.Database, file: string, applyDdl: () => void): void {
   const current = readSchemaVersion(sqlite);
   const needsMigrate = current < SCHEMA_VERSION;
   // 全新库（version 0 且无任何表）= 首次建库，无数据可备——备份只在「已有内容的老库」上做。

@@ -22,7 +22,8 @@
     "seed:demo": "tsx scripts/seed-demo.ts",
     "admin": "tsx scripts/admin.ts",
     "build:server": "node scripts/build-server.mjs",
-    "build:release": "node scripts/build-release.mjs"
+    "build:release": "node scripts/build-release.mjs",
+    "upgrade": "node scripts/upgrade.mjs"
   },
   "simple-git-hooks": {
     "pre-commit": "npx lint-staged",
