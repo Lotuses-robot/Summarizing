@@ -1,0 +1,34 @@
+name: diag-acr
+
+# 临时诊断工作流（用完即删）：判定 ACR 推送失败的确切成因。
+# 探测 A：硬编码 crpi 域名 + 硬编码命名空间 → 验「凭据是否可推」
+# 探测 B：硬编码 crpi 域名 + 来自 secrets 的命名空间 → 验「ACR_NAMESPACE secret 是否正确」
+# 探测 C：复刻 release.yml 现状（secrets 的 registry+namespace）→ 复现失败
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 登录（硬编码 crpi 域名，凭据来自 secrets）
+        run: |
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login \
+            crpi-ggr0v2rzvtv9ah0b.cn-hangzhou.personal.cr.aliyuncs.com \
+            -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+      - name: 拉底镜像
+        run: docker pull caddy:2-alpine
+      - name: "探测 A：硬编码 registry + 硬编码 ns=lotuses"
+        run: |
+          docker tag caddy:2-alpine crpi-ggr0v2rzvtv9ah0b.cn-hangzhou.personal.cr.aliyuncs.com/lotuses/summarizing:diag-a
+          docker push crpi-ggr0v2rzvtv9ah0b.cn-hangzhou.personal.cr.aliyuncs.com/lotuses/summarizing:diag-a
+      - name: "探测 B：硬编码 registry + secrets.ACR_NAMESPACE"
+        if: always()
+        run: |
+          docker tag caddy:2-alpine crpi-ggr0v2rzvtv9ah0b.cn-hangzhou.personal.cr.aliyuncs.com/${{ secrets.ACR_NAMESPACE }}/summarizing:diag-b
+          docker push crpi-ggr0v2rzvtv9ah0b.cn-hangzhou.personal.cr.aliyuncs.com/${{ secrets.ACR_NAMESPACE }}/summarizing:diag-b
+      - name: "探测 C：secrets.ACR_REGISTRY + secrets.ACR_NAMESPACE（复刻 release.yml 现状）"
+        if: always()
+        run: |
+          docker tag caddy:2-alpine ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/summarizing:diag-c
+          docker push ${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/summarizing:diag-c
