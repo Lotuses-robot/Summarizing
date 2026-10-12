@@ -17,6 +17,7 @@
     "check": "npm run check:tsc && eslint . && vitest run",
     "check:dead": "knip",
     "stop": "node scripts/stop.mjs",
+    "status": "node scripts/status.mjs",
     "prepare": "simple-git-hooks",
     "db:reset": "tsx scripts/db-reset.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
