@@ -1,11 +1,16 @@
 # 生产部署（单实例多账户，上云形态 A：阿里云轻量 2C2G + Caddy/TLS）。
 # 数据 bind mount 到宿主机固定路径（备份/迁移/查看全在宿主机做，人不进容器——docs/11 阶段 2）。
-# 用法：docker compose up -d --build（或 CI 构建镜像后 pull/up）
+#
+# 两种用法：
+#   本地开发/首版上线：docker compose up -d --build   （在服务器上 build，用下面的 build: .）
+#   生产（CI 出镜像 → 服务器只拉）：在 .env 里设 APP_IMAGE=<ACR>/<ns>/summarizing:vX.Y.Z，
+#     然后 docker compose pull && docker compose up -d  （不 build；见 docs/13）
 services:
   app:
+    # APP_IMAGE 由 .env 提供（生产=ACR 镜像）；缺省 summarizing:local（本地/服务器 build 的产物名）
+    image: ${APP_IMAGE:-summarizing:local}
+    # 有 build 段时：compose up 会构建并以此 image 名打标；生产只想 pull 就删/注释本段（或设 APP_IMAGE）
     build: .
-    # 生产用 CI 推的镜像（如阿里云 ACR）；本地开发用 build: .
-    # image: registry.cn-shenzhen.aliyuncs.com/<ns>/summarizing:v0.x.y
     restart: unless-stopped
     # .env 可缺席（新机器没复制 .env.example 也起得来；老写法 env_file: .env 会硬拒启动）
     env_file:

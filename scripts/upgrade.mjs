@@ -48,19 +48,29 @@ try {
 }
 
 // ── 2. 拉新镜像 / 重建 ──
+// 形态决定动作：.env 设了 APP_IMAGE（ACR 形态）→ pull 拉新镜像；否则（本地 build 形态）→ 拉代码后 build。
+const useImage = (process.env.APP_IMAGE ?? "").trim() !== "";
 try {
-  console.log("[2/4] 更新代码/镜像…");
-  // 本地 build 形态：先拉代码（若这是 git 仓库）。ACR 形态：改 compose 的 image: 后 pull。
-  run("docker", ["compose", "pull"], { stdio: "inherit" });
-} catch {
-  // pull 在本地 build 形态会失败（无 image:）——不致命，继续 build
-  console.log("  （pull 跳过：本地 build 形态）");
+  if (useImage) {
+    console.log(`[2/4] 拉新镜像 ${process.env.APP_IMAGE}…`);
+    run("docker", ["compose", "pull", "app"], { stdio: "inherit" });
+  } else {
+    console.log("[2/4] 更新代码（本地 build 形态：git pull）…");
+    try {
+      run("git", ["pull", "--ff-only"], { stdio: "inherit" });
+    } catch {
+      console.log("  （git pull 跳过：非 git 工作区或已最新）");
+    }
+  }
+} catch (err) {
+  fail("拉新镜像/代码", err);
 }
 
 // ── 3. 重启（触发 schema 版本门控迁移）──
 try {
   console.log("[3/4] 重启（启动时逐库过版本门控）…");
-  run("docker", ["compose", "up", "-d", "--build"]);
+  // ACR 形态：只起（--no-build，用刚 pull 的镜像）；本地 build 形态：构建后起
+  run("docker", ["compose", "up", "-d", ...(useImage ? ["--no-build"] : ["--build"])]);
 } catch (err) {
   fail("重启", err);
 }
