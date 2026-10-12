@@ -56,9 +56,9 @@
 
 ```bash
 npm install
-cp .env.example .env      # 填一个 OpenAI 兼容接入（如 DeepSeek / 本地模型）
+cp .env.example .env      # 可选：改 PORT 等环境变量（AI 接入不在这——每个账户在界面里配）
 npm run admin -- user:add 你的名字   # 建账户（交互输密码；第一个账户就是管理员/你自己）
-npm run dev                # 打开 http://localhost:5173 登录 · server: http://localhost:3001
+npm run dev                # 打开 http://localhost:5173 登录 → 设置 → AI 填你的接入
 ```
 
 不想配环境？到 [Releases](https://github.com/Lotuses-robot/Summarizing/releases) 下载 **Windows 便携包**（内置运行时，解压双击 `start.cmd`，首次会自动引导建账户）。

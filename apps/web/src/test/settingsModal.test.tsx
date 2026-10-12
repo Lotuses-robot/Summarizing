@@ -117,19 +117,23 @@ describe("设置弹层：AI 即时生效管道（设置重排 review 轮）", ()
 });
 
 describe("滚动联动判定（用户走查 2026-10-03 修）", () => {
-  it("滚到底：已越过容器顶且最靠上的一段胜出（旧 rootMargin 窄带在底部会退回上一段）", () => {
-    // 滚到最底：信源顶边在容器顶附近（-10），数据/ai/外观更靠上——信源应胜出
+  it("滚到底（atBottom）：最后一段必须点亮——即使它顶不到容器顶（真 bug 的根因）", () => {
+    // 滚到最底：信源顶边仍在容器顶下方（正距离，顶不到顶）——旧的「top≤0 才算」会让它永远落选
     expect(
       pickActiveSection(
         new Map([
           ["appearance", -1200],
           ["ai", -900],
-          ["data", -500],
-          ["sources", -10],
+          ["data", -300],
+          ["sources", 180], // 顶不到顶
         ]),
+        true,
       ),
     ).toBe("sources");
-    // 滚到中段：只有外观/ai 越过顶，ai 更靠上 → ai
+  });
+
+  it("常规滚动：取顶边最接近容器顶的一段（含尚未越顶的正距离）", () => {
+    // 中段：data 顶边 -40（刚过顶）最接近 0 → data
     expect(
       pickActiveSection(
         new Map([
@@ -140,7 +144,7 @@ describe("滚动联动判定（用户走查 2026-10-03 修）", () => {
         ]),
       ),
     ).toBe("ai");
-    // 没滚过任何段（都在下方）→ 取最靠上的那段（外观）
+    // 刚打开：appearance 顶边 +10 最接近顶 → appearance
     expect(
       pickActiveSection(
         new Map([
@@ -149,5 +153,16 @@ describe("滚动联动判定（用户走查 2026-10-03 修）", () => {
         ]),
       ),
     ).toBe("appearance");
+    // 滚到 sources 顶边 -5（已过顶）→ sources
+    expect(
+      pickActiveSection(
+        new Map([
+          ["appearance", -1200],
+          ["ai", -900],
+          ["data", -500],
+          ["sources", -5],
+        ]),
+      ),
+    ).toBe("sources");
   });
 });

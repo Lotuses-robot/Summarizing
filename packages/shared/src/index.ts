@@ -516,7 +516,7 @@ export const AiSettingsSchema = z.object({
 });
 export type AiSettings = z.infer<typeof AiSettingsSchema>;
 
-/** GET /api/settings/ai 响应：Key 只回掩码；overridden = 设置覆盖生效中（否则走 .env）。 */
+/** GET /api/settings/ai 响应：Key 只回掩码；overridden = 本账户已配置（006 起无 .env 兜底）。 */
 export const AiSettingsViewSchema = z.object({
   baseUrl: z.string(),
   model: z.string(),

@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { AiSettings } from "@summarizing/shared";
 
 // OpenAI 兼容协议（D-55）：baseURL 指向具体服务商，代码不感知是谁。
 // LlmClient 是接口：生产用 makeOpenAiLlm，测试注入 fake（digest.test.ts）。
@@ -27,42 +28,29 @@ export interface LlmClient {
 /** 带模型标识的 LLM 客户端：热切换后路由逐请求取 llmRef.current，modelTag 进 agent0: 署名永不说谎。 */
 export type TaggedLlm = LlmClient & { readonly modelTag: string };
 
-/** 由设置表单值合成 env（.env 做底，表单非空字段覆盖）——设置路由与启动种子共用（05§五）。 */
-export function envFromAiSettings(
-  s: { baseUrl: string; model: string; apiKey?: string },
-  base: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-  return {
-    ...base,
-    OPENAI_BASE_URL: s.baseUrl,
-    OPENAI_MODEL: s.model,
-    ...(s.apiKey !== undefined && s.apiKey !== "" ? { OPENAI_API_KEY: s.apiKey } : {}),
-  };
-}
-
-/** 生产 LLM 客户端：OpenAI 兼容协议（D-55），baseURL/model 来自 .env 或设置的合成 env；缺配置直接抛错不静默。 */
+/** 生产 LLM 客户端：OpenAI 兼容协议（D-55）。配置用 shared 的 **AiSettings**（单一来源；已过 zod）。
+ *  **必须显式传入**（不再读 .env——多用户下 .env 兜底 = 全站共享一把 key，已废；006 用户走查）。
+ *  缺 baseUrl/model 直接抛错不静默。 */
 export function makeOpenAiLlm(
-  env: NodeJS.ProcessEnv = process.env,
+  config: AiSettings,
   timeoutMs = 60_000, // 测试连接传短超时（15s），日常消化保持长超时防网关挂起
 ): TaggedLlm {
-  const baseURL = env.OPENAI_BASE_URL;
-  const model = env.OPENAI_MODEL;
-  if (!baseURL || !model) {
+  if (config.baseUrl === "" || config.model === "") {
     // 「无数据」不得静默当作已配置（01§8.3）
-    throw new Error("缺少 OPENAI_BASE_URL / OPENAI_MODEL，请参照 .env.example 配置 .env");
+    throw new Error("AI 接入未配置：请填 Base URL 与模型（设置 → AI）");
   }
   const client = new OpenAI({
-    baseURL,
-    apiKey: env.OPENAI_API_KEY || "not-needed",
+    baseURL: config.baseUrl,
+    apiKey: config.apiKey !== undefined && config.apiKey !== "" ? config.apiKey : "not-needed",
     // 网关挂起（非拒绝）会永久阻塞请求——超时让它变成可捕获的失败
     timeout: timeoutMs,
     maxRetries: 1,
   });
   return {
-    modelTag: model,
+    modelTag: config.model,
     async chat({ system, messages, tools }) {
       const res = await client.chat.completions.create({
-        model,
+        model: config.model,
         // 部分兼容网关默认 max_tokens 很小，会把 JSON 截断在半截（实测发生过）
         max_tokens: 4000,
         messages: [{ role: "system", content: system }, ...messages.map(toOpenAiMessage)],
@@ -91,14 +79,13 @@ export function makeOpenAiLlm(
   };
 }
 
-/** 未配置占位客户端（006 评审修复）：构造**不抛**——服务照常启动、界面可用（FR-009「未配置 =
- *  明确提示未配置」；服务器 .env 留空是部署常态，若在装配期抛会把整站锁死）；
- *  真正发起调用时才报人话错（消化会把批次标「未处理」；测试连接给明确失败）。 */
+/** 未配置占位客户端（006）：构造**不抛**——服务照常启动、界面可用（FR-009「未配置 = 明确提示」；
+ *  多用户下未配 key 是常态而非异常）；真正发起调用时才报人话错（消化把批次标「未处理」）。 */
 export function makeUnconfiguredLlm(): TaggedLlm {
   return {
     modelTag: "未配置",
     async chat() {
-      throw new Error("尚未配置 AI 接入——去 设置 → AI 填写，或配置 .env 的 OPENAI_*");
+      throw new Error("尚未配置 AI 接入——去 设置 → AI 填 Base URL / 模型 / Key");
     },
   };
 }

@@ -3,6 +3,7 @@ import {
   AiSettingsViewSchema,
   AiTestResultSchema,
   errText,
+  type AiSettings,
   type AiSettingsView,
 } from "@summarizing/shared";
 import type { FastifyInstance } from "fastify";
@@ -12,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import { envFromAiSettings, makeOpenAiLlm, type TaggedLlm } from "../shared/llm";
+import { makeOpenAiLlm, makeUnconfiguredLlm, type TaggedLlm } from "../shared/llm";
 
 // settings 资源路由（05§五 / D-81；006 起依赖来自请求上下文）：AI 设置的读改清 + 测试连接 +
 // 数据备份下载。库与 llm 引用都从 req.space 取——AI key 每人自带（本批定制）。
@@ -27,20 +28,28 @@ function maskKey(key: string | undefined): string | null {
   return `••••${key.slice(-4)}`;
 }
 
-/** 组 GET 响应视图：覆盖在 = 设置值；否则 .env 现值。 */
+/** 组 GET 响应视图：本账户设置值（无则空——006 起无 .env 兜底，未配即「未配置」）。
+ *  overridden = **配得全**（baseUrl 与 model 都在）——不是「存过行」：半配置/坏配置不该冒充已配置。 */
 function view(db: Db): AiSettingsView {
   const stored = repo.readStoredAi(db);
-  const src = stored ?? {
-    baseUrl: process.env.OPENAI_BASE_URL ?? "",
-    model: process.env.OPENAI_MODEL ?? "",
-    apiKey: process.env.OPENAI_API_KEY,
-  };
+  const configured = stored !== null && stored.baseUrl !== "" && stored.model !== "";
   return AiSettingsViewSchema.parse({
-    baseUrl: src.baseUrl,
-    model: src.model,
-    apiKeyMasked: maskKey(src.apiKey),
-    overridden: stored !== null,
+    baseUrl: stored?.baseUrl ?? "",
+    model: stored?.model ?? "",
+    apiKeyMasked: maskKey(stored?.apiKey),
+    overridden: configured,
   });
+}
+
+/** 由表单值 + 存量合成完整 AI 配置（apiKey 空串 = 沿用存量；不把 "" 当 key）。 */
+function mergeAiConfig(form: AiSettings, stored: AiSettings | null): AiSettings {
+  const incoming = form.apiKey === "" ? undefined : form.apiKey;
+  const apiKey = incoming ?? stored?.apiKey;
+  return {
+    baseUrl: form.baseUrl,
+    model: form.model,
+    ...(apiKey === undefined || apiKey === "" ? {} : { apiKey }),
+  };
 }
 
 /** 注册 settings 路由（GET/PUT/DELETE ai、POST ai/test、GET backup）。 */
@@ -54,33 +63,23 @@ export function registerSettingsRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
     }
     const db = req.space.db;
-    const stored = repo.readStoredAi(db);
-    // 显式空串 = 没填：沿用现值，不把 "" 当 key 存库
-    const incoming = parsed.data.apiKey === "" ? undefined : parsed.data.apiKey;
-    const apiKey = incoming ?? stored?.apiKey ?? process.env.OPENAI_API_KEY ?? "";
+    const config = mergeAiConfig(parsed.data, repo.readStoredAi(db));
     let next: TaggedLlm;
     try {
-      next = makeOpenAiLlm(envFromAiSettings({ ...parsed.data, apiKey }));
+      next = makeOpenAiLlm(config);
     } catch (err) {
       return reply.code(400).send({ error: errText(err) });
     }
     // 落库（唯一可失败步骤）成功后才换引用——任一步失败都保持旧一致状态
-    repo.setAppSetting(db, repo.AI_SETTINGS_KEY, JSON.stringify({ ...parsed.data, apiKey }));
+    repo.setAppSetting(db, repo.AI_SETTINGS_KEY, JSON.stringify(config));
     req.space.llmRef.current = next;
     return view(db);
   });
 
-  // 清除覆盖（05§五）：回 .env 种子并热切回去。
-  // 与 PUT 同款原子性——先建成 .env 客户端才换+删；.env 缺配置就保旧客户端继续服务，如实相告不 500。
-  app.delete("/api/settings/ai", async (req, reply) => {
-    let restored: TaggedLlm;
-    try {
-      restored = makeOpenAiLlm();
-    } catch (err) {
-      return reply.code(409).send({ error: `.env 缺少 AI 配置，无法回退：${errText(err)}` });
-    }
+  // 清除设置（05§五）：本账户回到「未配置」并热切占位客户端——无 .env 可回（006 每人自带 key）。
+  app.delete("/api/settings/ai", async (req) => {
     repo.deleteAppSetting(req.space.db, repo.AI_SETTINGS_KEY);
-    req.space.llmRef.current = restored;
+    req.space.llmRef.current = makeUnconfiguredLlm();
     return view(req.space.db);
   });
 
@@ -90,12 +89,10 @@ export function registerSettingsRoutes(app: FastifyInstance): void {
     if (!parsed.success) {
       return reply.code(400).send({ error: "请求体不合法", issues: parsed.error.issues });
     }
-    const stored = repo.readStoredAi(req.space.db);
-    const incoming = parsed.data.apiKey === "" ? undefined : parsed.data.apiKey;
-    const apiKey = incoming ?? stored?.apiKey ?? process.env.OPENAI_API_KEY ?? "";
+    const config = mergeAiConfig(parsed.data, repo.readStoredAi(req.space.db));
     const started = Date.now();
     try {
-      const probe = makeOpenAiLlm(envFromAiSettings({ ...parsed.data, apiKey }), 15_000);
+      const probe = makeOpenAiLlm(config, 15_000);
       await probe.chat({
         system: "你是连通性探针。收到任何消息都只回复 OK。",
         messages: [{ role: "user", content: "ping" }],

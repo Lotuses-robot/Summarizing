@@ -12,9 +12,7 @@ afterEach(async () => {
 });
 
 describe("设置面板服务端（05§五 / D-81）", () => {
-  it("PUT 热切换：引用换新、落库、视图掩码不回显完整 Key；DELETE 回 .env", async () => {
-    vi.stubEnv("OPENAI_BASE_URL", "http://env.example/v1");
-    vi.stubEnv("OPENAI_MODEL", "env-model");
+  it("PUT 热切换：引用换新、落库、视图掩码不回显完整 Key；DELETE 回「未配置」（无 .env 可回）", async () => {
     const t = await makeTestAccount();
     const llmRef = t.space.llmRef;
     const before = llmRef.current;
@@ -40,25 +38,25 @@ describe("设置面板服务端（05§五 / D-81）", () => {
     const del = await t.inject({ method: "DELETE", url: "/api/settings/ai" });
     expect(del.statusCode).toBe(200);
     expect(del.json<{ overridden: boolean }>().overridden).toBe(false);
-    expect(llmRef.current.modelTag).toBe("env-model"); // 热切回 .env（stub 的值）
+    // 006：无 .env 可回——DELETE 即回「未配置」占位客户端（多用户每人自带 key）
+    expect(llmRef.current.modelTag).toBe("未配置");
     expect(repo.getAppSetting(t.db, "ai")).toBeNull();
   });
 
-  it("DELETE 时 .env 缺配置 → 409、保旧客户端、覆盖不删（不静默不 500）", async () => {
-    const t = await makeTestAccount(); // 先建账户（空间装配需要可用 env）；再钉死缺配置前提
-    const llmRef = t.space.llmRef;
-    vi.stubEnv("OPENAI_BASE_URL", "");
-    vi.stubEnv("OPENAI_MODEL", "");
-    await t.inject({
+  it("未配 AI 的账户：视图为空、PUT 空 baseUrl → 400（不再有 .env 兜底）", async () => {
+    const t = await makeTestAccount();
+    const get = await t.inject({ method: "GET", url: "/api/settings/ai" });
+    expect(get.json<{ overridden: boolean; baseUrl: string }>()).toMatchObject({
+      overridden: false,
+      baseUrl: "",
+    });
+    // 空 baseUrl 建客户端直接抛 → 400（无 .env 可顶上）
+    const put = await t.inject({
       method: "PUT",
       url: "/api/settings/ai",
-      payload: { baseUrl: "http://127.0.0.1:9/v1", model: "probe-model" },
+      payload: { baseUrl: "", model: "m" },
     });
-
-    const del = await t.inject({ method: "DELETE", url: "/api/settings/ai" });
-    expect(del.statusCode).toBe(409);
-    expect(llmRef.current.modelTag).toBe("probe-model"); // 旧客户端继续服务
-    expect(repo.getAppSetting(t.db, "ai")).not.toBeNull(); // 覆盖原样保留
+    expect(put.statusCode).toBe(400);
   });
 
   it("PUT 校验失败 → 400 且引用不换（切换原子：先建成客户端才换）", async () => {

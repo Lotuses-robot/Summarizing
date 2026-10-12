@@ -53,6 +53,15 @@ const DENSITY_NAMES: Record<Density, string> = { comfortable: "舒适", compact:
 // 左侧分类栏（用户 2026-09-27 定：左导航 + 右侧内容，点击定位）。
 // 右侧内容 = 分组卡（macOS 系统设置式，用户 2026-09-30 走查定：一行一设置、控件右对齐、**改完即生效**）。
 type SectionId = "appearance" | "ai" | "data" | "sources";
+
+/** 段 id → DOM 锚点 id 的**唯一出处**（JSX 挂锚点、滚动定位、联动观测都查它；漏一段编译不过）。 */
+const SECTION_DOM = {
+  appearance: "settings-appearance",
+  ai: "settings-ai",
+  data: "settings-data",
+  sources: "settings-sources",
+} satisfies Record<SectionId, string>;
+
 type SectionMeta = { id: SectionId; label: string; icon: LucideIcon };
 const SECTIONS: SectionMeta[] = [
   { id: "appearance", label: "外观", icon: PaletteIcon },
@@ -61,26 +70,36 @@ const SECTIONS: SectionMeta[] = [
   { id: "sources", label: "信源", icon: Rss },
 ];
 
-/** 滚动联动判定（纯函数，可测）：给各分区「顶边相对容器顶」的距离，取「已越过容器顶
- *  （top ≤ 60，留一点容差）且最靠上」的一段为当前分区；若都还在下方，取最靠上的那段。
- *  ⚠️ 曾用 rootMargin 把判定区压到顶部 30%：滚到底时末段落进被裁区域 → 高亮退回上一段
- *  （用户走查 2026-10-03 的 bug）。这里不裁根，用全量站距判定。 */
-export function pickActiveSection(tops: Map<string, number>): SectionId | null {
-  let past: SectionId | null = null;
-  let pastY = Number.NEGATIVE_INFINITY;
-  let nearest: SectionId | null = null;
-  let nearestY = Number.POSITIVE_INFINITY;
-  for (const [id, top] of tops) {
-    if (top <= 60 && top > pastY) {
-      pastY = top;
-      past = id as SectionId;
+/** 滚动联动判定（纯函数，可测）：给各分区「顶边相对容器顶」的距离（可正可负）——
+ *  取**最接近容器顶且已进入容差带**（|top| ≤ 60 内取 top 最小者……）的一段；滚到底时容器无法再滚，
+ *  末段始终差一截顶不到顶——故 `atBottom` 为真时**直接选最后一段**（用户走查 2026-10-03 的真正修法）。
+ *  ⚠️ 两处教训：①曾用 rootMargin 压窄带 → 滚到底末段被摘除；②曾要求「top ≤ 0 才算已到位」
+ *  → 末段永远越不过顶、点不亮。故不以「越过」为条件，用「最接近顶 + 到底兜底」。 */
+export function pickActiveSection(tops: Map<string, number>, atBottom = false): SectionId | null {
+  if (tops.size === 0) return null;
+  if (atBottom) {
+    // 滚到底：直接选顶边最靠下（= 最后一段）——它顶不到容器顶是物理必然，不该因此落选
+    let last: SectionId | null = null;
+    let lastY = Number.NEGATIVE_INFINITY;
+    for (const [id, top] of tops) {
+      if (top > lastY) {
+        lastY = top;
+        last = id as SectionId;
+      }
     }
-    if (top < nearestY) {
-      nearestY = top;
-      nearest = id as SectionId;
+    return last;
+  }
+  // 常规：取顶边最接近容器顶的一段（|top| 最小；同距取更靠上的）
+  let pick: SectionId | null = null;
+  let bestAbs = Number.POSITIVE_INFINITY;
+  for (const [id, top] of tops) {
+    const abs = Math.abs(top);
+    if (abs < bestAbs) {
+      bestAbs = abs;
+      pick = id as SectionId;
     }
   }
-  return past ?? nearest;
+  return pick;
 }
 
 /** 设置弹层（05§五 / D-81）：居中，Esc/点外关。外观进 localStorage、AI 进 app_settings、
@@ -98,44 +117,49 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const [testResult, setTestResult] = useState<AiTestResult | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>("appearance");
   const contentRef = useRef<HTMLDivElement | null>(null);
+  /** 点击左栏后的滚动动画期间（ms 时间戳之前）不重算高亮——防 smooth 滚动中把它覆盖回上一段。 */
+  const lockUntilRef = useRef(0);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   });
 
-  // 滚动联动左栏高亮（用户走查 2026-10-03：此前只在点击时设置，滚动不更新）：
-  // IntersectionObserver 监听各分区，取「视口内最靠上」的一项为当前分区。
+  // 滚动联动左栏高亮（用户走查 2026-10-03）：滚动时把当前段的高亮跟上。
+  // 判定在 pickActiveSection（纯函数）：取「顶边最接近容器顶」的段；**滚到底时直接选最后一段**
+  // （末段顶不到顶是物理必然，不该因此落选）。scroll + IntersectionObserver 都触发重算（前者管
+  // 同段内滚动，后者管段进出视口）。点击左栏后的滚动动画期由 lockUntilRef 挡一下，不覆盖用户选择。
   useEffect(() => {
     if (!open) return;
     const root = contentRef.current;
     if (root === null) return;
-    // 判定：记录每个分区的「顶边相对容器顶部」的距离，每次回调取"已进入容器顶（top ≤ 阈值）
-    // 且最靠上"的一段——滚到底时最后一段进入，高亮才会跟着走。
-    // ⚠️ 曾用 rootMargin 把判定区压到顶部 30%：滚到底时「数据/信源」落进被裁掉的区域 →
-    // isIntersecting=false 被摘除 → 高亮退回上一段（用户走查 2026-10-03 的 bug）。
     const tops = new Map<string, number>();
-    /** 用当前站距更新左栏高亮（判定权在 pickActiveSection 纯函数）。 */
+    /** 用当前站距更新左栏高亮（判定权在 pickActiveSection；到底信号一并传入）。 */
     const apply = () => {
-      const id = pickActiveSection(tops);
+      if (Date.now() < lockUntilRef.current) return; // 点击后的滚动动画期间：不覆盖用户选中的段
+      const atBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 2;
+      const id = pickActiveSection(tops, atBottom);
       if (id !== null) setActiveSection(id);
     };
-    /** 量一次各分区顶边相对容器顶的距离，再刷新高亮（IntersectionObserver 只是"何时量"的触发器）。 */
+    /** 量一次各分区顶边相对容器顶的距离，再刷新高亮。 */
     const read = () => {
       const rootTop = root.getBoundingClientRect().top;
       for (const s of SECTIONS) {
-        const el = document.getElementById(`settings-${s.id}`);
+        const el = document.getElementById(SECTION_DOM[s.id]);
         if (el !== null) tops.set(s.id, el.getBoundingClientRect().top - rootTop);
       }
       apply();
     };
-    // 观测只是"何时重算"的触发器（任何段进出视口都重算一次全量站距，判定权在 read 里）
-    const observerWithRead = new IntersectionObserver(() => read(), { root, threshold: 0 });
+    const observer = new IntersectionObserver(() => read(), { root, threshold: 0 });
     for (const s of SECTIONS) {
-      const el = document.getElementById(`settings-${s.id}`);
-      if (el !== null) observerWithRead.observe(el);
+      const el = document.getElementById(SECTION_DOM[s.id]);
+      if (el !== null) observer.observe(el);
     }
+    root.addEventListener("scroll", read, { passive: true });
     read();
-    return () => observerWithRead.disconnect();
+    return () => {
+      observer.disconnect();
+      root.removeEventListener("scroll", read);
+    };
   }, [open]);
 
   /** 关闭（三条路径共用）：先 blur 触发「失焦即存」的提交，再关——Esc 否则会静默丢未失焦的输入。 */
@@ -144,11 +168,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     onCloseRef.current();
   }, []);
 
-  /** 点左侧分类：高亮 + 右侧滚动到对应分区。 */
+  /** 点左侧分类：高亮 + 右侧滚动到对应分区。末段（数据/信源）因滚动空间不够顶不到顶，
+   *  `scrollIntoView` 到"能到的最靠上位置"即可；期间**锁定目标段**，防滚动中重算把它覆盖掉。 */
   const goToSection = (id: SectionId) => {
     setActiveSection(id);
+    lockUntilRef.current = Date.now() + 600; // 滚动动画期间不重算（smooth ~300-500ms）
     document
-      .getElementById(`settings-${id}`)
+      .getElementById(SECTION_DOM[id])
       ?.scrollIntoView({ block: "start", behavior: "smooth" });
   };
 
@@ -232,7 +258,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       .finally(() => setBusy("none"));
   };
 
-  /** 清除覆盖：回 .env。 */
+  /** 清除本账户 AI 配置：回「未配置」占位（无 .env 可回——006 每人自带 key）。 */
   const runClear = () => {
     if (ai === null || busy !== "none") return;
     setBusy("clear");
@@ -240,16 +266,19 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       .clearAiSettings()
       .then((v) => {
         applyAiView(v);
-        flash("save", "已清除覆盖，回 .env 配置");
+        flash("save", "已清除配置（AI 功能回到未配置）");
       })
       .catch((err: unknown) => sticky("clear", `清除失败：${errText(err)}`))
       .finally(() => setBusy("none"));
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40" onClick={closeWithFlush}>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[7vh_1rem_1rem]"
+      onClick={closeWithFlush}
+    >
       <div
-        className="mx-auto mt-[7vh] flex h-[min(640px,84vh)] w-[min(860px,94vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
+        className="flex max-h-[86vh] w-[min(860px,94vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <nav className="flex w-36 shrink-0 flex-col border-r border-line bg-canvas p-3">
@@ -276,12 +305,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
         <div
           ref={contentRef}
-          // pb 大余量：让最后一张卡（信源）也能滚到接近顶部——否则「数据/信源」锚点滚不到位、
-          // 左栏高亮联动错乱（用户走查 2026-10-03）。min-h-0 保 flex 子项可滚。
-          className="min-h-0 min-w-0 flex-1 space-y-7 overflow-y-auto px-6 pt-5 pb-[calc(2rem+8vh)]"
+          // min-h-0 保 flex 子项可滚（弹层 max-h 自限高，内容超出即在本区滚动）
+          className="min-h-0 min-w-0 flex-1 space-y-7 overflow-y-auto px-6 py-5"
         >
           <Card
-            id="settings-appearance"
+            id={SECTION_DOM.appearance}
             icon={PaletteIcon}
             title="外观"
             desc="只存本机浏览器"
@@ -333,18 +361,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           </Card>
 
           <Card
-            id="settings-ai"
+            id={SECTION_DOM.ai}
             icon={Bot}
             title="AI"
             desc="模型接入——改完即生效"
-            footnote={
-              ai !== null ? (
-                <>
-                  ⚠ Key 以明文存在你的账户库（其他用户不可见；运维技术上可见——如实托管）；当前生效：
-                  {ai.overridden ? "设置覆盖" : ".env"} · 模型 {ai.model}
-                </>
-              ) : undefined
-            }
+            footnote={ai !== null && ai.overridden ? `当前模型 ${ai.model}` : undefined}
           >
             {readFailed ? (
               // 读失败优先于一切（评审 M：否则会拿上一次的旧表单冒充成功）
@@ -355,13 +376,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </Row>
             ) : (
               <>
-                <Row label="Base URL" description="OpenAI 兼容，须带 /v1">
+                <Row label="Base URL" description="OpenAI 兼容接口地址，须带 /v1">
                   <input
                     className="input w-[18rem] max-w-full"
                     value={form.baseUrl}
                     onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
                     onBlur={saveNow}
-                    placeholder="http://127.0.0.1:8317/v1"
+                    placeholder="https://api.example.com/v1"
                   />
                 </Row>
                 <Row label="模型">
@@ -370,13 +391,10 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                     value={form.model}
                     onChange={(e) => setForm({ ...form, model: e.target.value })}
                     onBlur={saveNow}
-                    placeholder="deepseek-v4.1-flash"
+                    placeholder="模型名（如 gpt-4o-mini / deepseek-chat）"
                   />
                 </Row>
-                <Row
-                  label="API Key"
-                  description={ai.overridden ? "留空 = 沿用现值" : "留空 = 沿用 .env"}
-                >
+                <Row label="API Key" description="留空 = 沿用已存的值（首次须填）">
                   <input
                     className="input w-[18rem] max-w-full"
                     type="password"
@@ -393,7 +411,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                     </button>
                     {ai.overridden && (
                       <button className="btn" disabled={busy !== "none"} onClick={runClear}>
-                        清除覆盖（回 .env）
+                        清除配置
                       </button>
                     )}
                   </div>
@@ -418,7 +436,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           </Card>
 
           <Card
-            id="settings-data"
+            id={SECTION_DOM.data}
             icon={Database}
             title="数据"
             desc="你的账户独立数据库——拷贝即备份"
@@ -434,7 +452,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           </Card>
 
           <Card
-            id="settings-sources"
+            id={SECTION_DOM.sources}
             icon={Rss}
             title="信源"
             desc="配置与状态——改完即生效"

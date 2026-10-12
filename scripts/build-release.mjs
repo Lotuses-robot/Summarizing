@@ -25,7 +25,6 @@ const START_CMD = `@echo off
 cd /d "%~dp0"
 if not exist ".env" (
   copy /y ".env.example" ".env" >nul
-  echo [summarizing] created .env - open it and fill in your OpenAI-compatible API settings.
 )
 rem Fast path: user data dir exists = already set up (skip the extra node probe on every start)
 if exist "data\\users" goto :start_server
@@ -50,12 +49,9 @@ const README_TXT = `Summarizing · 便携版（Windows）
 ================================
 
 一、第一次使用
-  1. 打开本文件夹里的 .env（首次启动会自动生成），填入你的 AI 接入：
-       OPENAI_BASE_URL=...   （OpenAI 兼容接口，须带 /v1）
-       OPENAI_MODEL=...
-       OPENAI_API_KEY=...
-  2. 双击 start.cmd —— 首次会引导你创建自己的账户（用户名 + 密码）。
-  3. 之后在浏览器里登录使用。
+  1. 双击 start.cmd —— 首次会引导你创建自己的账户（用户名 + 密码）。
+  2. 浏览器里登录 → 打开「设置 → AI」填你的 AI 接入（Base URL / 模型 / API Key）。
+     （不填也能用界面，只是没法消化信息。）
 
 二、之后每次
   双击 start.cmd。浏览器会自动打开 http://localhost:3001
@@ -67,7 +63,6 @@ const README_TXT = `Summarizing · 便携版（Windows）
 
 四、试一下
   在右侧对话里丢一句「10月8日前交数据结构作业」，看它变成看板上的一条事项。
-  （不配 AI 也能打开界面，只是没法消化信息。）
 
 五、运维命令（可选）
   建账户 / 发邀请码 / 停用账户等一律走命令行：

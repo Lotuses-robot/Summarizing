@@ -64,7 +64,7 @@ export const itemViews = sqliteTable("item_views", {
 });
 
 // 应用设置（05§五 设置面板）：哑 KV——值是 JSON 字符串，形状归调用方（schema 住使用它的边界）。
-// 当前只有 key="ai"（AI 连接覆盖，优先于 .env）。系统策略永远进代码，这里只放用户偏好。
+// 当前只有 key="ai"（本账户 AI 接入，006 起每人自带 key、不再有 .env 兜底）。系统策略永远进代码，这里只放用户偏好。
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

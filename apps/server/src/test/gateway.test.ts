@@ -43,6 +43,23 @@ async function makeGatewayRealm() {
 }
 
 describe("令牌定向（SC-001 信源面）", () => {
+  it("GET /api/sources 下发 hookPath（含账户令牌——前端零拼接）；轮换后随之更新", async () => {
+    const { a } = await makeGatewayRealm();
+    const list = await a.inject({ method: "GET", url: "/api/sources" });
+    const [echo] = z
+      .array(z.object({ name: z.string(), hookPath: z.string().nullable() }))
+      .parse(list.json());
+    if (!echo) throw new Error("信源列表为空");
+    expect(echo.hookPath).toBe(`/hook/${a.sourceToken}/echo/ingest`); // 由后端算好（源自己的路径形状）
+
+    // 轮换令牌 → hookPath 用新令牌（说明它取的是实时值，不是快照）
+    const rot = await a.inject({ method: "POST", url: "/api/auth/source-token/rotate" });
+    const next = rot.json<{ sourceToken: string }>().sourceToken;
+    const list2 = await a.inject({ method: "GET", url: "/api/sources" });
+    const [echo2] = z.array(z.object({ hookPath: z.string().nullable() })).parse(list2.json());
+    expect(echo2?.hookPath).toBe(`/hook/${next}/echo/ingest`);
+  });
+
   it("A/B 各凭自己的令牌投递 → 各落各库；互不串", async () => {
     const { a, b } = await makeGatewayRealm();
 

@@ -37,7 +37,7 @@ export const SOURCE_SCHEMA_KEY = "__schema__";
 /** 存量 AI 设置在 app_settings 的键（设置路由写、空间装配读——同住 storage 单一出处）。 */
 export const AI_SETTINGS_KEY = "ai";
 
-/** 读存量 AI 设置（app_settings 的 ai 行）；缺失、坏 JSON、形状不符都视为无覆盖（回 .env，不崩不静默崩溃）。
+/** 读存量 AI 设置（app_settings 的 ai 行）；缺失、坏 JSON、形状不符都视为**未配置**（不崩不静默崩溃）。
  *  空间装配（spaces）与设置路由共用——解析逻辑唯一出处。 */
 export function readStoredAi(db: DbOrTx): AiSettings | null {
   const raw = getAppSetting(db, AI_SETTINGS_KEY);
@@ -47,7 +47,7 @@ export function readStoredAi(db: DbOrTx): AiSettings | null {
     const parsed = AiSettingsSchema.safeParse(value);
     return parsed.success ? parsed.data : null;
   } catch {
-    process.stderr.write("[settings] app_settings 的 ai 行不是合法 JSON，忽略并回退 .env\n");
+    process.stderr.write("[settings] app_settings 的 ai 行不是合法 JSON，按未配置处理\n");
     return null;
   }
 }
@@ -499,7 +499,7 @@ export function setAppSetting(db: DbOrTx, key: string, value: string): void {
     .run();
 }
 
-/** 删应用设置（「清除覆盖」回 .env 用，05§五）。 */
+/** 删应用设置（「清除配置」回未配置用，05§五）。 */
 export function deleteAppSetting(db: DbOrTx, key: string): void {
   db.delete(s.appSettings).where(eq(s.appSettings.key, key)).run();
 }

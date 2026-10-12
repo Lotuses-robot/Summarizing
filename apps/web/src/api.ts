@@ -182,7 +182,7 @@ export const api = {
   saveAiSettings: (s: AiSettings): Promise<AiSettingsView> =>
     req("/api/settings/ai", put(s)).then((r) => to<AiSettingsView>(r)),
 
-  /** 清除覆盖，回 .env。 */
+  /** 清除本账户 AI 配置（回「未配置」）。 */
   clearAiSettings: (): Promise<AiSettingsView> =>
     req("/api/settings/ai", { method: "DELETE" }).then((r) => to<AiSettingsView>(r)),
 

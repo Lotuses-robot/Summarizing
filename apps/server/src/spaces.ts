@@ -8,12 +8,7 @@ import {
   type RegistryDb,
 } from "./storage/registry";
 import { readStoredAi } from "./storage/repo";
-import {
-  envFromAiSettings,
-  makeOpenAiLlm,
-  makeUnconfiguredLlm,
-  type TaggedLlm,
-} from "./shared/llm";
+import { makeOpenAiLlm, makeUnconfiguredLlm, type TaggedLlm } from "./shared/llm";
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { sweepOrphanPending } from "./agent0/digest";
 import { errText } from "@summarizing/shared";
@@ -49,20 +44,25 @@ declare module "fastify" {
   }
 }
 
-/** 本库 AI 客户端：设置覆盖优先，回退 .env；两者都缺 → **未配置占位**（构造不抛——服务器 .env
- *  留空是部署常态，装配期抛会把整站锁死；用到时明确报未配置，FR-009。评审修复）。
- *  构造失败的真因写 stderr（simplify：无声吞错会让「尚未配置」这句提示可能不实——留痕可见）。 */
+/** 本库 AI 客户端：**只认本账户自己的设置**（多用户 = 每人自带 key，006 用户走查——不再回退
+ *  .env：那会让全站共享一把 key）。未配 / 构造失败 → 未配置占位（服务照常起，用到时明确报未配置）。
+ *  构造失败的真因写 stderr（留痕可见——无声吞错会让「尚未配置」这句提示可能不实）。 */
 function buildLlm(db: Db): TaggedLlm {
   const stored = readStoredAi(db);
+  if (stored === null) return makeUnconfiguredLlm();
   try {
-    return stored !== null ? makeOpenAiLlm(envFromAiSettings(stored)) : makeOpenAiLlm();
+    return makeOpenAiLlm({
+      baseUrl: stored.baseUrl,
+      model: stored.model,
+      ...(stored.apiKey === undefined ? {} : { apiKey: stored.apiKey }),
+    });
   } catch (err) {
     process.stderr.write(`[space] AI 客户端构造失败，按未配置处理：${errText(err)}\n`);
     return makeUnconfiguredLlm();
   }
 }
 
-/** 装配一个账户的空间：开库（含启动清扫）→ 建 llm 引用（本库设置优先，回退 .env）→ 信源上岗并启动。
+/** 装配一个账户的空间：开库（含启动清扫）→ 建 llm 引用（只认本账户设置）→ 信源上岗并启动。
  *  `factories` 默认取生产注册表；测试注入替身适配器（不改生产路径）。 */
 async function assembleSpace(
   account: AccountRow,
