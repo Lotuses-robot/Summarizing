@@ -2,7 +2,7 @@ import type { DigestState, IngestRequest, RawInput } from "@summarizing/shared";
 import type { TaggedLlm } from "../shared/llm";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import { nowLocalWallClock } from "../shared/time";
+import { nowWallClock } from "../shared/time";
 import { kickDigest } from "../agent0/digest";
 import type { AgentTools } from "../agent0/tools";
 
@@ -23,7 +23,7 @@ export function ingestBatch(
   from: string,
   log?: (msg: string) => void,
 ): { raw: RawInput; digestState: DigestState } {
-  const raw = repo.insertRawInput(db, { ...payload, receivedAt: nowLocalWallClock() });
+  const raw = repo.insertRawInput(db, { ...payload, receivedAt: nowWallClock() });
   const client = llmRef.current;
   const digestState = kickDigest(db, client, tools, client.modelTag, raw, from, log);
   return { raw, digestState };

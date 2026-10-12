@@ -14,6 +14,7 @@ import {
 const DDL_NOTE_KEY = "@ddl-note";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
+import { fmtFullTime } from "../../lib/time";
 import { QuoteOverlay } from "./QuoteOverlay";
 
 /** 事项展开体（D-80 手风琴内容）：基本信息开 / 信息元素平铺引文收 / 版本史收只显计数。
@@ -83,7 +84,7 @@ export function ItemBody({ id }: { id: string }) {
           ddl：
           {dueText !== null ? (
             <>
-              {new Date(dueText).toLocaleString()}
+              {fmtFullTime(dueText)}
               {dueRelative !== null && (
                 <span className="ml-1.5 text-xs text-ink-muted">（{dueRelative}）</span>
               )}
@@ -182,7 +183,7 @@ export function ItemBody({ id }: { id: string }) {
             {detail.versions.map((v) => (
               <li key={v.id}>
                 <span className="text-xs text-ink-muted">
-                  {v.id.slice(0, 6)} · {new Date(v.at).toLocaleString()} · {v.by.actor}
+                  {v.id.slice(0, 6)} · {fmtFullTime(v.at)} · {v.by.actor}
                   {v.by.model ? ` · ${v.by.model}` : ""} · {v.action}
                 </span>
                 <br />

@@ -58,7 +58,7 @@ export function buildBoard(db: Db): BoardView {
   const undated = todo.filter((r) => itemDueDate(r.item) === null);
   const scheduled = todo
     .filter((r) => itemDueDate(r.item) !== null)
-    // 定宽本地墙钟（D-64）→ 字典序 = 时间序；非法串（NaN）排最后而非错位
+    // 定宽北京墙钟（D-64）→ 字典序 = 时间序；非法串（NaN）排最后而非错位
     .sort((a, b) => {
       const av = itemDueDate(a.item) ?? "";
       const bv = itemDueDate(b.item) ?? "";

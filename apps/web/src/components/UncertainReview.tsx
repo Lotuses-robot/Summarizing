@@ -4,6 +4,7 @@ import { sourceIdentityLabel, type UncertainInput } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { pushEscLayer } from "../lib/escLayer";
+import { fmtFullTime } from "../lib/time";
 
 /** 移除按钮（D-89 用户设计的「移动确认」交互——防误触）：
  *  idle = 归档图标；点击 → 原位变 X、左侧弹出勾——鼠标**移到勾上点击**才真删；
@@ -125,8 +126,7 @@ export function UncertainReview({
                   <span>{it.reason}</span>
                 </p>
                 <p className="mt-0.5 text-xs text-ink-muted">
-                  {sourceIdentityLabel(it.sourceIdentity)} ·{" "}
-                  {new Date(it.createdAt).toLocaleString()}
+                  {sourceIdentityLabel(it.sourceIdentity)} · {fmtFullTime(it.createdAt)}
                 </p>
               </div>
               <RemoveButton onConfirm={() => remove(it.id)} />

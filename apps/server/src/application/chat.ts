@@ -9,7 +9,7 @@ import {
 } from "@summarizing/shared";
 import { z } from "zod";
 import type { Db } from "../storage/db";
-import { nowLocalWallClock } from "../shared/time";
+import { nowWallClock } from "../shared/time";
 import * as repo from "../storage/repo";
 import { buildBoard } from "./board";
 import { describeSweep, sweepUncertainLibrary } from "../agent0/sweep";
@@ -320,7 +320,7 @@ function insertChatRaw(db: Db, content: string) {
     content,
     sourceType: "chat",
     sourceIdentity: { sourceLabel: "用户对话" },
-    receivedAt: nowLocalWallClock(),
+    receivedAt: nowWallClock(),
     eventTime: null,
   });
 }

@@ -26,7 +26,7 @@ import {
   type SourceIdentity,
   type UncertainInput,
 } from "@summarizing/shared";
-import { nowLocalWallClock } from "../shared/time";
+import { nowWallClock, wallClockFromDate } from "../shared/time";
 import type { DbOrTx } from "./db";
 import * as s from "./schema";
 
@@ -104,7 +104,7 @@ export function appendItemVersion(
     action: args.action,
     detail: args.detail,
     snapshot: JSON.stringify(args.snapshot),
-    at: nowLocalWallClock(),
+    at: nowWallClock(),
     by: JSON.stringify(args.by), // Provenance 结构化存 JSON 串（列仍是 TEXT，D-88）
     revokedBy: null, // 预留未用（撤回功能暂缓，D-79）
   };
@@ -317,15 +317,10 @@ export function listRecentRawInputs(db: DbOrTx, daysBack: number): RawInput[] {
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
 }
 
-/** N 天前的本地墙钟串（与 receivedAt 同格式，供 SQL 字符串比较）。 */
+/** N 天前的北京墙钟串（与 receivedAt 同格式、同口径——供 SQL 字符串比较；单一出处 wallClockFromDate，
+ *  勿手搓：手搓副本会按机器时区算，与 +08:00 的 receivedAt 偏 8 小时，D-97 走查逮出）。 */
 function wallClockDaysAgo(days: number): string {
-  const d = new Date(Date.now() - days * 86_400_000);
-  /** 两位数补零（月/日/时/分/秒）。 */
-  const p = (n: number): string => String(n).padStart(2, "0");
-  return (
-    `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` +
-    `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-  );
+  return wallClockFromDate(new Date(Date.now() - days * 86_400_000));
 }
 
 /** SQL 端截断上限（rowid 倒序 = 最新优先；过滤后数量由调用方再截）。 */
@@ -342,7 +337,7 @@ export function appendPipelineEvent(
     action: args.action,
     detail: args.detail,
     payload: args.payload === undefined ? null : JSON.stringify(args.payload),
-    at: nowLocalWallClock(),
+    at: nowWallClock(),
     by: JSON.stringify(args.by), // Provenance 结构化存 JSON 串（列仍是 TEXT，D-88）
   };
   db.insert(s.pipelineEvents).values(row).run();
@@ -450,7 +445,7 @@ export function addEvidence(
     subject: args.subject,
     fragmentId: args.fragmentId,
     pointer: args.pointer ?? null,
-    capturedAt: nowLocalWallClock(),
+    capturedAt: nowWallClock(),
     capturedBy: args.by,
   };
   db.insert(s.evidence).values(row).run();
@@ -468,10 +463,7 @@ export function listEvidenceByItem(db: DbOrTx, itemId: string): EvidenceSource[]
 
 /** 标记事项已被用户打开过（幂等；「新」微标消除，用户 2026-09-27）。 */
 export function markItemViewed(db: DbOrTx, itemId: string): void {
-  db.insert(s.itemViews)
-    .values({ itemId, viewedAt: nowLocalWallClock() })
-    .onConflictDoNothing()
-    .run();
+  db.insert(s.itemViews).values({ itemId, viewedAt: nowWallClock() }).onConflictDoNothing().run();
 }
 
 /** 已标记查看的事项 id 集合（看板装配「新」微标用）。 */
@@ -551,9 +543,9 @@ export function listSourceNames(db: DbOrTx): string[] {
 
 // ── 对话轮次（L16：持久化会话，刷新/换设备可回填）──
 
-/** 追加一轮对话（user 或 assistant 各一条）；at = 本地墙钟。 */
+/** 追加一轮对话（user 或 assistant 各一条）；at = 北京墙钟。 */
 export function appendChatTurn(db: DbOrTx, role: "user" | "assistant", content: string): void {
-  db.insert(s.chatTurns).values({ id: newId(), role, content, at: nowLocalWallClock() }).run();
+  db.insert(s.chatTurns).values({ id: newId(), role, content, at: nowWallClock() }).run();
 }
 
 /** 读最近 limit 轮（时间升序返回，供前端回填）；chat_turns 是只增不删的日志。 */

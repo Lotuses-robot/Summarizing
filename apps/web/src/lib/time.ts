@@ -1,12 +1,25 @@
-/** 时间戳（墙钟串/ISO）→「MM-DD HH:mm」全站统一短格式——月/日/时/分补零（用户 2026-10-10 定：统一口径 = 补齐位数）。
- *  看板 ddl 与流水（列表/状态卡）共用；长期记录类（版本历史/引文悬浮窗）另有带年份的长格式，不在此列。 */
+// 全站时间显示（D-64 立，D-97 定死北京）：库内时刻一律是**北京墙钟串** `YYYY-MM-DDTHH:mm:ss`——
+// 显示即**纯字符串裁剪**（不做时区换算：串本身就是北京时间，转换只会引入机器时区偏差）。
+
+/** 北京时间墙钟串 → 「MM-DD HH:mm」（月/日/时/分补零；看板 ddl + 流水列表/状态卡共用）。
+ *  纯字符串裁剪：零时区参与，绝对保真（D-97）。 */
 export function fmtShortTime(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  // "YYYY-MM-DDTHH:mm:ss" → date="YYYY-MM-DD" time="HH:mm:ss"
+  const [date = "", time = ""] = iso.split("T");
+  const [, mm = "", dd = ""] = date.split("-");
+  const [hh = "", mi = ""] = time.split(":");
+  return `${mm}-${dd} ${hh}:${mi}`;
 }
 
 /** 同款短格式带秒「MM-DD HH:mm:ss」——审计面（流水详情时间线）专用：
  *  digest_trace 事件常相隔数秒，分钟精度在时间线上分不开（走查批次 2026-10-10）。 */
 export function fmtTimeSec(iso: string): string {
-  return `${fmtShortTime(iso)}:${String(new Date(iso).getSeconds()).padStart(2, "0")}`;
+  const sec = iso.split("T")[1]?.split(":")[2] ?? "00";
+  return `${fmtShortTime(iso)}:${sec}`;
+}
+
+/** 北京墙钟串 → 带年份的长格式「YYYY-MM-DD HH:mm:ss」——长期记录面（版本历史/引文悬浮窗）。 */
+export function fmtFullTime(iso: string): string {
+  const [date = "", time = ""] = iso.split("T");
+  return `${date} ${time.slice(0, 8)}`;
 }

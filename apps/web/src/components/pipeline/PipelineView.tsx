@@ -8,7 +8,12 @@ import {
   RefreshCw,
   XCircle,
 } from "lucide-react";
-import { DIGEST_MAX_ROUNDS, type PipelineRun, type PipelineRunDetail } from "@summarizing/shared";
+import {
+  DIGEST_MAX_ROUNDS,
+  wallClockToEpoch,
+  type PipelineRun,
+  type PipelineRunDetail,
+} from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
 import { fmtShortTime, fmtTimeSec } from "../../lib/time";
@@ -175,7 +180,7 @@ function DigestingCard({
   now: number;
   pendingCount: number;
 }) {
-  const elapsedSec = Math.max(0, Math.floor((now - new Date(run.receivedAt).getTime()) / 1000));
+  const elapsedSec = Math.max(0, Math.floor((now - wallClockToEpoch(run.receivedAt)) / 1000));
   // 最近 3 条事件倒序（最新在上，旧的向下渐隐——「滚动栏 + 残影」）
   const recent = events.slice(-3).reverse();
   // 轮次进度：digest_trace 一条 = 完成一轮（真实事件驱动；上限 = 服务端硬约束）。
@@ -341,7 +346,7 @@ export function PipelineView() {
                 if (run.digestState !== "digested") return false;
                 const was = prev.get(run.id);
                 if (was !== undefined) return was !== "digested";
-                return Date.parse(run.receivedAt) >= openedAt.current - 2000;
+                return wallClockToEpoch(run.receivedAt) >= openedAt.current - 2000;
               });
         prevStates.current = new Map(r.runs.map((run) => [run.id, run.digestState]));
         setRuns(r.runs);

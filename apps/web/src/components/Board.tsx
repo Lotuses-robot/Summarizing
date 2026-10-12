@@ -4,6 +4,7 @@ import {
   dueDateElement,
   itemName,
   relativeDueText,
+  wallClockToEpoch,
   type BoardView,
   type ItemRow,
 } from "@summarizing/shared";
@@ -86,7 +87,7 @@ function Row({
   // 「新」微标：待办且未被打开过（点开即消，用户 2026-09-27）；已完成/已归档不亮
   const isNew = item.status === "todo" && !row.viewed && !viewedLocally.has(item.id);
   // 临近/过期都在渲染期派生（01§4.15「派生不落库」）；只对待办追讨
-  const dueTs = dueText === null ? Number.NaN : new Date(dueText).getTime();
+  const dueTs = dueText === null ? Number.NaN : wallClockToEpoch(dueText); // 固定 +08:00 解析（D-97）
   const near =
     !row.overdue &&
     item.status === "todo" &&

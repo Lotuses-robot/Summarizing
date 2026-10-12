@@ -1,30 +1,35 @@
 import { z } from "zod";
 
-// ──────────────── 本地墙钟时间（D-64，格式单一来源）────────────────
-// 全库统一 `YYYY-MM-DDTHH:mm:ss`（北京时间墙钟，无时区标记）。
+// ──────────────── 北京时间墙钟（D-64 立，D-97 定死）────────────────
+// 全库统一 `YYYY-MM-DDTHH:mm:ss`（**北京时间 UTC+8**，无时区标记；不依赖运行机器时区）。
 // 本 schema 同时是类型定义与运行时校验（类型即校验，2026-09-25 定）。
 
-export const localWallClockSchema = z
+/** 北京时间的固定 UTC 偏移（分钟）——校验回读比对时用它，与运行机器时区无关。 */
+const WALL_CLOCK_OFFSET_MIN = 8 * 60;
+
+export const wallClockSchema = z
   .string()
   .regex(
     /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?)?$/,
-    "本地墙钟格式：YYYY-MM-DDTHH:mm:ss（无时区标记）",
+    "墙钟格式：YYYY-MM-DDTHH:mm:ss（北京时间，无时区标记）",
   )
   .refine((t) => {
     // Date.parse 会把 2026-02-30 静默进位成 3-02、把 24:00 进位成次日——
-    // 必须回读比对，拒绝「不存在的日期」（错误日期比没日期危险，01§4.2）
+    // 必须回读比对，拒绝「不存在的日期」（错误日期比没日期危险，01§4.2）。
+    // 回读按**固定 +08:00** 取分量（不依赖机器时区：UTC 服务器上 getFullYear 会偏 8h）。
     const norm = t.includes("T") ? t : `${t}T00:00:00`;
-    const d = new Date(norm);
-    if (Number.isNaN(d.getTime())) return false;
+    const epoch = Date.parse(`${norm}+08:00`);
+    if (Number.isNaN(epoch)) return false;
+    const shifted = new Date(epoch + WALL_CLOCK_OFFSET_MIN * 60_000);
     const [datePart = "", timePart = ""] = t.split("T");
     const [y = "", mo = "", da = ""] = datePart.split("-");
-    if (d.getFullYear() !== Number(y)) return false;
-    if (d.getMonth() + 1 !== Number(mo)) return false;
-    if (d.getDate() !== Number(da)) return false;
+    if (shifted.getUTCFullYear() !== Number(y)) return false;
+    if (shifted.getUTCMonth() + 1 !== Number(mo)) return false;
+    if (shifted.getUTCDate() !== Number(da)) return false;
     if (timePart !== "") {
       const [h = "", mi = ""] = timePart.split(":");
-      if (d.getHours() !== Number(h)) return false;
-      if (d.getMinutes() !== Number(mi)) return false;
+      if (shifted.getUTCHours() !== Number(h)) return false;
+      if (shifted.getUTCMinutes() !== Number(mi)) return false;
     }
     return true;
   }, "不是真实存在的日期时间（如 2月30日）");
@@ -40,14 +45,14 @@ export const ElementSchema = z
     note: z.string().nullable().optional(), // 说明/推断依据——可查回，UI 可区分
   })
   .superRefine((el, ctx) => {
-    // 类型即校验（D-64）：dueDate 元素的 text 必须是本地墙钟
+    // 类型即校验（D-64/D-97）：dueDate 元素的 text 必须是北京墙钟
     if (el.label === "dueDate") {
-      const parsed = localWallClockSchema.safeParse(el.text);
+      const parsed = wallClockSchema.safeParse(el.text);
       if (!parsed.success) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["text"],
-          message: "dueDate 必须是本地墙钟格式（YYYY-MM-DDTHH:mm:ss）",
+          message: "dueDate 必须是北京墙钟格式（YYYY-MM-DDTHH:mm:ss）",
         });
       }
     }
@@ -114,10 +119,17 @@ export function itemName(elements: { label: string; text: string }[]): string {
   return elements.find((e) => e.label === "name")?.text ?? "（无名事项）";
 }
 
+/** 北京墙钟串 → epoch 毫秒（补显式 +08:00 偏移——不依赖运行机器时区；非法返回 NaN）。
+ *  web 侧解析库内时间串（ddl/流水时刻等）都该走它，别用裸 `new Date(串)`。 */
+export function wallClockToEpoch(wallClock: string): number {
+  const withZone = /[Zz]|[+-]\d{2}:?\d{2}$/.test(wallClock) ? wallClock : `${wallClock}+08:00`;
+  return Date.parse(withZone);
+}
+
 /** ddl 相对当下的自然语言（05§三）：不足 2 天按小时、其余按天；过去如实「已过期」。
  *  非法日期返回 null（调用方隐藏相对时间，不编造）。 */
 export function relativeDueText(ddl: string, now: Date): string | null {
-  const ts = new Date(ddl).getTime();
+  const ts = wallClockToEpoch(ddl); // 墙钟串按固定 +08:00 解析（D-97：不依赖机器时区）
   if (Number.isNaN(ts)) return null;
   const diff = ts - now.getTime();
   const abs = Math.abs(diff);
@@ -181,7 +193,7 @@ export const RawInputSchema = z.object({
   content: z.string().min(1), // 原始文本，永不丢失
   sourceType: z.string(), // chat / paste / nc / …
   sourceIdentity: SourceIdentitySchema, // 来源身份——推理依据 + 外发粒度 + 矛盾取舍的官方性判据（D-84）
-  receivedAt: z.string(), // 接收时间（本地墙钟）
+  receivedAt: z.string(), // 接收时间（北京墙钟）
   eventTime: z.string().nullable(), // 事件时间（事情发生时）；相对日期按它锚定
   digestState: DigestState,
 });
@@ -261,7 +273,7 @@ export const ItemVersionSchema = z.object({
     status: z.enum(["todo", "done", "archived"]), // 快照同 Item（D-83 启用 archived）
     doubtNote: z.string().nullable(),
   }),
-  at: z.string(), // 本地墙钟
+  at: z.string(), // 北京墙钟
   by: ProvenanceSchema, // 变更署名（谁 + 模型，D-88）
   revokedBy: z.string().nullable(), // 预留未用（撤回功能暂缓，D-79）
 });
@@ -496,7 +508,7 @@ export const ChatHistoryResponseSchema = z.object({
     z.object({
       role: z.enum(["user", "assistant"]),
       content: z.string(),
-      at: z.string(), // 本地墙钟
+      at: z.string(), // 北京墙钟
     }),
   ),
 });
@@ -618,7 +630,7 @@ export const PipelineEventSchema = z.object({
   action: z.string(),
   detail: z.string(),
   payload: z.unknown().nullable(),
-  at: z.string(), // 本地墙钟
+  at: z.string(), // 北京墙钟
   by: ProvenanceSchema,
 });
 export type PipelineEvent = z.infer<typeof PipelineEventSchema>;

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { UncertainStatus } from "@summarizing/shared";
 import { sweepUncertainLibrary } from "../agent0/sweep";
 import * as repo from "../storage/repo";
-import { nowLocalWallClock } from "../shared/time";
+import { nowWallClock } from "../shared/time";
 
 // 存疑信息库查询端点（D-85/D-88；006 起依赖来自请求上下文）：GET 全库（按状态筛，人工通道
 // needsHuman 倒序）；POST sweep 触发清扫循环（用本空间的库与 llm——清扫归本账户）；
@@ -42,7 +42,7 @@ export function registerUncertainRoutes(app: FastifyInstance): void {
       id,
       status: "discarded",
       resolvedRef: "manual",
-      resolvedAt: nowLocalWallClock(),
+      resolvedAt: nowWallClock(),
     });
     if (!resolved) {
       return reply.code(409).send({ error: "条目已被处置" });

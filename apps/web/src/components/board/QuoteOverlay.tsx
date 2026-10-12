@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { sourceIdentityLabel, type RawInput } from "@summarizing/shared";
 import { pushEscLayer } from "../../lib/escLayer";
+import { fmtFullTime } from "../../lib/time";
 
 /** 引文悬浮窗（05§三 ㉜）：显示所属批次完整原文并高亮引文那句；点遮罩 / Esc 关闭。
  *  高亮用 indexOf 精确定位，定位不到（引文与原文有空白差异）就整段平铺不高亮——如实展示不编造。 */
@@ -29,7 +30,7 @@ export function QuoteOverlay({
       >
         <div className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-muted">
           <span className="truncate">
-            批次 {rawInput.id.slice(0, 6)} · {new Date(rawInput.receivedAt).toLocaleString()} ·{" "}
+            批次 {rawInput.id.slice(0, 6)} · {fmtFullTime(rawInput.receivedAt)} ·{" "}
             {sourceIdentityLabel(rawInput.sourceIdentity)}
           </span>
           <button className="btn shrink-0" onClick={onClose}>

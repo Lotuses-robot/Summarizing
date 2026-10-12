@@ -302,7 +302,7 @@ describe("nc 适配器：纯函数", () => {
     expect(batch.sender).toBeUndefined(); // 无法确证是同一人——不署名（假数据比没数据糟）
   });
 
-  it("wallClockFromUnix：unix 秒 → 本地墙钟（D-64 格式）", () => {
+  it("wallClockFromUnix：unix 秒 → 北京墙钟（D-64 格式）", () => {
     expect(wallClockFromUnix(1790595828)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/);
   });
 });

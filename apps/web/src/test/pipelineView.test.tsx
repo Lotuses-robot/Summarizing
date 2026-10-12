@@ -51,7 +51,7 @@ const DETAIL_EVENTS = [
   },
 ];
 
-/** 本地墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）——供「刚完成/页开后到达」用例构造。
+/** 北京墙钟串（与 receivedAt 同格式；ISO 是 UTC 会差出时区）——供「刚完成/页开后到达」用例构造。
  *  显式补零（不依赖 ICU locale——sv-SE 在 small-icu 运行时会静默变格式）。 */
 function localNowStr(): string {
   const d = new Date();

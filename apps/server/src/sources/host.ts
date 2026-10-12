@@ -2,7 +2,7 @@ import { errText, IngestRequestSchema, SettingFieldSchema } from "@summarizing/s
 import { withTimeout } from "../shared/timeout";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import { nowLocalWallClock } from "../shared/time";
+import { nowWallClock } from "../shared/time";
 import { ingestBatch } from "../application/ingest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { TaggedLlm } from "../shared/llm";
@@ -112,7 +112,7 @@ function makeSourceContext(
         );
         // 落地成功即恢复正常（reportError 置的 error 不能粘滞——「最近出错」语义要能翻篇）
         state.state = "ok";
-        state.lastOkAt = nowLocalWallClock();
+        state.lastOkAt = nowWallClock();
         return { ok: true, id: raw.id };
       } catch (err) {
         // 不抛（D-88）：信源要能感知「落地失败」，自己决定重试/丢弃；抛出去只会污染主进程
@@ -177,7 +177,7 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
   const kept: Array<{ adapter: SourceAdapter; state: SourceState }> = [];
   for (const adapter of adapters) {
     if (states.has(adapter.name)) continue; // 防重复（P7）
-    const state: SourceState = { state: "ok", lastOkAt: nowLocalWallClock() };
+    const state: SourceState = { state: "ok", lastOkAt: nowWallClock() };
     const cleanups: (() => void | Promise<void>)[] = [];
     const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state);
     adapter.register(
@@ -236,7 +236,7 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
           if (adapter.start === undefined) continue;
           state.state = "ok";
           state.lastError = undefined;
-          state.lastOkAt = nowLocalWallClock();
+          state.lastOkAt = nowWallClock();
         } catch (err) {
           const reason = errText(err);
           state.state = "error";

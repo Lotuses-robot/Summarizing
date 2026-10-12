@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { nowLocalWallClock, wallClockFromDate } from "../shared/time";
+import { nowWallClock, wallClockFromDate } from "../shared/time";
 
 // 系统库（data/system.db，D-96 / 00 契约 §十二）：账户登记——账户/邀请码/键值。
 // 独立于用户库（data/users/<uid>.db）：服务器每请求读它做鉴权（CLI 也直接开它，WAL 跨进程安全）。
@@ -134,7 +134,7 @@ function buildAccountRow(args: { username: string; passwordHash: string }): Acco
     status: "active",
     tokenVersion: 1,
     sourceToken: newSourceToken(),
-    createdAt: nowLocalWallClock(),
+    createdAt: nowWallClock(),
   };
 }
 
@@ -186,7 +186,7 @@ export function createInvite(db: RegistryDb, days = 7): { code: string; expiresA
   const code = newInviteCode();
   const expiresAt = wallClockFromDate(new Date(Date.now() + days * 86_400_000));
   db.insert(invites)
-    .values({ code, createdAt: nowLocalWallClock(), expiresAt, usedBy: null, usedAt: null })
+    .values({ code, createdAt: nowWallClock(), expiresAt, usedBy: null, usedAt: null })
     .run();
   return { code, expiresAt };
 }
@@ -206,7 +206,7 @@ export function redeemInviteAndCreateAccount(
   db: RegistryDb,
   args: { code: string; username: string; passwordHash: string },
 ): { ok: true; account: AccountRow } | { ok: false; reason: "code" | "username" } {
-  const now = nowLocalWallClock();
+  const now = nowWallClock();
   try {
     return db.transaction((tx) => {
       // 原子核销：未用 + 未过期（字符串序=时间序，直接比较）——变更行数判定，并发双注册恰一成功
