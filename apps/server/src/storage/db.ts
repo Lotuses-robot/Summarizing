@@ -1,10 +1,8 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
+import type Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import * as schema from "./schema";
-import { runSchemaGate } from "./migrate";
+import { openGatedDb } from "./migrate";
 
 // 单文件库 = 拷贝即备份（01§8.4）。data/ 已 gitignore。
 // 建表走幂等 DDL（IF NOT EXISTS），文件库与测试内存库同源初始化。
@@ -12,26 +10,10 @@ import { runSchemaGate } from "./migrate";
 
 /** 打开并幂等建表一个 SQLite 库：":memory:" 供测试，文件库开 WAL；文件库=拷贝即备份（01§8.4）。 */
 export function makeDb(file: string) {
-  if (file !== ":memory:") {
-    mkdirSync(path.dirname(file), { recursive: true });
-  }
-  const sqlite = new Database(file);
-  if (file !== ":memory:") {
-    sqlite.pragma("journal_mode = WAL");
-  }
-  // 版本门控：落后先在备份后迁移；持平/领先直接跑幂等 DDL 自愈（migrate.ts 单出处）。
-  // 门控失败（备份 busy / DDL 错）关句柄再抛——按请求重试装配时否则会逐次泄漏连接。
-  try {
-    runSchemaGate(sqlite, file, () => ensureSchema(sqlite));
-  } catch (err) {
-    try {
-      sqlite.close(); // 半开不留句柄
-    } catch {
-      // 已关/未开——忽略，别盖住原始错误
-    }
-    throw err;
-  }
-  return drizzle(sqlite, { schema });
+  return drizzle(
+    openGatedDb(file, (sqlite) => ensureSchema(sqlite)),
+    { schema },
+  );
 }
 
 /** 事务句柄：drizzle 事务回调给出，读/写方法齐全但无 $client。repo 函数接受 DbOrTx。 */

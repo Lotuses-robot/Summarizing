@@ -11,32 +11,22 @@ COPY packages/shared/package.json packages/shared/
 # 全量安装（含 devDeps：构建要 vite/esbuild/typescript）——npm ci 按 lockfile 精确复现
 RUN npm ci
 
-# 拷源码后构建：前端 vite + 服务端 esbuild 单文件（复用 build-release 的服务端打包逻辑等价物）
+# 拷源码后构建：前端 vite + 服务端 esbuild 单文件（打包配方复用 scripts/build-server.mjs，与便携包同一出处）
 COPY . .
 RUN npm run build -w @summarizing/web \
- && npx esbuild apps/server/src/index.ts \
-      --bundle --platform=node --format=esm --target=node22 \
-      --outfile=apps/server/dist/index.mjs --external:better-sqlite3 \
-      --banner:js='import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);' \
- && npx esbuild scripts/admin.ts \
-      --bundle --platform=node --format=esm --target=node22 \
-      --outfile=apps/server/dist/admin.mjs --external:better-sqlite3 \
-      --banner:js='import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);'
+ && node scripts/build-server.mjs .
 
-# ── 运行阶段：只带运行需要的东西（无 devDeps / 无源码）──
+# ── 运行阶段：只带运行需要的东西（无 devDeps / 无源码 / 无前端源码依赖）──
 FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# 运行依赖：生产依赖（只有 better-sqlite3 等运行时需要）+ 其原生预编译随包下发
-COPY package.json package-lock.json ./
-COPY apps/server/package.json apps/server/
-COPY apps/web/package.json apps/web/
-COPY packages/shared/package.json packages/shared/
-# --omit=dev：只装生产依赖。--ignore-scripts 必需：根 package.json 的 prepare=simple-git-hooks
-# 在 --omit=dev 下仍会执行（命令已被剔除 → npm ci exit 1，镜像构建必挂，实测复现）；
-# 运行依赖无需脚本——better-sqlite3 v13 无 install 脚本、prebuilds 随包下发（含 linux-x64），实测可用。
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# 运行时依赖：只有 better-sqlite3（服务端 esbuild bundle 只外挂它）——从构建阶段取精简副本
+# （package.json + lib + 本平台预编译，≈2MB）。其余生产依赖/web 工作区依赖（react 等）运行时都加载不到，
+# 整棵 npm 生产树（含 42MB react）不进镜像（便携包同款做法，见 build-release.mjs）。
+COPY --from=build /app/node_modules/better-sqlite3/package.json ./node_modules/better-sqlite3/
+COPY --from=build /app/node_modules/better-sqlite3/lib ./node_modules/better-sqlite3/lib
+COPY --from=build /app/node_modules/better-sqlite3/prebuilds/linux-x64.node ./node_modules/better-sqlite3/prebuilds/
 
 # 从构建阶段取产物：服务端单文件 + 前端静态
 COPY --from=build /app/apps/server/dist ./apps/server/dist
@@ -51,11 +41,10 @@ VOLUME ["/app/data"]
 # data 属主由 compose 的 bind mount 决定——宿主机目录需可写（见 docs/11 部署注意）
 USER node
 
+# PORT 由 compose 设（默认 3001 见 index.ts）；EXPOSE 仅文档化
 EXPOSE 3001
-# PORT 环境变量可控（默认 3001）；host 0.0.0.0（容器内必需）
-ENV PORT=3001
 
-# 健康检查：未登录面 GET /api/board 应回 401（服务活着即通过——200 也正常）
+# 健康检查：未登录面 GET /api/board 应回 401（只认 401——该面受保护，其它都是异常）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/board').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"
 

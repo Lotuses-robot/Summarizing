@@ -7,7 +7,6 @@ import { cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import esbuild from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "release");
@@ -95,37 +94,12 @@ if (!existsSync(path.join(root, "apps/web/dist/index.html"))) {
   throw new Error("apps/web/dist 不存在——先去构建前端（或不要用 --skip-web）");
 }
 
-// ── 2. 服务端打包（esbuild 单文件；better-sqlite3 是原生模块，外挂）──
+// ── 2. 服务端打包（esbuild 单文件；与 Dockerfile 共用 scripts/build-server.mjs，配方单出处）──
 console.log("[2/4] 打包服务端…");
 rmSync(out, { recursive: true, force: true });
-await esbuild.build({
-  entryPoints: [path.join(root, "apps/server/src/index.ts")],
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node22",
-  outfile: path.join(out, "apps/server/dist/index.mjs"),
-  external: ["better-sqlite3"],
-  logLevel: "warning",
-  // CJS 依赖（fastify 生态）在 ESM 产物里的 require 垫片：定义真 require，否则动态 require 抛错
-  banner: {
-    js: 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);',
-  },
-});
-
-// 运维命令入口（admin.mjs；start.cmd 首启引导 + 手动运维——同一份 scripts/admin.ts）
-await esbuild.build({
-  entryPoints: [path.join(root, "scripts/admin.ts")],
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node22",
-  outfile: path.join(out, "apps/server/dist/admin.mjs"),
-  external: ["better-sqlite3"],
-  logLevel: "warning",
-  banner: {
-    js: 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);',
-  },
+execFileSync(process.execPath, [path.join(root, "scripts/build-server.mjs"), out], {
+  cwd: root,
+  stdio: "inherit",
 });
 
 // ── 3. 组装目录 ──

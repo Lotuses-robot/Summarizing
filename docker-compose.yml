@@ -12,17 +12,14 @@ services:
       - path: .env
         required: false
     environment:
-      - PORT=3001
       # 反代（Caddy）后取真实来源 IP 供限速用；前提：本端口不直暴公网（见下 ports）。
       # 配套：XFF 由 Caddyfile 覆写为直连客户端 IP——防客户端自带伪造头（trustProxy 信任全部跳数）
       - TRUST_PROXY=1
     volumes:
       # 唯一有状态的东西：整目录 bind mount（system.db + users/<uid>.db）——宿主机可直接备份
       - ./data:/app/data
-    # 只暴露给 Caddy（compose 网络内），不映射到宿主机 —— 防直连绕过 TLS
-    expose:
-      - "3001"
-    # ⚠️ 刻意不写 ports：应用端口绝不可直暴公网（docs/11 部署注意 R12-1）
+    # ⚠️ 刻意不写 ports：应用端口绝不可直暴公网（docs/11 部署注意 R12-1）；Caddy 经 compose 网络直连 app:3001
+    # ⚠️ 宿主机 ./data 需可写（uid 1000，容器内 node 用户）——见 docs/11 部署注意
 
   caddy:
     image: caddy:2-alpine

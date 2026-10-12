@@ -21,6 +21,7 @@
     "db:reset": "tsx scripts/db-reset.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "admin": "tsx scripts/admin.ts",
+    "build:server": "node scripts/build-server.mjs",
     "build:release": "node scripts/build-release.mjs"
   },
   "simple-git-hooks": {

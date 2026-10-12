@@ -1,7 +1,7 @@
-import type Database from "better-sqlite3";
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
-import { wallClockFromDate } from "../shared/time";
+import Database from "better-sqlite3";
+import { nowWallClock } from "../shared/time";
 
 // schema 迁移三件套（批次 2 / docs/11 阶段 2）：**版本号 + 迁移前自动备份 + 逐库跑**。
 // 逐库跑：由调用方（index 启动遍历账户、每库 makeDb）天然保证——本模块只管单库的版本门控。
@@ -28,22 +28,52 @@ function writeSchemaVersion(sqlite: Database.Database, version: number): void {
 }
 
 /**
+ * 打开一个库句柄并过版本门控（开库生命周期单出处：makeDb / makeRegistryDb 共用）。
+ * mkdir 父目录 → 开库 → 文件库开 WAL → runSchemaGate；**门控失败关句柄再抛**——上层的启动失败
+ * 与「按请求重试装配」都不会泄漏连接。返回的句柄已建表就绪，调用方只需再套 drizzle。
+ * @param file 库文件路径（":memory:" 跳过目录/WAL/备份——测试内存库）
+ * @param applyDdl 幂等建表 + 存量迁移的回调（本库自己的 ensureSchema 主体）
+ */
+export function openGatedDb(
+  file: string,
+  applyDdl: (sqlite: Database.Database) => void,
+): Database.Database {
+  if (file !== ":memory:") {
+    mkdirSync(path.dirname(file), { recursive: true });
+  }
+  const sqlite = new Database(file);
+  if (file !== ":memory:") {
+    sqlite.pragma("journal_mode = WAL");
+  }
+  try {
+    runSchemaGate(sqlite, file, () => applyDdl(sqlite));
+  } catch (err) {
+    try {
+      sqlite.close(); // 半开不留句柄
+    } catch {
+      // 已关/未开——忽略，别盖住原始错误
+    }
+    throw err;
+  }
+  return sqlite;
+}
+
+/**
  * 版本门控建表/迁移：给已打开的库跑「当前版本」的 schema 自愈 + 迁移。
  * - 库内版本**落后** → 先备份（仅此情形）→ 跑迁移回调 → 写新版本（迁移与版本写入同一事务）；
  * - 库内版本**持平** → 不备份、直接跑幂等 DDL（自愈），**不动版本**；
  * - 库内版本**领先**（降级旧二进制）→ 同持平处理，但往 stderr 留痕（红线「不许静默」）。
  *
- * 调用时机由 makeDb/makeRegistryDb 在**建表前**做（备份要在改动落盘前完成）。
+ * 调用时机：由 openGatedDb 在建表前调用（备份要在改动落盘前完成）。
  * @param sqlite 已打开的库句柄
  * @param file 库文件路径（":memory:" 跳过备份——测试内存库无文件）
  * @param applyDdl 幂等建表 + 存量迁移的回调（本库自己的 ensureSchema 主体）
  */
 export function runSchemaGate(sqlite: Database.Database, file: string, applyDdl: () => void): void {
   const current = readSchemaVersion(sqlite);
-  const isFile = file !== ":memory:";
   const needsMigrate = current < SCHEMA_VERSION;
-  // 全新库（version 0 且无任何表）= 首次建库，无数据可备——不备份；只有「已有内容的老库」才在迁移前备份。
-  const isLegacyWithData = needsMigrate && (current > 0 || hasAnyTable(sqlite));
+  // 全新库（version 0 且无任何表）= 首次建库，无数据可备——备份只在「已有内容的老库」上做。
+  const needsBackup = needsMigrate && file !== ":memory:" && (current > 0 || hasAnyTable(sqlite));
 
   // 降级运行（旧二进制开新库，docs/11 回滚流程会遇到）：按设计自愈不迁，但红线「不许静默」——留痕。
   if (current > SCHEMA_VERSION) {
@@ -52,10 +82,8 @@ export function runSchemaGate(sqlite: Database.Database, file: string, applyDdl:
     );
   }
 
-  if (isLegacyWithData && isFile) {
-    // 迁移前自动备份（仅在真要迁移时——正常启动零开销）。备份失败**中止迁移**（不回滚地改表更危险）。
-    backupBeforeMigrate(sqlite, file, current);
-  }
+  // 迁移前自动备份（仅在真要迁移时——正常启动零开销）。备份失败**中止迁移**（不回滚地改表更危险）。
+  if (needsBackup) backupBeforeMigrate(sqlite, file, current);
   if (needsMigrate) {
     // 迁移与版本写入同一事务：崩溃窗口不再产生「表已改、版本仍旧」的半迁移态——
     // 要么全落盘，要么全回滚（下次启动按旧版本重放幂等 DDL）。
@@ -82,19 +110,28 @@ function hasAnyTable(sqlite: Database.Database): boolean {
 /** 迁移前备份：`<dir>/backup/<名>-v<旧版本>-<北京时间戳>.db`。**同步**（不把 makeDb 变 async）：
  *  先 WAL checkpoint(TRUNCATE) 把已提交内容落主库文件——checkpoint 真正完成才是一致快照
  *  （busy 即中止：宁可迁移不跑，也不产出假备份），再拷主库文件。保留最近 BACKUP_KEEP 份。
- *  备份失败抛错 → 中止迁移（不带着未备份的库改表）。 */
+ *  备份失败抛错 → 中止迁移（不带着未备份的库改表）。
+ *  幂等：同 (库,旧版本) 已有备份即跳过——迁移失败会在装配重试路径上被反复触发，迁移是回滚事务、
+ *  库内容不变，不必每请求重做一次全库拷。 */
 function backupBeforeMigrate(sqlite: Database.Database, file: string, fromVersion: number): void {
+  const dir = path.join(path.dirname(file), "backup");
+  const base = path.basename(file, path.extname(file));
+  // 已有同版本备份（上次迁移失败/回滚留下的忠实快照）→ 不重做（目录不存在 = 无备份，直接往下走）
+  if (
+    existsSync(dir) &&
+    readdirSync(dir).some((f) => f.startsWith(`${base}-v${fromVersion}-`) && f.endsWith(".db"))
+  ) {
+    return;
+  }
   // busy=1 = 有并发读者/写者令 TRUNCATE 未完成：主库文件尚缺已提交事务，此时拷出的「备份」会被
   // 当成回滚安全网——比没有备份更危险。直接抛错（与「备份失败中止迁移」同一底线：宁停不改）。
   const busy = sqlite.pragma("wal_checkpoint(TRUNCATE)", { simple: true });
   if (busy !== 0) {
     throw new Error(`迁移前备份失败：WAL checkpoint 未完成（busy）——中止迁移：${file}`);
   }
-  const dir = path.join(path.dirname(file), "backup");
   mkdirSync(dir, { recursive: true });
-  const base = path.basename(file, path.extname(file));
-  // 北京时间戳（D-97 单出处 wallClockFromDate）；':' 在 Windows 文件名非法 → 换 '-'，与全库墙钟同形状可比
-  const stamp = wallClockFromDate(new Date()).replace(/[:.]/g, "-"); // 2026-10-12T09-14-41
+  // 北京时间戳（D-97 单出处 nowWallClock）；':' 在 Windows 文件名非法 → 换 '-'，与全库墙钟同形状可比
+  const stamp = nowWallClock().replace(/[:.]/g, "-"); // 2026-10-12T09-14-41
   const target = path.join(dir, `${base}-v${fromVersion}-${stamp}.db`);
   copyFileSync(file, target); // checkpoint 已完成：主库文件即完整一致快照
   pruneBackups(dir, base);

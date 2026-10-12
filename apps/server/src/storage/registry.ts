@@ -1,12 +1,10 @@
-import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import path from "node:path";
+import type Database from "better-sqlite3";
 import { randomBytes } from "node:crypto";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { nowWallClock, wallClockFromDate } from "../shared/time";
-import { runSchemaGate } from "./migrate";
+import { openGatedDb } from "./migrate";
 
 // 系统库（data/system.db，D-96 / 00 契约 §十二）：账户登记——账户/邀请码/键值。
 // 独立于用户库（data/users/<uid>.db）：服务器每请求读它做鉴权（CLI 也直接开它，WAL 跨进程安全）。
@@ -47,28 +45,15 @@ const meta = sqliteTable("meta", {
 export type AccountRow = typeof accounts.$inferSelect;
 
 /** 打开系统库：幂等建表 + session_secret 缺失即生成（重启后会话不失效）；文件库开 WAL。
- *  批次 2：开库先过 schema 版本门控（落后 → 迁移前自动备份 → 迁移，同用户库；见 migrate.ts）。 */
-export function makeRegistryDb(file: string) {
-  if (file !== ":memory:") {
-    mkdirSync(path.dirname(file), { recursive: true });
-  }
-  const sqlite = new Database(file);
-  if (file !== ":memory:") {
-    sqlite.pragma("journal_mode = WAL");
-  }
-  // 版本门控：落后先备份后迁移；持平/领先跑幂等 DDL 自愈（migrate.ts 单出处，同用户库）。
-  // 门控失败关句柄再抛——启动失败与按请求重试都不会泄漏连接。
-  try {
-    runSchemaGate(sqlite, file, () => ensureRegistrySchema(sqlite));
-  } catch (err) {
-    try {
-      sqlite.close(); // 半开不留句柄
-    } catch {
-      // 已关/未开——忽略，别盖住原始错误
-    }
-    throw err;
-  }
-  return drizzle(sqlite, { schema: { accounts, invites, meta } });
+ *  批次 2：开库先过 schema 版本门控（落后 → 迁移前自动备份 → 迁移，同用户库；见 migrate.ts）。 */ export function makeRegistryDb(
+  file: string,
+) {
+  return drizzle(
+    openGatedDb(file, (sqlite) => ensureRegistrySchema(sqlite)),
+    {
+      schema: { accounts, invites, meta },
+    },
+  );
 }
 
 export type RegistryDb = ReturnType<typeof makeRegistryDb>;
