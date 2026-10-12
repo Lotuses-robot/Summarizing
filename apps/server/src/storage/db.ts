@@ -4,9 +4,11 @@ import path from "node:path";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { z } from "zod";
 import * as schema from "./schema";
+import { runSchemaGate } from "./migrate";
 
 // 单文件库 = 拷贝即备份（01§8.4）。data/ 已 gitignore。
 // 建表走幂等 DDL（IF NOT EXISTS），文件库与测试内存库同源初始化。
+// 批次 2：开库先过 schema 版本门控（落后 → 迁移前自动备份 → 迁移 → 写版本；见 migrate.ts）。
 
 /** 打开并幂等建表一个 SQLite 库：":memory:" 供测试，文件库开 WAL；文件库=拷贝即备份（01§8.4）。 */
 export function makeDb(file: string) {
@@ -17,7 +19,8 @@ export function makeDb(file: string) {
   if (file !== ":memory:") {
     sqlite.pragma("journal_mode = WAL");
   }
-  ensureSchema(sqlite);
+  // 版本门控：落后先在备份后迁移；持平/领先直接跑幂等 DDL 自愈（migrate.ts 单出处）
+  runSchemaGate(sqlite, file, () => ensureSchema(sqlite));
   return drizzle(sqlite, { schema });
 }
 

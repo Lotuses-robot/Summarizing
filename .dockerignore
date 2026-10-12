@@ -1,0 +1,22 @@
+# 构建上下文瘦身：容器里会重新 npm ci + 构建——这些都不该进上下文
+node_modules
+**/node_modules
+dist
+**/dist
+release
+data
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.codegraph
+.serena
+.specify
+.claude
+.vitest
+docs
+specs
+archive
+*.log
+summarizing-portable-*.zip

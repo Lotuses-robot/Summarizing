@@ -1,0 +1,38 @@
+# 生产部署（单实例多账户，上云形态 A：阿里云轻量 2C2G + Caddy/TLS）。
+# 数据 bind mount 到宿主机固定路径（备份/迁移/查看全在宿主机做，人不进容器——docs/11 阶段 2）。
+# 用法：docker compose up -d --build（或 CI 构建镜像后 pull/up）
+services:
+  app:
+    build: .
+    # 生产用 CI 推的镜像（如阿里云 ACR）；本地开发用 build: .
+    # image: registry.cn-shenzhen.aliyuncs.com/<ns>/summarizing:v0.x.y
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=3001
+      # 反代（Caddy）后取真实来源 IP 供限速用；前提：本端口不直暴公网（见下 ports）
+      - TRUST_PROXY=1
+    volumes:
+      # 唯一有状态的东西：整目录 bind mount（system.db + users/<uid>.db）——宿主机可直接备份
+      - ./data:/app/data
+    # 只暴露给 Caddy（compose 网络内），不映射到宿主机 —— 防直连绕过 TLS
+    expose:
+      - "3001"
+    # ⚠️ 刻意不写 ports：应用端口绝不可直暴公网（docs/11 部署注意 R12-1）
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # 证书与 ACME 状态（持久化，别丢）
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
