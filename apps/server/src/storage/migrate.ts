@@ -112,7 +112,13 @@ function hasAnyTable(sqlite: Database.Database): boolean {
  *  （busy 即中止：宁可迁移不跑，也不产出假备份），再拷主库文件。保留最近 BACKUP_KEEP 份。
  *  备份失败抛错 → 中止迁移（不带着未备份的库改表）。
  *  幂等：同 (库,旧版本) 已有备份即跳过——迁移失败会在装配重试路径上被反复触发，迁移是回滚事务、
- *  库内容不变，不必每请求重做一次全库拷。 */
+ *  库内容不变，不必每请求重做一次全库拷。
+ *
+ *  ⚠️ 为何这里用同步 checkpoint+拷贝、而不用 SQLite `.backup` API（R12「非裸拷」的解读）：
+ *  本函数跑在**启动早期、进程刚开库、服务尚未 listen**——此刻本进程是该库**唯一连接、无并发写者**，
+ *  checkpoint 后拷到的即一致快照；`.backup` API 是为「运行中并发读写」发明的，此处用不上，且它是 async
+ *  （会把整个 makeDb 链变 async、波及 40+ 调用点）。**运行中/在线备份走 `.backup` API**——见 backup.ts。
+ *  两者分工：迁移前=同步快照（适配启动期），在线备份=异步 `.backup`（适配运行期）。 */
 function backupBeforeMigrate(sqlite: Database.Database, file: string, fromVersion: number): void {
   const dir = path.join(path.dirname(file), "backup");
   const base = path.basename(file, path.extname(file));

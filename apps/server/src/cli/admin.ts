@@ -12,6 +12,8 @@ import {
   setPasswordHashAndBumpTokenVersion,
   type RegistryDb,
 } from "../storage/registry";
+import { backupAll, restoreAll } from "../storage/backup";
+import { nowWallClock } from "../shared/time";
 import { hashPassword } from "../auth/password";
 
 // 运维命令**内核**（006 / contracts/cli.md）：建号 / 发码 / 列表 / 停用启用 / 重置密码——
@@ -42,7 +44,9 @@ const ADMIN_USAGE = `用法（运维命令）：
   user:enable <username>     启用
   passwd:reset <username>    重置密码（全端下线；交互输入新密码）
   invite:new [--days N]      生成一次性邀请码（默认 7 天；设 BASE_URL 时附完整注册链接）
-  invite:revoke <code>       作废未使用的邀请码`;
+  invite:revoke <code>       作废未使用的邀请码
+  backup [--out DIR]         在线备份全部库（system.db + users/*.db → DIR，默认 ./backups/<时间戳>）
+  restore <DIR>              从备份目录还原全部库（**须先停服**）`;
 
 /** 按用户名取账户；不存在/格式坏抛人话错误。 */
 function mustFind(db: RegistryDb, usernameRaw: string) {
@@ -74,14 +78,61 @@ async function askPasswordTwice(io: AdminIo): Promise<string> {
   throw new Error("密码输入连续 3 次失败，已取消");
 }
 
+/** 备份/恢复子命令（不走 registry 开库——见 runAdmin 提前分支）。 */
+async function runBackupCommand(
+  cmd: "backup" | "restore",
+  arg: string | undefined,
+  rest: string[],
+  deps: AdminDeps,
+): Promise<void> {
+  const { io } = deps;
+  const layout = { dataRoot: deps.dataRoot };
+  if (cmd === "backup") {
+    let out: string | undefined;
+    if (arg === "--out") {
+      out = rest[0];
+      if (out === undefined || out === "") throw new Error("用法：backup [--out DIR]");
+    } else if (arg !== undefined) {
+      throw new Error("用法：backup [--out DIR]");
+    }
+    // 默认落 dataRoot 同级的 backups/<北京时间戳>/（相对 dataRoot，容器里 dataRoot=/app/data）
+    const dir =
+      out ?? path.join(deps.dataRoot, "..", "backups", nowWallClock().replace(/[:.]/g, "-"));
+    const written = await backupAll(layout, dir);
+    if (written.length === 0) {
+      io.log("没有可备份的库（dataRoot 下无 system.db / users/*.db）");
+      return;
+    }
+    io.log(`已备份 ${written.length} 个库 → ${dir}`);
+    for (const r of written) io.log(`  ${r}`);
+    return;
+  }
+  // restore
+  if (arg === undefined || arg === "") throw new Error("用法：restore <DIR>");
+  const replaced = restoreAll(layout, arg);
+  if (replaced.length === 0) {
+    io.log(`备份目录里没有可还原的库：${arg}`);
+    return;
+  }
+  io.log(`已还原 ${replaced.length} 个库（源 ${arg}）——请重启服务`);
+  for (const r of replaced) io.log(`  ${r}`);
+}
+
 /** 执行一条运维命令；失败抛人话错误（入口壳负责打印与退出码）。 */
 export async function runAdmin(argv: string[], deps: AdminDeps): Promise<void> {
   mkdirSync(deps.dataRoot, { recursive: true });
-  const db = makeRegistryDb(path.join(deps.dataRoot, "system.db"));
   const { io } = deps;
   const cmd = argv[0] ?? "";
   const arg = argv[1];
   const rest = argv.slice(2);
+
+  // 备份/恢复**先于**开 registry 处理：恢复要覆盖 system.db，提前开库会锁住文件、破坏还原。
+  if (cmd === "backup" || cmd === "restore") {
+    await runBackupCommand(cmd, arg, rest, deps);
+    return;
+  }
+
+  const db = makeRegistryDb(path.join(deps.dataRoot, "system.db"));
   try {
     switch (cmd) {
       case "user:add": {

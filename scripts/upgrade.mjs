@@ -3,14 +3,12 @@
 // 依赖宿主机的 docker / docker compose 与 curl。回滚是人工决策（见 docs/13 三·5）——本脚本不自动回滚，
 // 只在任一步失败时停下并打印回滚指引，把决定权留给人。
 import { execFileSync } from "node:child_process";
-import { mkdirSync, cpSync, existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, "data");
-const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-const backupDir = path.join(root, "backups", stamp);
 
 /** 跑一条命令（继承 stdio，失败抛错）。 */
 function run(cmd, args, opts = {}) {
@@ -26,31 +24,25 @@ function fail(step, err) {
 }
 
 // ── 1. 备份（升级前，最重要）──
-// 直接拷 data/ 下的 .db（应用未在写时点做；生产更稳是用 SQLite .backup API——docs/11 阶段 1）。
-// 本脚本采用「停服后再拷」以保证一致性：先 down（数据落盘、WAL 随连接关闭 checkpoint）再拷。
+// 用容器内的 admin backup 命令走 SQLite .backup API（在线热备、WAL 安全、不停服）——R12-6。
+// 备份落在宿主机 backups/<戳>/（compose 把 ./data 挂进容器，backups 落在仓库根同级，见 admin 命令默认路径）。
 try {
   if (!existsSync(dataDir)) throw new Error(`找不到数据目录：${dataDir}`);
-  console.log("[1/4] 备份 data/…");
-  // 停服，确保数据文件一致（WAL 在连接关闭时 checkpoint 回主库）
-  run("docker", ["compose", "down"]);
-  mkdirSync(backupDir, { recursive: true });
-  for (const f of readdirSync(dataDir)) {
-    if (f.endsWith(".db") || f.endsWith(".db-wal") || f.endsWith(".db-shm")) {
-      cpSync(path.join(dataDir, f), path.join(backupDir, f));
-    }
-  }
-  // 用户库目录（data/users/*.db）
-  const usersDir = path.join(dataDir, "users");
-  if (existsSync(usersDir)) {
-    const usersBackup = path.join(backupDir, "users");
-    mkdirSync(usersBackup, { recursive: true });
-    for (const f of readdirSync(usersDir)) {
-      if (f.endsWith(".db") || f.endsWith(".db-wal") || f.endsWith(".db-shm")) {
-        cpSync(path.join(usersDir, f), path.join(usersBackup, f));
-      }
-    }
-  }
-  console.log(`  备份完成：${backupDir}`);
+  console.log("[1/4] 在线备份 data/…（SQLite .backup API）");
+  // admin 命令在容器内跑；--out 指到容器内可见的路径（compose 只挂了 ./data，故备份先落 data 同级需另挂——
+  // 这里直接备到 /app/data/backups/，宿主对应 ./data/backups/，属主与 data 同）
+  run("docker", [
+    "compose",
+    "exec",
+    "-T",
+    "app",
+    "node",
+    "apps/server/dist/admin.mjs",
+    "backup",
+    "--out",
+    "/app/data/backups",
+  ]);
+  console.log("  备份完成：<repo>/data/backups/");
 } catch (err) {
   fail("备份", err);
 }
