@@ -8,8 +8,10 @@ COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
-# 全量安装（含 devDeps：构建要 vite/esbuild/typescript）——npm ci 按 lockfile 精确复现
-RUN npm ci
+# 全量安装（含 devDeps：构建要 vite/esbuild/typescript）——npm ci 按 lockfile 精确复现。
+# --ignore-scripts 必需：否则 better-sqlite3 触发 node-gyp 源码编译（slim 镜像无 python/make/g++ → 构建失败）。
+# 依赖均自带预编译二进制（better-sqlite3 prebuilds、esbuild 平台包），禁脚本不影响可用性（容器内实测通过）。
+RUN npm ci --ignore-scripts
 
 # 拷源码后构建：前端 vite + 服务端 esbuild 单文件（打包配方复用 scripts/build-server.mjs，与便携包同一出处）
 COPY . .

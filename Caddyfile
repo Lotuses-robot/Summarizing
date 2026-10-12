@@ -4,7 +4,7 @@
 # 部署前确认：
 #   - 域名已解析到本机公网 IP；80/443 已开（ACME 需 80 或 443 可达）
 #   - app 容器只在 compose 网络内（compose 未给 app 映射端口）——TLS 对外唯一入口是 Caddy
-#   - 起容器后看一眼 Caddy 日志无 adapt 报错（本配置未在本机 docker 预验——首次部署时验证）
+#   - 起容器后看一眼 Caddy 日志无 adapt 报错（本配置已用 caddy validate 验过语法）
 sum.lotuses.cn {
 	encode zstd gzip
 
@@ -29,9 +29,8 @@ sum.lotuses.cn {
 	}
 
 	# 反代到 app 容器（compose 服务名即主机名）。
-	# XFF 覆写为直连客户端 IP：应用 trustProxy=true 信任全部跳数、取 XFF 最左值——保留客户端自带
-	# 的 XFF 等于拿伪造头当真实 IP（登录/注册限速桶可被绕过）。Caddy 是唯一入口，直连 IP 即真实 IP。
-	reverse_proxy app:3001 {
-		header_up X-Forwarded-For {remote_host}
-	}
+	# XFF：**不需要**显式 header_up——Caddy 默认即丢弃客户端自带的 X-Forwarded-For、只写直连客户端 IP
+	# （实测验证：客户端伪造 1.2.3.4 → 上游收到真实来源 IP）。应用 trustProxy=true 信任全部跳数取最左值，
+	# 故 Caddy 这一默认行为正是限速桶需要的真实 IP；Caddy 是唯一入口，无需保留任何上游可信链。
+	reverse_proxy app:3001
 }
