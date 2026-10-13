@@ -39,18 +39,17 @@ services:
     depends_on:
       - app
 
-  # 状态监控 + 告警（Uptime Kuma，最轻的网页面板）——**可选**（compose profile `monitor`，默认不起）：
-  #   docker compose --profile monitor up -d   （服务器装了 Tailscale 后启用；见 docs/13 五）
-  # **只走 Tailscale，绝不暴公网**：ports 绑 TAILSCALE_IP（服务器 tailnet 地址 100.x.y.z）而非 0.0.0.0。
-  # 首次访问 http://<服务器 tailnet IP>:3002 建管理员账号，再配监测项与告警（docs/13 五）。
+  # 状态监控 + 告警（Uptime Kuma）——**可选**（compose profile `monitor`，默认不起）：
+  #   docker compose --profile monitor up -d   （见 docs/13 五）
+  # **只绑 127.0.0.1，绝不暴公网**——访问走 SSH 隧道：本地 `ssh -L 3002:localhost:3002 <服务器>`，
+  # 浏览器开 http://localhost:3002（详见 docs/13 五）。首次访问建管理员账号，再配监测项与告警。
   uptime-kuma:
-    image: louislam/uptime-kuma:1
+    # v2（官方推荐 tag；生产宜钉具体版本如 2.x.x-slim——届时改此处）
+    image: louislam/uptime-kuma:2
     profiles: ["monitor"]
     restart: unless-stopped
     ports:
-      # 绑 TAILSCALE_IP（服务器 tailnet 地址）；缺省 127.0.0.1 = 仅本机可及（也绝不暴公网）。
-      # 启用时在 .env 设 TAILSCALE_IP=<tailscale ip -4> 方能从 tailnet 内其它设备访问。
-      - "${TAILSCALE_IP:-127.0.0.1}:3002:3001"
+      - "127.0.0.1:3002:3001" # 仅宿主回环；公网/home内其它设备都够不到
     volumes:
       - uptime_kuma_data:/app/data # 监测项/账号/告警配置（持久化，别丢）
     depends_on:
