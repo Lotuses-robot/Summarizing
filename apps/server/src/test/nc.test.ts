@@ -365,8 +365,9 @@ describe("nc 适配器：webhook 快收", () => {
     expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
   });
 
-  it("私聊与非消息事件 → 204 丢", async () => {
+  it("未在白名单的私聊与非消息事件 → 204 丢", async () => {
     const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
+    // 私聊：2026-10-13 起因白名单制而可收——本用例的发送者（10001）不在 privates 白名单 → 仍丢
     const priv = await emit(
       t,
       groupEvent({ groupId: "g1", messageId: "m1", text: "私聊", time: 1, messageType: "private" }),
@@ -376,6 +377,28 @@ describe("nc 适配器：webhook 快收", () => {
     expect(notice.statusCode).toBe(204);
     sweepNow();
     expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
+  });
+
+  it("白名单外私聊 → 留痕一次（含 private: 会话键，A14 同款）", async () => {
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      await emit(
+        t,
+        groupEvent({
+          groupId: "g1",
+          messageId: "pm1",
+          text: "陌生私聊",
+          time: 1,
+          messageType: "private",
+        }),
+      );
+      const logs = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(logs).toContain("私聊"); // 文案标明"私聊"（群/私聊分流）
+      expect(logs).toContain("private:10001"); // 会话键可见——供用户对照修正私聊白名单
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   it("形状不符的请求体 → 204 静默丢（快收语义，不落档）", async () => {
@@ -423,6 +446,28 @@ describe("nc 适配器：去抖封批全链路", () => {
     const raw = await sealAndWaitDigested(t.db);
     expect(raw.sourceType).toBe("nc");
     expect(raw.content).toBe(`[${HM}] 小明: 通知：作业\n[${HM}] 小明: 截止10月8日`); // 组内合并（行协议逐行署名，specs/003）
+  });
+
+  it("私聊白名单内 → 封批落库：身份以 peer（对方 QQ）标识、sourceLabel = 备注名（2026-10-13 私聊支持）", async () => {
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
+    repo.setSourceSetting(t.db, "nc", "privates", JSON.stringify({ "10001": "室友小王" }));
+
+    await emit(
+      t,
+      groupEvent({
+        groupId: "g1",
+        messageId: "pm1",
+        text: "明天带饭卡",
+        time: 1790595828,
+        messageType: "private",
+      }),
+    );
+    const raw = await sealAndWaitDigested(t.db);
+    expect(raw.content).toContain("明天带饭卡");
+    expect(raw.sourceIdentity["sourceLabel"]).toBe("室友小王"); // 私聊备注名
+    expect(raw.sourceIdentity["peer"]).toBe("10001"); // 身份键 = peer（非 groupId）
   });
 
   it("重推同一 message_id → 只投递一次", async () => {

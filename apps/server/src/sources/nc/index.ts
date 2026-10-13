@@ -43,17 +43,31 @@ function textFromSegments(segments: NcSegment[] | undefined, rawMessage: string)
   return parts.length > 0 ? parts.join("") : rawMessage;
 }
 
-/** 群白名单：`Record<群号, 群备注名>`（备注名供 sourceIdentity.name）。
+/** 会话白名单（群 + 私聊统一）：`Record<会话键, 备注名>`（备注名供 sourceLabel）。
+ *  会话键：群 = `群号`；私聊 = `private:<对方QQ>`（2026-10-13 私聊支持）——**两 KV 的键都归一到会话键**。
  *  缺省/空对象/非对象 → null（= 未配置 = 全丢，fail-closed，D-84 Q-F）。 */
 function readWhitelist(ctx: SourceContext): Record<string, string> | null {
-  const v = ctx.getSetting("groups");
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
   const out: Record<string, string> = {};
-  for (const [k, val] of Object.entries(v)) {
-    // 空串备注名不收（会产出 name="" 的身份 → ingest schema 必拒 → 该组永远封不出去）
-    if (typeof val === "string" && val.trim() !== "") out[k] = val;
-  }
+  /** 收一个 KV 到 out（坏形状忽略；空串备注名不收——会产出 name="" 的身份 → ingest schema 必拒）。
+   *  `prefix` 把 kv 键归一到会话键（私聊 `private:`）；空键不前缀。 */
+  const collect = (key: string, prefix: string): void => {
+    const v = ctx.getSetting(key);
+    if (v === null || typeof v !== "object" || Array.isArray(v)) return;
+    for (const [k, val] of Object.entries(v)) {
+      if (k !== "" && typeof val === "string" && val.trim() !== "") out[`${prefix}${k}`] = val;
+    }
+  };
+  collect("groups", ""); // 群白名单：键 = 群号
+  collect("privates", "private:"); // 私聊白名单：键 = 对方 QQ 号 → 归一到 private:<QQ>
   return Object.keys(out).length > 0 ? out : null;
+}
+
+/** 事件 → 会话键：群 = group_id；私聊 = `private:<对方 user_id>`（自己发的不回推，见 NapCat 行为）。
+ *  取不到键（私聊却无发信人 id）→ null（无法定位会话，丢弃）。 */
+function conversationKey(ev: NcEvent): string | null {
+  if (ev.message_type === "group") return ev.group_id ?? null;
+  const peer = ev.sender?.user_id ?? ev.user_id;
+  return peer !== undefined && peer !== "" ? `private:${peer}` : null;
 }
 
 /** 从事件取发信人显示名（群名片 > 昵称 > user_id）。 */
@@ -109,12 +123,16 @@ export function makeNcAdapter(): SourceAdapter {
       buffers.delete(buf.groupId);
       return;
     }
+    const kind = buf.events[0]?.raw.message_type; // 会话类型取批内首条（同会话键内必一致）
     const result = ctx.ingest({
       content: batch.content,
       sourceType: NC_SOURCE_NAME,
       sourceIdentity: {
         sourceLabel: groupNameOf(buf),
-        groupId: buf.groupId,
+        // 身份键：群 → groupId；私聊 → peer（对方 QQ）——语义诚实（弹性字典自由键，D-84）
+        ...(kind === "private"
+          ? { peer: buf.groupId.replace(/^private:/, "") }
+          : { groupId: buf.groupId }),
         ...(batch.sender === undefined ? {} : { sender: batch.sender }), // 多人批次省略——行协议已逐行署名（specs/003 FR-004）
       },
       eventTime: batch.eventTime,
@@ -151,24 +169,23 @@ export function makeNcAdapter(): SourceAdapter {
       // 卡片文案：动态段名（实测 nc 上报路径形如 /event），实际可达地址由 core 按账户令牌拼
       router.post("/event", async (req, reply) => {
         const parsed = NcEventSchema.safeParse(req.body);
-        if (!parsed.success) return reply.code(204).send(); // 非群消息/形状不符 → 静默丢
+        if (!parsed.success) return reply.code(204).send(); // 非消息/形状不符 → 静默丢
         const ev = parsed.data;
 
+        const key = conversationKey(ev);
+        if (key === null) return reply.code(204).send(); // 定位不了会话（私聊无发信人 id 等）→ 丢
         const whitelist = readWhitelist(ctx);
-        const groupName = whitelist?.[ev.group_id];
-        if (whitelist === null || groupName === undefined) {
+        const label = whitelist?.[key];
+        if (whitelist === null || label === undefined) {
           // A14（2026-10-13）：白名单外静默丢曾是"配置错了（如群号填反）用户无从感知"的黑洞。
-          // 每群留痕一次（warn → [source:nc] 前缀进 stderr/日志）——用户可据此对照修正白名单。
-          // 只去重不置 state=error：转发多群、白名单只收一部分是正常用法，置 error 会误报。
-          if (
-            typeof ev.group_id === "string" &&
-            ev.group_id !== "" &&
-            !warnedDroppedGroups.has(ev.group_id)
-          ) {
-            warnedDroppedGroups.add(ev.group_id);
+          // 每会话留痕一次（warn → [source:nc] 前缀进 stderr/日志）——用户可据此对照修正白名单。
+          // 只去重不置 state=error：转发多会话、白名单只收一部分是正常用法，置 error 会误报。
+          if (!warnedDroppedGroups.has(key)) {
+            warnedDroppedGroups.add(key);
+            const kind = ev.message_type === "group" ? "群" : "私聊";
             ctx.log.warn(
-              `收到群 ${ev.group_id} 的消息，但不在白名单（设置 → 信源 → 群白名单 未收录该群号）——已丢弃。` +
-                (whitelist === null ? "（当前白名单为空 = 全部群都不收）" : ""),
+              `收到${kind} ${key} 的消息，但不在白名单（设置 → 信源 → nc 白名单未收录）——已丢弃。` +
+                (whitelist === null ? "（当前白名单为空 = 全部都不收）" : ""),
             );
           }
           return reply.code(204).send(); // 白名单外丢
@@ -181,19 +198,19 @@ export function makeNcAdapter(): SourceAdapter {
           sender: senderName(ev),
           senderId: ev.sender?.user_id ?? ev.user_id ?? "",
           role: ev.sender?.role,
-          groupName,
+          groupName: label, // 白名单里的备注名（群名 / 私聊对方备注名）——封批直接用作 sourceLabel
           // 机械时刻（去抖/行前缀用）——桥接发 null 时按接收时刻；真伪由 trueTime 区分（01§5.3 禁兜底进 eventTime）
           at: wallClockFromUnix(ev.time ?? Math.floor(Date.now() / 1000)),
           trueTime: typeof ev.time === "number",
           raw: ev,
         };
-        const existing = buffers.get(ev.group_id);
+        const existing = buffers.get(key);
         if (existing) {
           existing.events.push(buffered);
           existing.lastAt = buffered.at;
         } else {
-          buffers.set(ev.group_id, {
-            groupId: ev.group_id,
+          buffers.set(key, {
+            groupId: key, // 会话键（群号 / private:<QQ>）——GroupBuffer 沿用此名
             events: [buffered],
             lastAt: buffered.at,
           });
@@ -213,15 +230,23 @@ export function makeNcAdapter(): SourceAdapter {
       for (const buf of [...buffers.values()]) sealGroup(runtime.ctx, buf);
     },
 
-    /** 声明设置项（纯数据，core 落库 __schema__ 供前端渲染）——白名单 + 打包窗长。 */
+    /** 声明设置项（纯数据，core 落库 __schema__ 供前端渲染）——群/私聊白名单 + 打包窗长。 */
     settings(): SettingField[] {
       return [
         {
           key: "groups",
           type: "record",
           label: "群白名单",
-          description: "只收这些群的消息，格式「群号: 备注名」；未配置 = 全不收（fail-closed）",
+          description: "只收这些群的消息；未配置 = 群消息全不收（fail-closed）",
           keyPlaceholder: "群号（如 940641749）",
+          valuePlaceholder: "备注名（随便填，显示用）",
+        },
+        {
+          key: "privates",
+          type: "record",
+          label: "私聊白名单",
+          description: "只收这些人的私聊消息；未配置 = 私聊全不收",
+          keyPlaceholder: "对方 QQ 号",
           valuePlaceholder: "备注名（随便填，显示用）",
         },
         {
@@ -229,7 +254,7 @@ export function makeNcAdapter(): SourceAdapter {
           type: "number",
           label: "打包窗长（分钟）",
           default: DEFAULT_WINDOW_MINUTES,
-          description: "群内静默这么久就把这段时间的消息合并成一个批次",
+          description: "同一会话静默这么久就把这段时间的消息合并成一个批次",
         },
       ];
     },

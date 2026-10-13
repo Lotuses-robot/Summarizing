@@ -27,8 +27,11 @@ const IdLikeSchema = z
 
 export const NcEventSchema = z.object({
   post_type: z.literal("message"),
-  message_type: z.literal("group"), // 私聊不收（D-84 Q-F）
-  group_id: z.union([z.string(), z.number()]).transform(String),
+  message_type: z.enum(["group", "private"]), // 群 + 私聊（2026-10-13 放开——私聊白名单制，见 index.ts）
+  group_id: z
+    .union([z.string(), z.number()])
+    .nullish()
+    .transform((v) => (v === null || v === undefined ? undefined : String(v))), // 私聊事件无群号
   message_id: z.union([z.string(), z.number()]).transform(String),
   user_id: IdLikeSchema,
   raw_message: z
