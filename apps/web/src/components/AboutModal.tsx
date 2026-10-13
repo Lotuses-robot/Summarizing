@@ -80,22 +80,24 @@ export function AboutModal({ open, onClose }: { open: boolean; onClose: () => vo
         className="flex max-h-[80vh] w-[min(540px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 产品牌区：主题色渐变头 + 圆角 logo——展示型弹层的"好看"预算都花在这 */}
-        <header className="relative flex flex-col items-center gap-2 overflow-hidden px-6 pb-5 pt-7 text-center">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-accent-soft to-transparent opacity-70"
-          />
-          <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-surface shadow-md">
-            <BookMarked size={26} />
+        {/* 头部（大仓库 README 风，用户 2026-10-13 定）：超大居中图标 + 超大居中标题 + 信息基座。
+            无头图、无渐变——靠字号节奏立骨架：图标 → 标题 → 一句话 → 元信息 chips。 */}
+        <header className="flex flex-col items-center px-6 pb-6 pt-9 text-center">
+          <BookMarked size={56} className="text-accent" strokeWidth={1.25} />
+          <h2 className="mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
+          <p className="mt-2 text-sm text-ink-muted">个人信息中枢 · 把碎片拼成完整的事项</p>
+          {/* 信息基座：一行元信息 chips（版本 / 许可 / 开源） */}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-xs">
+            <span className="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-ink-muted">
+              {currentVersion() ?? "—"}
+            </span>
+            <span className="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-ink-muted">
+              AGPL-3.0
+            </span>
+            <span className="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-ink-muted">
+              开源
+            </span>
           </div>
-          <div className="relative">
-            <h2 className="text-lg font-semibold">Summarizing</h2>
-            <p className="mt-0.5 text-xs text-ink-muted">个人信息中枢 · 把碎片拼成完整的事项</p>
-          </div>
-          <span className="relative rounded-full border border-line bg-canvas px-2.5 py-0.5 text-xs text-ink-muted">
-            {currentVersion() ?? "—"}
-          </span>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-line px-6 py-4">
