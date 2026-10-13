@@ -17,7 +17,12 @@ import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { UserModal } from "./components/UserModal";
-import { AboutModal, markChangelogSeen, shouldShowChangelog } from "./components/AboutModal";
+import {
+  AboutModal,
+  lastSeenVersion,
+  markChangelogSeen,
+  shouldShowChangelog,
+} from "./components/AboutModal";
 import { cn } from "./lib/cn";
 import { handleEsc, pushEscLayer } from "./lib/escLayer";
 import { loadChatOpen, saveChatOpen } from "./lib/appearance";
@@ -50,10 +55,15 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  // 关于弹层（2026-10-13）：活动栏 ⓘ 手动打开；发版后登录也自动弹一次「这版更新了什么」
+  // 关于弹层（2026-10-13）：活动栏 ⓘ 手动打开；发版后登录也自动弹一次「这版更新了什么」。
+  // upgradeFrom：自动弹时记下"上次看过的版本"（头部渲染「旧 → 新」）；手动打开为 null。
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [aboutUpgradeFrom, setAboutUpgradeFrom] = useState<string | null>(null);
   useEffect(() => {
-    if (me !== null && shouldShowChangelog()) setAboutOpen(true);
+    if (me !== null && shouldShowChangelog()) {
+      setAboutUpgradeFrom(lastSeenVersion());
+      setAboutOpen(true);
+    }
   }, [me]);
   const [tagsOpen, setTagsOpen] = useState(false); // 标签栏默认折叠（用户 2026-09-27 定）
   const [filter, setFilter] = useState<BoardFilter>({ query: "", tags: [] });
@@ -252,7 +262,10 @@ export default function App() {
         onShowPipeline={() => setView("pipeline")}
         onOpenAccount={() => setAccountOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
-        onOpenAbout={() => setAboutOpen(true)}
+        onOpenAbout={() => {
+          setAboutUpgradeFrom(null); // 手动打开不是"升级场景"——不显示旧→新
+          setAboutOpen(true);
+        }}
       />
 
       <div ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
@@ -378,6 +391,7 @@ export default function App() {
       />
       <AboutModal
         open={aboutOpen}
+        showUpgradeFrom={aboutUpgradeFrom}
         onClose={() => {
           markChangelogSeen(); // 关掉即记本设备已读——自动弹以后不再弹
           setAboutOpen(false);

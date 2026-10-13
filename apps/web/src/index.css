@@ -143,6 +143,28 @@
   .pop-in {
     animation: pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
   }
+  /* 关于弹层头部（2026-10-13）：主题色径向光晕 + 极淡点阵纹理——无头图排版靠底纹立层次。
+     色用 color-mix 现算（换色板/暗色自动跟随，与 accent-soft 同配方手法）。 */
+  .about-hero {
+    background: radial-gradient(
+      120% 90% at 50% -10%,
+      color-mix(in oklab, var(--accent) 16%, transparent) 0%,
+      transparent 62%
+    );
+  }
+  .about-hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(
+      color-mix(in oklab, var(--ink) 9%, transparent) 1px,
+      transparent 1.2px
+    );
+    background-size: 14px 14px;
+    -webkit-mask-image: radial-gradient(75% 65% at 50% 24%, black 0%, transparent 100%);
+    mask-image: radial-gradient(75% 65% at 50% 24%, black 0%, transparent 100%);
+    pointer-events: none;
+  }
 }
 
 @keyframes row-flash {

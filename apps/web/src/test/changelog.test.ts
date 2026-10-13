@@ -78,4 +78,12 @@ describe("shouldShowChangelog 弹窗判断（localStorage 已读记忆）", () =
     window.localStorage.setItem("summarizing.seenVersion", "v0.0.1-远古");
     expect(shouldShowChangelog()).toBe(true);
   });
+
+  it("lastSeenVersion 给「旧 → 新」chip 提供旧版本号（未记过 → null）", async () => {
+    reset();
+    const { lastSeenVersion } = await import("../components/AboutModal");
+    expect(lastSeenVersion()).toBeNull(); // 未记过
+    window.localStorage.setItem("summarizing.seenVersion", "v0.2.0");
+    expect(lastSeenVersion()).toBe("v0.2.0"); // 更新场景渲染「v0.2.0 → 当前版」
+  });
 });

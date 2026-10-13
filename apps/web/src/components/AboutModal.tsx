@@ -18,11 +18,16 @@ function currentVersion(): string | null {
   return parseChangelog(changelogRaw)[0]?.version ?? null;
 }
 
+/** 本设备上次看过的版本（自动弹窗据此渲染「旧 → 新」）；从未记过 → null。 */
+export function lastSeenVersion(): string | null {
+  return localStorage.getItem(SEEN_KEY);
+}
+
 /** 本设备是否该弹"更新了什么"——有新版（且非首次安装）才弹。 */
 export function shouldShowChangelog(): boolean {
   const latest = currentVersion();
   if (latest === null) return false;
-  const seen = localStorage.getItem(SEEN_KEY);
+  const seen = lastSeenVersion();
   // 首次安装（从未记过）：不弹（用户刚来，没有"更新"概念）
   if (seen === null) {
     localStorage.setItem(SEEN_KEY, latest); // 记下当前版，避免下次误弹
@@ -57,8 +62,18 @@ function ChangelogList() {
   );
 }
 
-/** 关于弹层：产品牌 + 一句话 + 当前版本 + 更新日志（全部版本，滚动区）。 */
-export function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** 关于弹层：大仓库 README 风头部（超大居中图标/标题/信息基座）+ 更新日志（全部版本，滚动区）。
+ *  `showUpgradeFrom`：本次是"更新后首次打开"→ 版本 chip 显示「旧 → 新」（手动打开不传）。 */
+export function AboutModal({
+  open,
+  onClose,
+  showUpgradeFrom = null,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** 旧版本号（更新弹窗场景）；null = 手动打开，只显当前版。 */
+  showUpgradeFrom?: string | null;
+}) {
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -71,6 +86,7 @@ export function AboutModal({ open, onClose }: { open: boolean; onClose: () => vo
 
   if (!open) return null;
 
+  const version = currentVersion();
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[10vh_1rem_1rem]"
@@ -80,17 +96,28 @@ export function AboutModal({ open, onClose }: { open: boolean; onClose: () => vo
         className="flex max-h-[80vh] w-[min(540px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 头部（大仓库 README 风，用户 2026-10-13 定）：超大居中图标 + 超大居中标题 + 信息基座。
-            无头图、无渐变——靠字号节奏立骨架：图标 → 标题 → 一句话 → 元信息 chips。 */}
-        <header className="flex flex-col items-center px-6 pb-6 pt-9 text-center">
-          <BookMarked size={56} className="text-accent" strokeWidth={1.25} />
-          <h2 className="mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
-          <p className="mt-2 text-sm text-ink-muted">个人信息中枢 · 把碎片拼成完整的事项</p>
-          {/* 信息基座：一行元信息 chips（版本 / 许可 / 开源） */}
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-xs">
-            <span className="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-ink-muted">
-              {currentVersion() ?? "—"}
-            </span>
+        {/* 头部（大仓库 README 风）：点阵底纹+主题光晕 → 超大图标（accent 圆盘）→ 超大标题 → 基座 chips */}
+        <header className="about-hero relative flex flex-col items-center px-6 pb-6 pt-9 text-center">
+          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-soft text-accent shadow-sm ring-1 ring-accent/25">
+            <BookMarked size={34} strokeWidth={1.5} />
+          </div>
+          <h2 className="relative mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
+          <p className="relative mt-2 text-sm text-ink-muted">
+            个人信息中枢 · 把碎片拼成完整的事项
+          </p>
+          {/* 信息基座：更新场景显「旧 → 新」，平时只显当前版；另挂许可/开源 */}
+          <div className="relative mt-4 flex flex-wrap items-center justify-center gap-1.5 text-xs">
+            {showUpgradeFrom !== null && showUpgradeFrom !== version ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/35 bg-accent-soft px-2.5 py-0.5 font-medium text-accent">
+                {showUpgradeFrom}
+                <span aria-hidden>→</span>
+                {version ?? "—"}
+              </span>
+            ) : (
+              <span className="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-ink-muted">
+                {version ?? "—"}
+              </span>
+            )}
             <span className="rounded-full border border-line bg-canvas px-2.5 py-0.5 text-ink-muted">
               AGPL-3.0
             </span>
