@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  BookMarked,
   Bot,
   Check,
   Database,
+  Info,
   Loader2,
   Palette as PaletteIcon,
   Rss,
@@ -11,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { AiSettings, AiSettingsView, AiTestResult } from "@summarizing/shared";
+import { ChangelogList, currentVersion } from "../ChangelogModal";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
@@ -108,16 +111,7 @@ export function pickActiveSection(tops: Map<string, number>, atBottom = false): 
  *  交互总则（走查修订③）：**改完即生效**——下拉/色板/开关点一下即存，输入框失焦即存，
  *  卡尾状态行一闪「已保存」；失败常驻红字（不静默）。整页无「保存」按钮。
  *  ⚠️ 关闭前先 blur（评审 H1）：Esc 不产生焦点转移，「失焦即存」必须在卸载前落一次。 */
-export function SettingsModal({
-  open,
-  onClose,
-  onOpenChangelog,
-}: {
-  open: boolean;
-  onClose: () => void;
-  /** 打开更新日志（弹层由 App 统一持有——本组件只发信号）。 */
-  onOpenChangelog?: () => void;
-}) {
+export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearance);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
@@ -316,15 +310,6 @@ export function SettingsModal({
               {s.label}
             </button>
           ))}
-          {onOpenChangelog !== undefined && (
-            <button
-              className="mt-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-ink-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/10"
-              onClick={onOpenChangelog}
-            >
-              <ScrollText size={15} />
-              更新日志
-            </button>
-          )}
           <button className="btn mt-auto" onClick={closeWithFlush}>
             <X size={14} /> 关闭
           </button>
@@ -487,6 +472,34 @@ export function SettingsModal({
             footnote="对话输入始终可用——把信息发给前台即录入。"
           >
             <SourcesSection />
+          </Card>
+
+          {/* 关于（设置内容区最底）：产品名 + 一句话 + 当前版本（版本唯一出处 = CHANGELOG）。 */}
+          <Card icon={Info} title="关于" bare>
+            <div className="rounded-xl border border-line bg-surface px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                  <BookMarked size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Summarizing · 个人信息中枢</p>
+                  <p className="text-xs text-ink-muted">
+                    把散落的信息拼成完整图景，每块都可查回原文。
+                  </p>
+                </div>
+              </div>
+              <p className="mt-3 border-t border-line pt-3 text-xs text-ink-muted">
+                当前版本 <span className="font-medium text-ink">{currentVersion() ?? "—"}</span>
+                <span className="ml-2">· 更新记录见下方</span>
+              </p>
+            </div>
+          </Card>
+
+          {/* 更新日志（关于的正下方）：全部版本内联向下延展——公告都写进 CHANGELOG.md。 */}
+          <Card icon={ScrollText} title="更新日志" bare>
+            <div className="rounded-xl border border-line bg-surface px-5 py-4">
+              <ChangelogList />
+            </div>
           </Card>
         </div>
       </div>

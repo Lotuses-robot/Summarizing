@@ -369,14 +369,7 @@ export default function App() {
         </aside>
       )}
 
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onOpenChangelog={() => {
-          setSettingsOpen(false);
-          setChangelogOpen(true);
-        }}
-      />
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <UserModal
         open={accountOpen}
         onClose={() => setAccountOpen(false)}

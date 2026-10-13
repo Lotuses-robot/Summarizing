@@ -15,13 +15,13 @@ import { pushEscLayer } from "../lib/escLayer";
 const SEEN_KEY = "summarizing.seenVersion";
 
 /** CHANGELOG 里最新（首个）版本号；无版本段（只有 [未发布]）返回 null。 */
-function latestVersion(): string | null {
+export function currentVersion(): string | null {
   return parseChangelog(changelogRaw)[0]?.version ?? null;
 }
 
 /** 本设备是否该弹"更新了什么"——有新版（且非首次安装）才弹。 */
 export function shouldShowChangelog(): boolean {
-  const latest = latestVersion();
+  const latest = currentVersion();
   if (latest === null) return false;
   const seen = localStorage.getItem(SEEN_KEY);
   // 首次安装（从未记过）：不弹（用户刚来，没有"更新"概念）；对话历史等回填即初始体验
@@ -34,11 +34,31 @@ export function shouldShowChangelog(): boolean {
 
 /** 标记当前版本已读（弹窗关闭时调用）。 */
 export function markChangelogSeen(): void {
-  const latest = latestVersion();
+  const latest = currentVersion();
   if (latest !== null) localStorage.setItem(SEEN_KEY, latest);
 }
 
-/** 更新日志弹层：渲染全部版本段（最新在上），每段 Markdown 复用既有渲染器。 */
+/** 全部版本段的内联渲染（设置「更新日志」卡与弹窗共用）——最新在上。 */
+export function ChangelogList() {
+  const versions = parseChangelog(changelogRaw);
+  if (versions.length === 0) {
+    return <p className="text-sm text-ink-muted">（暂无更新记录）</p>;
+  }
+  return (
+    <>
+      {versions.map((v) => (
+        <section key={v.version} className="mb-6 last:mb-0">
+          <h3 className="mb-2 text-sm font-semibold text-accent">{v.version}</h3>
+          <div className="text-sm">
+            <Markdown text={v.body} />
+          </div>
+        </section>
+      ))}
+    </>
+  );
+}
+
+/** 更新日志弹层：发版后自动弹一次「这版更新了什么」；内容同设置里的「更新日志」卡。 */
 export function ChangelogModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -51,8 +71,6 @@ export function ChangelogModal({ open, onClose }: { open: boolean; onClose: () =
   }, [open]);
 
   if (!open) return null;
-
-  const versions = parseChangelog(changelogRaw);
 
   return (
     <div
@@ -68,18 +86,7 @@ export function ChangelogModal({ open, onClose }: { open: boolean; onClose: () =
           <span className="font-semibold">更新日志</span>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {versions.length === 0 ? (
-            <p className="text-sm text-ink-muted">（暂无更新记录）</p>
-          ) : (
-            versions.map((v) => (
-              <section key={v.version} className="mb-6 last:mb-0">
-                <h3 className="mb-2 text-sm font-semibold text-accent">{v.version}</h3>
-                <div className="text-sm">
-                  <Markdown text={v.body} />
-                </div>
-              </section>
-            ))
-          )}
+          <ChangelogList />
         </div>
         <footer className="flex justify-end border-t border-line px-5 py-3">
           <button className="btn" onClick={onClose}>
