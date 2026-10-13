@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 import { parseChangelog } from "../lib/changelog";
-// CHANGELOG 解析（更新日志弹窗的数据源）：版本段切分 + [未发布] 跳过 + 边界形态。
+// CHANGELOG 解析（更新日志弹窗的数据源）：版本段切分 + [未发布]/非版本标题跳过 + 边界形态。
 
 describe("parseChangelog", () => {
   it("按 ## 标题切版本段；[未发布] 跳过；最新在前", () => {
@@ -33,6 +33,27 @@ describe("parseChangelog", () => {
     expect(versions[1]?.body).toContain("正文2");
   });
 
+  it("rc/预发布后缀不截断（`[v0.2.0-rc.1]` 是完整版本号）", () => {
+    const md = ["## [v0.2.0-rc.1]", "候选正文"].join("\n");
+    const versions = parseChangelog(md);
+    expect(versions.map((v) => v.version)).toEqual(["v0.2.0-rc.1"]);
+    expect(versions[0]?.body).toContain("候选正文");
+  });
+
+  it("方括号后跟文字（无破折号）也认（`[v0.3.0] 补丁说明`）", () => {
+    const md = ["## [v0.3.0] 补丁说明", "正文"].join("\n");
+    const versions = parseChangelog(md);
+    expect(versions.map((v) => v.version)).toEqual(["v0.3.0"]);
+    expect(versions[0]?.body).toContain("正文");
+  });
+
+  it("非版本二级标题（附录/关于）不产出版本段", () => {
+    const md = ["## [v0.3.0]", "正文", "", "## 附录", "附文"].join("\n");
+    const versions = parseChangelog(md);
+    expect(versions.map((v) => v.version)).toEqual(["v0.3.0"]);
+    expect(versions[0]?.body).not.toContain("附文"); // 附录不进上一段
+  });
+
   it("### 三级标题不算版本段（并入上一段正文）", () => {
     const md = ["## [v0.3.0]", "### 子标题", "正文"].join("\n");
     const versions = parseChangelog(md);
@@ -44,12 +65,14 @@ describe("parseChangelog", () => {
     expect(parseChangelog("# 更新日志\n\n## [未发布]\n\n草稿")).toEqual([]);
   });
 
-  it("真 CHANGELOG.md（?raw 导入）能解析出至少一个版本（守集成）", async () => {
+  it("真 CHANGELOG.md（?raw 导入）能解析出至少一个版本，且不全同名（守集成）", async () => {
     const raw = (await import("../../../../CHANGELOG.md?raw")).default;
     const versions = parseChangelog(raw);
     expect(versions.length).toBeGreaterThan(0);
-    // 版本号以 v 开头（真实版本，非未发布）
     expect(versions[0]?.version.startsWith("v")).toBe(true);
+    // 无截断/重名（rc 截断事故的守门：版本号两两不同）
+    const names = versions.map((v) => v.version);
+    expect(new Set(names).size).toBe(names.length);
   });
 });
 
@@ -58,11 +81,12 @@ describe("shouldShowChangelog 弹窗判断（localStorage 已读记忆）", () =
   /** 清空本机已读记忆（用例隔离）。 */
   const reset = () => window.localStorage.clear();
 
-  it("首次安装（无记录）→ 不弹，并记下当前版", async () => {
+  it("从未记过（新设备）→ 弹（首发版 v0.3.0 要能被存量/新装设备看到一次）", async () => {
     reset();
     const { shouldShowChangelog } = await import("../components/AboutModal");
-    expect(shouldShowChangelog()).toBe(false);
-    expect(window.localStorage.getItem("summarizing.seenVersion")).not.toBeNull();
+    expect(shouldShowChangelog()).toBe(true);
+    // 纯判断不写状态——只有 markChangelogSeen 才落记忆
+    expect(window.localStorage.getItem("summarizing.seenVersion")).toBeNull();
   });
 
   it("已读过当前版 → 不弹", async () => {

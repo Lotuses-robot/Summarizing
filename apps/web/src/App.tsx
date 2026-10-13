@@ -81,6 +81,8 @@ export default function App() {
     setUncertain([]);
     setSettingsOpen(false);
     setAccountOpen(false);
+    setAboutOpen(false); // 弹层也要清——否则换账户/重登时残影（评审 2026-10-13）
+    setAboutUpgradeFrom(null);
   }, []);
 
   // 启动探测：me 200 → 主界面；401（未登录的正常首屏路径）→ 认证壳；

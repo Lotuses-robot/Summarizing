@@ -8,10 +8,17 @@ export interface ChangelogVersion {
   body: string; // 该版本标题行之后的正文（Markdown 源，交给既有 Markdown 组件渲染）
 }
 
-/** 版本标题行：`## [v0.3.0] - 2026-10-13` / `## [v0.3.0]`——方括号可省（斜杠前无空格）。 */
-const VERSION_HEADING = /^##\s+\[?([^\]]+?)\]?\s*(?:[-—].*)?$/;
+/** 版本标题行：`## [v0.3.0] - 2026-10-13` / `## [v0.3.0] 补丁说明` / `## v0.3.0`。
+ *  方括号内 = 完整标题（含 rc/beta 后缀，不截断）；无方括号 = 行内首 token。 */
+function parseVersionHeading(line: string): string | null {
+  const bracketed = /^##\s+\[([^\]]+)\]/.exec(line);
+  const raw = bracketed !== null ? bracketed[1] : /^##\s+(\S+)/.exec(line)?.[1];
+  const v = raw?.trim() ?? "";
+  // 只认版本号（本项目 tag 一律 v*）：排除 [未发布] 与普通章节（## 附录 等不产出版本段）
+  return /^v\d/.test(v) ? v : null;
+}
 
-/** 解析整个 CHANGELOG：按出现顺序返回版本段（最新在上，与文件同序）。`[未发布]` 段跳过。 */
+/** 解析整个 CHANGELOG：按出现顺序返回版本段（最新在上，与文件同序）。`[未发布]`/非版本标题跳过。 */
 export function parseChangelog(md: string): ChangelogVersion[] {
   const lines = md.replace(/\r\n?/g, "\n").split("\n");
   const out: ChangelogVersion[] = [];
@@ -21,10 +28,9 @@ export function parseChangelog(md: string): ChangelogVersion[] {
     if (/^##\s/.test(line) && !/^###/.test(line)) {
       if (current !== null)
         out.push({ version: current.version, body: current.bodyLines.join("\n").trim() });
-      const m = VERSION_HEADING.exec(line);
-      const raw = m?.[1]?.trim() ?? "";
-      // 「未发布」及空标题不算版本段（但继续吞行、不产出版本）
-      current = raw === "" || raw === "未发布" ? null : { version: raw, bodyLines: [] };
+      const version = parseVersionHeading(line);
+      // 非版本标题（[未发布]/附录等）→ 关闭当前段、不产出新段
+      current = version === null ? null : { version, bodyLines: [] };
       continue;
     }
     if (current !== null) current.bodyLines.push(line);

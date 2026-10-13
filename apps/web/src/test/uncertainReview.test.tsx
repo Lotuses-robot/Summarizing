@@ -195,11 +195,12 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
     expect(screen.queryByText("0")).not.toBeInTheDocument();
   });
 
-  it("三个入口回调各就各位：看板/审核/设置", () => {
+  it("各入口回调各就各位：看板/审核/设置/关于", () => {
     const onHome = vi.fn();
     const onShowUncertain = vi.fn();
     const onShowPipeline = vi.fn();
     const onOpenSettings = vi.fn();
+    const onOpenAbout = vi.fn();
     render(
       <ActivityBar
         view="board"
@@ -209,7 +210,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowPipeline={onShowPipeline}
         onOpenAccount={() => {}}
         onOpenSettings={onOpenSettings}
-        onOpenAbout={() => {}}
+        onOpenAbout={onOpenAbout}
       />,
     );
     fireEvent.click(screen.getByTitle("回到看板顶部"));
@@ -218,5 +219,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
     expect(onShowUncertain).toHaveBeenCalled();
     fireEvent.click(screen.getByTitle("设置"));
     expect(onOpenSettings).toHaveBeenCalled();
+    fireEvent.click(screen.getByTitle("关于（版本与更新日志）"));
+    expect(onOpenAbout).toHaveBeenCalled();
   });
 });
