@@ -6,6 +6,7 @@ import {
   Loader2,
   Palette as PaletteIcon,
   Rss,
+  ScrollText,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -107,7 +108,16 @@ export function pickActiveSection(tops: Map<string, number>, atBottom = false): 
  *  交互总则（走查修订③）：**改完即生效**——下拉/色板/开关点一下即存，输入框失焦即存，
  *  卡尾状态行一闪「已保存」；失败常驻红字（不静默）。整页无「保存」按钮。
  *  ⚠️ 关闭前先 blur（评审 H1）：Esc 不产生焦点转移，「失焦即存」必须在卸载前落一次。 */
-export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function SettingsModal({
+  open,
+  onClose,
+  onOpenChangelog,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** 打开更新日志（弹层由 App 统一持有——本组件只发信号）。 */
+  onOpenChangelog?: () => void;
+}) {
   const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearance);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
@@ -306,6 +316,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               {s.label}
             </button>
           ))}
+          {onOpenChangelog !== undefined && (
+            <button
+              className="mt-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-ink-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/10"
+              onClick={onOpenChangelog}
+            >
+              <ScrollText size={15} />
+              更新日志
+            </button>
+          )}
           <button className="btn mt-auto" onClick={closeWithFlush}>
             <X size={14} /> 关闭
           </button>

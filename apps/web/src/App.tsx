@@ -17,6 +17,11 @@ import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { UserModal } from "./components/UserModal";
+import {
+  ChangelogModal,
+  markChangelogSeen,
+  shouldShowChangelog,
+} from "./components/ChangelogModal";
 import { cn } from "./lib/cn";
 import { handleEsc, pushEscLayer } from "./lib/escLayer";
 import { loadChatOpen, saveChatOpen } from "./lib/appearance";
@@ -49,6 +54,11 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  // 更新日志弹窗（用户 2026-10-13）：登录后本设备没看过当前版 → 弹一次「这版更新了什么」
+  const [changelogOpen, setChangelogOpen] = useState(false);
+  useEffect(() => {
+    if (me !== null && shouldShowChangelog()) setChangelogOpen(true);
+  }, [me]);
   const [tagsOpen, setTagsOpen] = useState(false); // 标签栏默认折叠（用户 2026-09-27 定）
   const [filter, setFilter] = useState<BoardFilter>({ query: "", tags: [] });
   const [focus, setFocus] = useState<{ id: string; token: number } | null>(null);
@@ -359,7 +369,14 @@ export default function App() {
         </aside>
       )}
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onOpenChangelog={() => {
+          setSettingsOpen(false);
+          setChangelogOpen(true);
+        }}
+      />
       <UserModal
         open={accountOpen}
         onClose={() => setAccountOpen(false)}
@@ -368,6 +385,13 @@ export default function App() {
         onTokenRotated={(token) =>
           setMe((cur) => (cur === null ? cur : { ...cur, sourceToken: token }))
         }
+      />
+      <ChangelogModal
+        open={changelogOpen}
+        onClose={() => {
+          markChangelogSeen(); // 关掉即记本设备已读——以后不再弹
+          setChangelogOpen(false);
+        }}
       />
     </div>
   );
