@@ -69,19 +69,25 @@ describe("存疑库审核页（D-89）", () => {
     render(<UncertainReview items={[makeEntry()]} onRemoved={onRemoved} />);
 
     // 第一段：点归档图标 → 原位变 X、左侧弹出勾；此时**没有**任何请求
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
     expect(urls).toHaveLength(0);
-    expect(screen.getByTitle("确认清掉这条")).toBeInTheDocument();
+    expect(screen.getByTitle("确认丢弃这条（从列表移除，不再出现）")).toBeInTheDocument();
     expect(screen.getByTitle("取消")).toBeInTheDocument();
 
     // 取消路径：点 X 还原，不发请求
     fireEvent.click(screen.getByTitle("取消"));
     expect(urls).toHaveLength(0);
-    expect(screen.getByTitle("清掉这条（会再确认一次）")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    ).toBeInTheDocument();
 
     // 第二段：再唤醒 → 移到勾上点击 → 发 PUT 并通知刷新
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
-    fireEvent.click(screen.getByTitle("确认清掉这条"));
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
+    fireEvent.click(screen.getByTitle("确认丢弃这条（从列表移除，不再出现）"));
     await waitFor(() => expect(urls).toHaveLength(1));
     expect(urls[0]).toContain("/api/uncertain/u1");
     await waitFor(() => expect(onRemoved).toHaveBeenCalled());
@@ -90,22 +96,32 @@ describe("存疑库审核页（D-89）", () => {
   it("鼠标离开整组 = 取消还原（移动确认的第二道防误触）", () => {
     stubResolve();
     render(<UncertainReview items={[makeEntry()]} onRemoved={() => {}} />);
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
-    const group = screen.getByTitle("确认清掉这条").parentElement;
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
+    const group = screen.getByTitle("确认丢弃这条（从列表移除，不再出现）").parentElement;
     if (group === null) throw new Error("找不到确认组");
     fireEvent.mouseLeave(group);
-    expect(screen.getByTitle("清掉这条（会再确认一次）")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    ).toBeInTheDocument();
   });
 
   it("Esc = 取消还原（走 Esc 分层栈，不会把审核页一起弹掉）", async () => {
     const { urls } = stubResolve();
     const onRemoved = vi.fn();
     render(<UncertainReview items={[makeEntry()]} onRemoved={onRemoved} />);
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
     await act(async () => {
       handleEsc(); // App 的全局 Esc 消费实际就是调它
     });
-    expect(await screen.findByTitle("清掉这条（会再确认一次）")).toBeInTheDocument(); // 还原
+    expect(
+      await screen.findByTitle(
+        "丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它",
+      ),
+    ).toBeInTheDocument(); // 还原
     expect(urls).toHaveLength(0); // 没有发请求
     expect(onRemoved).not.toHaveBeenCalled();
   });
@@ -113,17 +129,23 @@ describe("存疑库审核页（D-89）", () => {
   it("指针在组外按下 = 取消还原（触屏 tap 别处 / mouseleave 覆盖不到的场景）", () => {
     stubResolve();
     render(<UncertainReview items={[makeEntry()]} onRemoved={() => {}} />);
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
     fireEvent.pointerDown(document.body);
-    expect(screen.getByTitle("清掉这条（会再确认一次）")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    ).toBeInTheDocument();
   });
 
   it("非 404/409 的移除失败 → 可见提示（不静默）且刷新收尾", async () => {
     stubResolve({ fail: true }); // 网络挂掉 = 非 gone 类失败
     const onRemoved = vi.fn();
     render(<UncertainReview items={[makeEntry()]} onRemoved={onRemoved} />);
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
-    fireEvent.click(screen.getByTitle("确认清掉这条"));
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
+    fireEvent.click(screen.getByTitle("确认丢弃这条（从列表移除，不再出现）"));
     expect(await screen.findByText(/移除失败/)).toBeInTheDocument();
     await waitFor(() => expect(onRemoved).toHaveBeenCalled());
   });
@@ -132,8 +154,10 @@ describe("存疑库审核页（D-89）", () => {
     stubResolve({ gone: true });
     const onRemoved = vi.fn();
     render(<UncertainReview items={[makeEntry()]} onRemoved={onRemoved} />);
-    fireEvent.click(screen.getByTitle("清掉这条（会再确认一次）"));
-    fireEvent.click(screen.getByTitle("确认清掉这条"));
+    fireEvent.click(
+      screen.getByTitle("丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"),
+    );
+    fireEvent.click(screen.getByTitle("确认丢弃这条（从列表移除，不再出现）"));
     await waitFor(() => expect(onRemoved).toHaveBeenCalled());
     expect(screen.queryByText(/移除失败/)).not.toBeInTheDocument();
   });

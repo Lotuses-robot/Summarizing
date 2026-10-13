@@ -159,7 +159,9 @@ export function ChatPanel({
         window.setTimeout(onActivity, 10000);
       })
       .catch(() => {
-        // 失败占位打 local 标记（不污染 history）；原话与提及都退回，改一字即可重发
+        // 失败占位打 local 标记（不污染 history）；原话与提及都退回，改一字即可重发。
+        // ⚠️ 不透传 err：此处异常只剩传输层故障（服务端真因都被 handleChat 的 catch-all 吞并转成正常回复），
+        // errText 只会给出 "Failed to fetch" 这类英文，反不如友好话术（2026-10-13 测试逮住误改）。
         setDraft((cur) => (cur === "" ? message : cur)); // 等待期间用户已输入新内容则不覆盖
         setMentions(savedMentions);
         setMsgs((m) => [

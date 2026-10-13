@@ -12,6 +12,20 @@ import {
 
 /** 推断披露的哨兵键（与自由元素 label 共用 openQuotes 键空间——带 @ 前缀避撞）。 */
 const DDL_NOTE_KEY = "@ddl-note";
+
+/** 版本史的动作名 → 人话（后端存内部枚举，此处面向用户翻译；未收录的原样显示）。 */
+const ACTION_LABELS: Record<string, string> = {
+  create_item: "新建",
+  update_item: "修改",
+  add_element: "补充元素",
+  resolve_doubt: "解除存疑",
+  complete_item: "标完成",
+  reopen_item: "恢复待办",
+  archive_item: "归档",
+  unarchive_item: "撤回归档",
+  record_note: "留痕",
+  digest_note: "留痕",
+};
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
 import { fmtFullTime } from "../../lib/time";
@@ -184,7 +198,7 @@ export function ItemBody({ id }: { id: string }) {
               <li key={v.id}>
                 <span className="text-xs text-ink-muted">
                   {v.id.slice(0, 6)} · {fmtFullTime(v.at)} · {v.by.actor}
-                  {v.by.model ? ` · ${v.by.model}` : ""} · {v.action}
+                  {v.by.model ? ` · ${v.by.model}` : ""} · {ACTION_LABELS[v.action] ?? v.action}
                 </span>
                 <br />
                 {v.detail}

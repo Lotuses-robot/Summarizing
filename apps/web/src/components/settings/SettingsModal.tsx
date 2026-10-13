@@ -261,6 +261,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   /** 清除本账户 AI 配置：回「未配置」占位（无 .env 可回——006 每人自带 key）。 */
   const runClear = () => {
     if (ai === null || busy !== "none") return;
+    // 破坏性操作：先确认并说清后果（令牌轮换同款；曾无确认，误点即断全部消化/对话）
+    if (
+      !window.confirm(
+        "清除后本账户的 Base URL / 模型 / Key 全部删除，AI 对话与消息消化会停摆，需重新填写才恢复。确定清除？",
+      )
+    ) {
+      return;
+    }
     setBusy("clear");
     api
       .clearAiSettings()
@@ -376,25 +384,25 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </Row>
             ) : (
               <>
-                <Row label="Base URL" description="OpenAI 兼容接口地址，须带 /v1">
+                <Row label="Base URL" description="去服务商官方文档复制填写">
                   <input
                     className="input w-[18rem] max-w-full"
                     value={form.baseUrl}
                     onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
                     onBlur={saveNow}
-                    placeholder="https://api.example.com/v1"
+                    placeholder="https://api.deepseek.com"
                   />
                 </Row>
-                <Row label="模型">
+                <Row label="模型" description="服务商官方文档里的模型名">
                   <input
                     className="input w-[18rem] max-w-full"
                     value={form.model}
                     onChange={(e) => setForm({ ...form, model: e.target.value })}
                     onBlur={saveNow}
-                    placeholder="模型名（如 gpt-4o-mini / deepseek-chat）"
+                    placeholder="deepseek-chat"
                   />
                 </Row>
-                <Row label="API Key" description="留空 = 沿用已存的值（首次须填）">
+                <Row label="API Key" description="服务商给的密钥；已配置过则留空">
                   <input
                     className="input w-[18rem] max-w-full"
                     type="password"

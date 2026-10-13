@@ -37,7 +37,11 @@ function RemoveButton({ onConfirm }: { onConfirm: () => void }) {
 
   if (!armed) {
     return (
-      <button className="btn" title="清掉这条（会再确认一次）" onClick={() => setArmed(true)}>
+      <button
+        className="btn"
+        title="丢弃这条（不再出现在列表；原文仍留档）——想先留着自己再想想就别点它"
+        onClick={() => setArmed(true)}
+      >
         <Archive size={14} />
       </button>
     );
@@ -46,7 +50,7 @@ function RemoveButton({ onConfirm }: { onConfirm: () => void }) {
     <span ref={groupRef} className="flex items-center gap-1" onMouseLeave={() => setArmed(false)}>
       <button
         className="btn border-warn/60 bg-warn-soft text-warn"
-        title="确认清掉这条"
+        title="确认丢弃这条（从列表移除，不再出现）"
         onClick={() => {
           setArmed(false);
           onConfirm();
@@ -120,7 +124,10 @@ export function UncertainReview({
               <div className="min-w-0 flex-1">
                 <p className="text-sm">{it.content}</p>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
-                  <span className="chip" title="需要人工定夺的程度（0-100，越高越急）">
+                  <span
+                    className="chip"
+                    title="由 AI 打的分（0-100），只表示「需要你看的紧迫程度」，不是信息的对错；越高越急"
+                  >
                     需人工 {it.needsHuman}
                   </span>
                   <span>{it.reason}</span>
