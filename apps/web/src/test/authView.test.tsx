@@ -74,6 +74,34 @@ describe("认证壳（006）", () => {
     expect(screen.getByLabelText("邀请码")).toHaveValue("ABCDE12345");
   });
 
+  it("注册失败显示 zod issues 的真话（A13：不再只显示「请求体不合法」）", async () => {
+    window.history.replaceState(null, "", "/register?code=ABCDE12345");
+    // 服务端校验失败返 {error, issues}——本用例专测 authErrorText 优先显示 issues[].message
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/auth/register")) {
+          return Promise.resolve(
+            jsonResponse(
+              { error: "请求体不合法", issues: [{ message: "用户名至少 2 个字符" }] },
+              400,
+            ),
+          );
+        }
+        return Promise.resolve(jsonResponse({ error: "未登录" }, 401)); // me（未登录）
+      }),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { name: "注册" });
+    fireEvent.change(screen.getByLabelText("用户名"), { target: { value: "a" } });
+    fireEvent.change(screen.getByLabelText("密码"), { target: { value: "pw12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "注册" }));
+    // 真话上屏（而非笼统的「请求体不合法」）
+    expect(await screen.findByText("用户名至少 2 个字符")).toBeInTheDocument();
+    expect(screen.queryByText("请求体不合法")).not.toBeInTheDocument();
+  });
+
   it("登录成功 → 主界面（看板出现）", async () => {
     stubAuth();
     render(<App />);

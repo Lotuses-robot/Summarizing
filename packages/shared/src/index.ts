@@ -596,6 +596,10 @@ export const SettingFieldSchema = z.discriminatedUnion("type", [
     type: z.literal("record"),
     label: z.string(),
     description: z.string().optional(),
+    // 键/值列的语义占位（如 nc：键=群号/值=备注名）——前端渲染 placeholder 用；
+    // 缺省时前端显示通用的「键」「值」。带语义的占位直接防「填反」（2026-10-13 A14）。
+    keyPlaceholder: z.string().optional(),
+    valuePlaceholder: z.string().optional(),
   }),
 ]);
 export type SettingField = z.infer<typeof SettingFieldSchema>;

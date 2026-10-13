@@ -104,10 +104,16 @@ function RecordEditor({
   rows,
   onChange,
   onCommit,
+  keyPlaceholder = "键",
+  valuePlaceholder = "值",
 }: {
   rows: [string, string][];
   onChange: (rows: [string, string][]) => void;
   onCommit: (rows: [string, string][]) => void;
+  /** 键列语义占位（schema 可给；缺省「键」）——如 nc 的「群号」，直接防填反（A14）。 */
+  keyPlaceholder?: string;
+  /** 值列语义占位（缺省「值」）。 */
+  valuePlaceholder?: string;
 }) {
   /** 半成品行（有键无值/有值无键）——只提示不动数据（评审 M3c：用户以为存上了）。 */
   const halfBaked = rows.some(([k, v]) => {
@@ -125,7 +131,7 @@ function RecordEditor({
           <input
             className="w-[9rem] max-w-[45%] shrink-0 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-ink-muted"
             value={k}
-            placeholder="键"
+            placeholder={keyPlaceholder}
             onChange={(e) => onChange(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))}
             onBlur={() => onCommit(rows)}
           />
@@ -133,7 +139,7 @@ function RecordEditor({
             <input
               className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-ink-muted"
               value={v}
-              placeholder="值"
+              placeholder={valuePlaceholder}
               onChange={(e) => onChange(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}
               onBlur={() => onCommit(rows)}
             />
@@ -347,6 +353,8 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
                   rows={recordRows[f.key] ?? []}
                   onChange={(rows) => setRecordRows((cur) => ({ ...cur, [f.key]: rows }))}
                   onCommit={(rows) => commitRecord(f, rows)}
+                  keyPlaceholder={f.keyPlaceholder}
+                  valuePlaceholder={f.valuePlaceholder}
                 />
               ) : (
                 <FieldInput

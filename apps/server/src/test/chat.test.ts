@@ -353,6 +353,66 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
       true,
     );
   });
+
+  it("resolve_uncertain：人工移除存疑条目（A10）→ 状态转 discarded、resolvedRef=chat", async () => {
+    const db = makeDb(":memory:");
+    // 造一条 open 存疑（绕过 agent0——本测的是工具不是词表）
+    const raw = repo.insertRawInput(db, {
+      content: "x",
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      receivedAt: "2026-09-24T10:00:00",
+      eventTime: null,
+    });
+    const entry = repo.insertUncertainInput(db, {
+      content: "拿不准的消息",
+      sourceType: raw.sourceType,
+      sourceIdentity: raw.sourceIdentity,
+      eventTime: null,
+      receivedAt: "2026-09-28T10:00:00",
+      originRawInputId: raw.id,
+      needsHuman: 60,
+      reason: "口述无佐证",
+      createdAt: "2026-09-28T10:00:00",
+    });
+
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [
+        { id: "t1", name: "resolve_uncertain", argsJson: JSON.stringify({ id: entry.id }) },
+      ],
+    });
+    llm.push({ content: "已从存疑库移除。" });
+
+    const result = await handleChat(db, llm, MODEL, "把那条清掉", []);
+
+    expect(result.reply).toContain("移除");
+    // 库内状态已变
+    const after = repo.getUncertainInput(db, entry.id);
+    expect(after?.status).toBe("discarded");
+    expect(after?.resolvedRef).toBe("chat");
+    expect(result.actions).toContainEqual({ tool: "resolve_uncertain", note: "从存疑库移除 1 条" });
+  });
+
+  it("resolve_uncertain：id 不存在 → error 回喂（不假装成功）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [
+        { id: "t1", name: "resolve_uncertain", argsJson: JSON.stringify({ id: "nonexistent" }) },
+      ],
+    });
+    llm.push({ content: "没找到这条。" });
+
+    const result = await handleChat(db, llm, MODEL, "清掉它", []);
+
+    const second = chatAt(llm, 1);
+    const toolMsg = second.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && toolMsg.content).toContain("没有这条");
+    expect(result.reply).toContain("没找到");
+  });
 });
 
 describe("POST /api/chat（真实 HTTP 入口）", () => {

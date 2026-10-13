@@ -56,38 +56,55 @@ export function AuthShell({
       >
         <h1 className="text-lg font-semibold">{mode === "login" ? "登录" : "注册"}</h1>
         {mode === "register" && (
-          <label className="block text-sm text-ink-muted">
-            邀请码
+          <div className="text-sm text-ink-muted">
+            <label className="block">
+              邀请码
+              <input
+                className="input mt-1 w-full"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                autoComplete="off"
+                required
+              />
+            </label>
+            <span className="mt-1 block text-xs text-ink-muted">
+              10 位字母数字（来自邀请链接或管理员发的码）
+            </span>
+          </div>
+        )}
+        <div className="text-sm text-ink-muted">
+          <label className="block">
+            用户名
             <input
               className="input mt-1 w-full"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              autoComplete="off"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="username"
               required
             />
           </label>
-        )}
-        <label className="block text-sm text-ink-muted">
-          用户名
-          <input
-            className="input mt-1 w-full"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            required
-          />
-        </label>
-        <label className="block text-sm text-ink-muted">
-          密码
-          <input
-            type="password"
-            className="input mt-1 w-full"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            required
-          />
-        </label>
+          {mode === "register" && (
+            <span className="mt-1 block text-xs text-ink-muted">
+              2~20 个字符，可用中文/字母/数字/下划线/连字符
+            </span>
+          )}
+        </div>
+        <div className="text-sm text-ink-muted">
+          <label className="block">
+            密码
+            <input
+              type="password"
+              className="input mt-1 w-full"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              required
+            />
+          </label>
+          {mode === "register" && (
+            <span className="mt-1 block text-xs text-ink-muted">至少 8 位</span>
+          )}
+        </div>
         {error !== null && <p className="text-sm text-danger">{error}</p>}
         <button type="submit" className="btn w-full justify-center" disabled={busy}>
           {busy ? "请稍候…" : mode === "login" ? "登录" : "注册"}

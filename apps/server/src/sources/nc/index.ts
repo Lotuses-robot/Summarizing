@@ -77,6 +77,7 @@ export function makeNcAdapter(): SourceAdapter {
   // 缓冲与去重集合是适配器实例级私有态（跨 register 调用保留；测试用工厂隔离）
   const buffers = new Map<string, GroupBuffer>();
   const recentIds = new Set<string>(); // 已封批消息 id（Set 保序，超限丢最旧）
+  const warnedDroppedGroups = new Set<string>(); // 已留痕过"白名单外丢弃"的群号（每群只报一次，防刷屏——A14 2026-10-13）
   // register 时注入的运行时依赖（stop 在 register 之外被调，故存引用）
   let runtime: { ctx: SourceContext; windowMinutes: () => number } | null = null;
 
@@ -156,6 +157,20 @@ export function makeNcAdapter(): SourceAdapter {
         const whitelist = readWhitelist(ctx);
         const groupName = whitelist?.[ev.group_id];
         if (whitelist === null || groupName === undefined) {
+          // A14（2026-10-13）：白名单外静默丢曾是"配置错了（如群号填反）用户无从感知"的黑洞。
+          // 每群留痕一次（warn → [source:nc] 前缀进 stderr/日志）——用户可据此对照修正白名单。
+          // 只去重不置 state=error：转发多群、白名单只收一部分是正常用法，置 error 会误报。
+          if (
+            typeof ev.group_id === "string" &&
+            ev.group_id !== "" &&
+            !warnedDroppedGroups.has(ev.group_id)
+          ) {
+            warnedDroppedGroups.add(ev.group_id);
+            ctx.log.warn(
+              `收到群 ${ev.group_id} 的消息，但不在白名单（设置 → 信源 → 群白名单 未收录该群号）——已丢弃。` +
+                (whitelist === null ? "（当前白名单为空 = 全部群都不收）" : ""),
+            );
+          }
           return reply.code(204).send(); // 白名单外丢
         }
         if (isDuplicate(ev.message_id)) return reply.code(204).send(); // 重推幂等
@@ -206,6 +221,8 @@ export function makeNcAdapter(): SourceAdapter {
           type: "record",
           label: "群白名单",
           description: "只收这些群的消息，格式「群号: 备注名」；未配置 = 全不收（fail-closed）",
+          keyPlaceholder: "群号（如 940641749）",
+          valuePlaceholder: "备注名（随便填，显示用）",
         },
         {
           key: "windowMinutes",

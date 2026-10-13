@@ -31,6 +31,8 @@ const BoardArgsSchema = z.object({});
 const IngestArgsSchema = z.object({ content: z.string().min(1) });
 const ChitchatArgsSchema = z.object({ content: z.string().min(1) });
 const SweepArgsSchema = z.object({});
+/** 人工移除单条存疑（A10 / docs/10 T4②）：id 由模型从 search_uncertain 结果里取（真实 id 才可命中）。 */
+const ResolveUncertainArgsSchema = z.object({ id: z.string().min(1) });
 
 const FRONT_TOOL_DEFS: ToolDef[] = [
   {
@@ -60,6 +62,12 @@ const FRONT_TOOL_DEFS: ToolDef[] = [
     description:
       "触发存疑库清扫（agent0 逐条复核、丢弃已被取代/证伪的条目）——用户说「清扫存疑库」时用它",
     parametersJsonSchema: z.toJSONSchema(SweepArgsSchema),
+  },
+  {
+    name: "resolve_uncertain",
+    description:
+      "把存疑库里**指定的一条**标记为已解决/丢弃（人工移除）——用户说「把那条删了/清了/处理掉」并指明是哪条时用它。id 必须先用 search_uncertain 查到（只能处理库里真实存在的条目）",
+    parametersJsonSchema: z.toJSONSchema(ResolveUncertainArgsSchema),
   },
   {
     name: "ingest",
@@ -157,8 +165,8 @@ export async function handleChat(
   return result;
 }
 
-/** 一轮会话的工具循环：模型按需查（get_board/search_items/get_item）、收信息（ingest）、
- *  留痕（log_chitchat），直到给出纯文本回复或超轮数抛错。 */
+/** 一轮会话的工具循环：模型按需查（get_board/search_items/get_item/search_uncertain）、收信息（ingest）、
+ *  触发清扫（sweep_uncertain）、人工移除存疑（resolve_uncertain）、留痕（log_chitchat），直到给出纯文本回复或超轮数抛错。 */
 async function converse(
   db: Db,
   llm: LlmClient,
@@ -269,6 +277,29 @@ async function runTool(
         state.actions.push({ tool: "sweep_uncertain", note: describeSweep(result) });
         return JSON.stringify({ ok: true, ...result, summary: describeSweep(result) });
       }
+      case "resolve_uncertain": {
+        // A10（docs/10 T4②）：存疑库人工移除的对话工具——与审核页 `PUT /api/uncertain/:id` 两套可互替。
+        // 语义对齐该端点：不存在 / 已被处置（非 open）/ 成功。resolvedRef="chat" 留痕来源。
+        const { id } = ResolveUncertainArgsSchema.parse(args);
+        const exists = repo.getUncertainInput(db, id);
+        if (exists === null) {
+          return JSON.stringify({
+            ok: false,
+            error: "存疑库里没有这条（id 可能不对，先用 search_uncertain 查）",
+          });
+        }
+        const resolved = repo.resolveUncertainInput(db, {
+          id,
+          status: "discarded",
+          resolvedRef: "chat",
+          resolvedAt: nowWallClock(),
+        });
+        if (!resolved) {
+          return JSON.stringify({ ok: false, error: "这条已经被处置过了" });
+        }
+        state.actions.push({ tool: "resolve_uncertain", note: `从存疑库移除 1 条` });
+        return JSON.stringify({ ok: true, note: "已从存疑库移除" });
+      }
       case "ingest": {
         if (state.ingested) {
           // 批次粒度（01§5.3）：一条消息 = 一个批次。拒绝并提示模型整条录入，系统自己拆
@@ -347,6 +378,7 @@ const FRONT_DESK_SYSTEM_PROMPT = `你是「前台」——用户的信息管家 
 
 指令类诉求：
 - "把 xx 改成 yy" 这类修改说法 → 一律当新信息 ingest——系统会把它识别为对已有事项的修正；你没有修改数据的工具，绝不假装执行。
+- 要"清掉/处理掉存疑库里某条" → 先用 search_uncertain 找到它拿到 id，再调 resolve_uncertain（只能处理真实存在的条目，id 不对会失败）。
 - 要求撤回/删除历史记录 → 系统暂未提供该能力（D-79），如实说明，并引导：直接再发一条更正信息即可，系统会合并处理。
 
 用户可能用指代（"就是刚才那条"）——结合对话历史理解；不确定就先查证再回答。

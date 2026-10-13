@@ -59,17 +59,39 @@ function ensureOk(res: Response): void {
   if (!res.ok) throw new Error(`请求失败 ${res.status}`);
 }
 
-/** 认证端点非 2xx 的错误文案（服务端 {error} 优先，非 JSON 兜底）。 */
+/** 从 unknown 安全提取 `issues[].message`（运行时类型守卫——不用 as 让编译器闭嘴，工程红线）。
+ *  zod issues 形状 `{message?: string}[]`；非数组/元素非对象/message 非串都跳过。 */
+function issueMessages(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const items: unknown[] = v; // Array.isArray 收窄为 any[]；赋给 unknown[] 收回元素静态类型
+  const out: string[] = [];
+  for (const item of items) {
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      "message" in item &&
+      typeof item.message === "string"
+    ) {
+      out.push(item.message);
+    }
+  }
+  return out;
+}
+
+/** 认证端点非 2xx 的错误文案（校验类优先 issues 逐条消息；其余 {error}；非 JSON 兜底）。
+ *  服务端校验失败返 `{error:"请求体不合法", issues:[zod 逐条中文]}——issues 才是「用户名至少 2 个字符」
+ *  这类真话，顶层 error 只说明"哪里错了没写清"（A13：曾只取 error，用户永远看不到规则）。 */
 async function authErrorText(res: Response): Promise<string> {
   try {
     const body: unknown = await res.json();
-    if (
-      typeof body === "object" &&
-      body !== null &&
-      "error" in body &&
-      typeof body.error === "string"
-    ) {
-      return body.error;
+    if (typeof body === "object" && body !== null) {
+      if ("issues" in body) {
+        const messages = issueMessages(body.issues);
+        if (messages.length > 0) return messages.join("；");
+      }
+      if ("error" in body && typeof body.error === "string") {
+        return body.error;
+      }
     }
   } catch {
     // 非 JSON——用兜底文案

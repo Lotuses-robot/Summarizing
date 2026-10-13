@@ -318,15 +318,40 @@ describe("nc 适配器：webhook 快收", () => {
     expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0); // 缓冲中，未投递
   });
 
-  it("白名单外群 → 204 丢（缓冲与落档都没有）", async () => {
+  it("白名单外群 → 204 丢（缓冲与落档都没有）+ 留痕该群号一次（A14）", async () => {
     const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
-    const res = await emit(
-      t,
-      groupEvent({ groupId: "g999", messageId: "m1", text: "闲聊", time: 1790595828 }),
-    );
-    expect(res.statusCode).toBe(204);
-    sweepNow();
-    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const res = await emit(
+        t,
+        groupEvent({ groupId: "g999", messageId: "m1", text: "闲聊", time: 1790595828 }),
+      );
+      expect(res.statusCode).toBe(204);
+      sweepNow();
+      expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
+      // 留痕：含丢弃群号（用户可据此对照白名单修正——A14 的核心价值）
+      const logs = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(logs).toContain("g999");
+      expect(logs).toContain("白名单");
+    } finally {
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it("白名单外同群重复来消息 → 只留痕一次（A14 去重，防刷屏）", async () => {
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      for (const mid of ["m1", "m2", "m3"]) {
+        await emit(t, groupEvent({ groupId: "g999", messageId: mid, text: "x", time: 1790595828 }));
+      }
+      const hits = stderrSpy.mock.calls
+        .map((c) => String(c[0]))
+        .filter((l) => l.includes("g999") && l.includes("白名单"));
+      expect(hits).toHaveLength(1); // 去重：同群只报一次
+    } finally {
+      stderrSpy.mockRestore();
+    }
   });
 
   it("未配置白名单（fail-closed）→ 全丢", async () => {
