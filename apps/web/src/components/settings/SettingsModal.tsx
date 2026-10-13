@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  BookMarked,
   Bot,
   Check,
   Database,
-  Info,
   Loader2,
   Palette as PaletteIcon,
   Rss,
-  ScrollText,
   X,
   type LucideIcon,
 } from "lucide-react";
 import type { AiSettings, AiSettingsView, AiTestResult } from "@summarizing/shared";
-import { ChangelogList, currentVersion } from "../ChangelogModal";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
@@ -472,34 +468,6 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             footnote="对话输入始终可用——把信息发给前台即录入。"
           >
             <SourcesSection />
-          </Card>
-
-          {/* 关于（设置内容区最底）：产品名 + 一句话 + 当前版本（版本唯一出处 = CHANGELOG）。 */}
-          <Card icon={Info} title="关于" bare>
-            <div className="rounded-xl border border-line bg-surface px-5 py-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-soft text-accent">
-                  <BookMarked size={20} />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">Summarizing · 个人信息中枢</p>
-                  <p className="text-xs text-ink-muted">
-                    把散落的信息拼成完整图景，每块都可查回原文。
-                  </p>
-                </div>
-              </div>
-              <p className="mt-3 border-t border-line pt-3 text-xs text-ink-muted">
-                当前版本 <span className="font-medium text-ink">{currentVersion() ?? "—"}</span>
-                <span className="ml-2">· 更新记录见下方</span>
-              </p>
-            </div>
-          </Card>
-
-          {/* 更新日志（关于的正下方）：全部版本内联向下延展——公告都写进 CHANGELOG.md。 */}
-          <Card icon={ScrollText} title="更新日志" bare>
-            <div className="rounded-xl border border-line bg-surface px-5 py-4">
-              <ChangelogList />
-            </div>
           </Card>
         </div>
       </div>

@@ -60,21 +60,21 @@ describe("shouldShowChangelog 弹窗判断（localStorage 已读记忆）", () =
 
   it("首次安装（无记录）→ 不弹，并记下当前版", async () => {
     reset();
-    const { shouldShowChangelog } = await import("../components/ChangelogModal");
+    const { shouldShowChangelog } = await import("../components/AboutModal");
     expect(shouldShowChangelog()).toBe(false);
     expect(window.localStorage.getItem("summarizing.seenVersion")).not.toBeNull();
   });
 
   it("已读过当前版 → 不弹", async () => {
     reset();
-    const { markChangelogSeen, shouldShowChangelog } = await import("../components/ChangelogModal");
+    const { markChangelogSeen, shouldShowChangelog } = await import("../components/AboutModal");
     markChangelogSeen();
     expect(shouldShowChangelog()).toBe(false);
   });
 
   it("记的是旧版 → 弹（新版本来了）", async () => {
     reset();
-    const { shouldShowChangelog } = await import("../components/ChangelogModal");
+    const { shouldShowChangelog } = await import("../components/AboutModal");
     window.localStorage.setItem("summarizing.seenVersion", "v0.0.1-远古");
     expect(shouldShowChangelog()).toBe(true);
   });

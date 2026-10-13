@@ -176,6 +176,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowPipeline={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={() => {}}
+        onOpenAbout={() => {}}
       />,
     );
     expect(screen.getByText("3")).toBeInTheDocument();
@@ -188,6 +189,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowPipeline={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={() => {}}
+        onOpenAbout={() => {}}
       />,
     );
     expect(screen.queryByText("0")).not.toBeInTheDocument();
@@ -207,6 +209,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowPipeline={onShowPipeline}
         onOpenAccount={() => {}}
         onOpenSettings={onOpenSettings}
+        onOpenAbout={() => {}}
       />,
     );
     fireEvent.click(screen.getByTitle("回到看板顶部"));

@@ -17,11 +17,7 @@ import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { UserModal } from "./components/UserModal";
-import {
-  ChangelogModal,
-  markChangelogSeen,
-  shouldShowChangelog,
-} from "./components/ChangelogModal";
+import { AboutModal, markChangelogSeen, shouldShowChangelog } from "./components/AboutModal";
 import { cn } from "./lib/cn";
 import { handleEsc, pushEscLayer } from "./lib/escLayer";
 import { loadChatOpen, saveChatOpen } from "./lib/appearance";
@@ -54,10 +50,10 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  // 更新日志弹窗（用户 2026-10-13）：登录后本设备没看过当前版 → 弹一次「这版更新了什么」
-  const [changelogOpen, setChangelogOpen] = useState(false);
+  // 关于弹层（2026-10-13）：活动栏 ⓘ 手动打开；发版后登录也自动弹一次「这版更新了什么」
+  const [aboutOpen, setAboutOpen] = useState(false);
   useEffect(() => {
-    if (me !== null && shouldShowChangelog()) setChangelogOpen(true);
+    if (me !== null && shouldShowChangelog()) setAboutOpen(true);
   }, [me]);
   const [tagsOpen, setTagsOpen] = useState(false); // 标签栏默认折叠（用户 2026-09-27 定）
   const [filter, setFilter] = useState<BoardFilter>({ query: "", tags: [] });
@@ -256,6 +252,7 @@ export default function App() {
         onShowPipeline={() => setView("pipeline")}
         onOpenAccount={() => setAccountOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenAbout={() => setAboutOpen(true)}
       />
 
       <div ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
@@ -379,11 +376,11 @@ export default function App() {
           setMe((cur) => (cur === null ? cur : { ...cur, sourceToken: token }))
         }
       />
-      <ChangelogModal
-        open={changelogOpen}
+      <AboutModal
+        open={aboutOpen}
         onClose={() => {
-          markChangelogSeen(); // 关掉即记本设备已读——以后不再弹
-          setChangelogOpen(false);
+          markChangelogSeen(); // 关掉即记本设备已读——自动弹以后不再弹
+          setAboutOpen(false);
         }}
       />
     </div>

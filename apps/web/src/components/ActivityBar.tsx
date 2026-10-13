@@ -1,7 +1,7 @@
-import { KeyRound, LayoutDashboard, ScrollText, Settings, TriangleAlert } from "lucide-react";
+import { Info, KeyRound, LayoutDashboard, ScrollText, Settings, TriangleAlert } from "lucide-react";
 import { cn } from "../lib/cn";
 
-/** 最左活动栏（05§一）：主视图切换（看板 / 存疑库审核 / 流水，specs/005）+ 账户与设置固定最底。
+/** 最左活动栏（05§一）：主视图切换（看板 / 存疑库审核 / 流水，specs/005）+ 账户/设置/关于固定最底。
  *  对话开关不在这——它管的停靠面板在右边，开关也放右边（用户 2026-09-26 定）。 */
 export function ActivityBar({
   view,
@@ -11,6 +11,7 @@ export function ActivityBar({
   onShowPipeline,
   onOpenAccount,
   onOpenSettings,
+  onOpenAbout,
 }: {
   view: "board" | "uncertain" | "pipeline";
   /** open 条数——徽标计数（0 = 不显示徽标）。 */
@@ -22,6 +23,8 @@ export function ActivityBar({
   /** 账户弹层（用户名/改密/接入地址/退出——006）。 */
   onOpenAccount: () => void;
   onOpenSettings: () => void;
+  /** 关于弹层（产品信息 + 更新日志——2026-10-13）。 */
+  onOpenAbout: () => void;
 }) {
   return (
     <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-2">
@@ -73,6 +76,13 @@ export function ActivityBar({
         className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <Settings size={18} />
+      </button>
+      <button
+        title="关于（版本与更新日志）"
+        onClick={onOpenAbout}
+        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+      >
+        <Info size={18} />
       </button>
     </nav>
   );
