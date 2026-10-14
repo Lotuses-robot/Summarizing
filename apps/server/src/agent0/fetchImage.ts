@@ -1,4 +1,5 @@
 import { BlockList, isIP } from "node:net";
+import type { LookupAddress } from "node:dns";
 import dns from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
@@ -64,16 +65,14 @@ export type FetchImageResult = { ok: true; dataUrl: string } | { ok: false; reas
  *  测试注入替身即可免网络断言各分支（签名带 ips/signal 供真实实现使用）。 */
 export type ImageTransport = (
   url: URL,
-  ips: { address: string; family: number }[],
+  ips: LookupAddress[],
   signal: AbortSignal,
 ) => Promise<{ status: number; contentType: string; bytes: Uint8Array }>;
 
 /** 校验并解析图片 URL —— 任何一条不过直接抛人话错（由 fetchImage 捕获转成 ok:false）。
  *  分两步：静态检查（协议/端口/主机形状）→ 动态检查（DNS 解析逐址过私网黑名单）。
  *  返回的 ips 会由传输层钉进连接（校验与连接用同一批地址，防 TOCTOU）。 */
-async function assertSafeImageUrl(
-  rawUrl: string,
-): Promise<{ url: URL; ips: { address: string; family: number }[] }> {
+async function assertSafeImageUrl(rawUrl: string): Promise<{ url: URL; ips: LookupAddress[] }> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -106,7 +105,7 @@ async function assertSafeImageUrl(
       throw new Error("目标地址落在内网/保留段，拒绝访问");
     }
   }
-  return { url, ips: addrs.map((a) => ({ address: a.address, family: a.family })) };
+  return { url, ips: addrs }; // dns.lookup({all:true}) 返回的本就是 LookupAddress[]，直传不拷
 }
 
 /** 生产传输：node http/https 单次 GET，连接钉死已核验 IP（lookup 不再解析域名），
@@ -120,15 +119,24 @@ const pinnedNetworkGet: ImageTransport = (url, ips, signal) =>
         method: "GET",
         headers: { accept: "image/*" },
         signal,
-        // ⑤ 连接只用已核验的 IP——域名不再交给传输层二次解析（防 DNS 重绑定 TOCTOU）
+        // ⑤ 连接只用已核验的 IP——域名不再交给传输层二次解析（防 DNS 重绑定 TOCTOU）。
+        //    opts.family 是 Node 传下的家族偏好（0/缺席 = 不限；类型上是 number | "IPv4" | "IPv6"）：
+        //    先归一成 4/6 再过滤，滤空回退全集——连接地址恒出自 assertSafeImageUrl 核过的那批。
         lookup: (_hostname, opts, cb) => {
+          const wish =
+            opts.family === "IPv4" || opts.family === "IPv6"
+              ? opts.family === "IPv4"
+                ? 4
+                : 6
+              : opts.family;
+          const preferred =
+            wish === undefined || wish === 0 ? ips : ips.filter((i) => i.family === wish);
+          const pool = preferred.length > 0 ? preferred : ips;
           if (opts.all === true) {
-            cb(
-              null,
-              ips.map((i) => ({ address: i.address, family: i.family })),
-            );
+            cb(null, [...pool]); // 拷一份交出去（不把「核过的地址集」这个对象交给外部代码）
           } else {
-            const first = ips[0];
+            const first = pool[0];
+            // 类型收窄需要（pool 恒非空——ips 已在 assertSafeImageUrl 保证非空）
             if (first === undefined) {
               cb(new Error("没有已核验的地址"), "", 0);
               return;
@@ -222,7 +230,9 @@ export async function fetchImage(
     if (!matchesMagic(mime, bytes)) {
       return { ok: false, reason: "文件内容与声明的图片格式不符，拒绝" };
     }
-    const dataUrl = `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+    // 生产传输交回的就是 Buffer（Buffer.concat）；isBuffer 守卫免掉「已是 Buffer 再整份拷一遍」（最多 2 MiB）
+    const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    const dataUrl = `data:${mime};base64,${buf.toString("base64")}`;
     return { ok: true, dataUrl };
   } catch (err) {
     return { ok: false, reason: errText(err) };

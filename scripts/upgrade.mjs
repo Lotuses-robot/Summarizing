@@ -8,6 +8,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readDotEnv, writeAppImage } from "./lib/dotenv.mjs";
+import { liveAppImageRef } from "./lib/docker.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, "data");
@@ -28,28 +29,31 @@ function capture(cmd, args) {
   }).trim();
 }
 
+const msgOf = (err) => (err instanceof Error ? err.message : String(err));
+
 /** 打印某一步失败后的回滚指引（不自动回滚）。 */
 function fail(step, err) {
-  console.error(`\n✗ 升级在「${step}」失败：${err instanceof Error ? err.message : String(err)}`);
+  console.error(`\n✗ 升级在「${step}」失败：${msgOf(err)}`);
   console.error("→ 回滚指引见 docs/13 三·5：回退镜像 tag 后 docker compose up -d；库如需回退用备份覆盖（连 -wal/-shm 一并删）。");
   process.exit(1);
 }
 
-const msgOf = (err) => (err instanceof Error ? err.message : String(err));
-
-/** 从镜像 ref 取 tag（最后一个 ':' 之后且不含 '/'——防把 registry 端口号当 tag）。 */
+/** 从镜像 ref 取 tag（最后一个 ':' 之后且不含 '/' 才算 tag——防把 registry 端口号当 tag）；无 tag 返回 null。 */
 function tagOf(ref) {
   const i = ref.lastIndexOf(":");
-  if (i < 0) return "(无 tag)";
+  if (i < 0) return null;
   const tail = ref.slice(i + 1);
-  return tail === "" || tail.includes("/") ? "(无 tag)" : tail;
+  return tail === "" || tail.includes("/") ? null : tail;
 }
 
-/** 取去掉 tag 的 base（无 tag 时原样返回），供拼目标 tag。 */
+/** 取去掉 tag 的 base（供拼目标 tag）。尾冒号（空 tag，如 `reg/ns/app:`）一并剥掉——
+ *  否则拼出 `reg/ns/app::vX` 畸形 ref（审查 2026-10-14）。无 tag 且无冒号时原样返回。 */
 function baseOf(ref) {
   const i = ref.lastIndexOf(":");
   if (i < 0) return ref;
-  return ref.slice(i + 1).includes("/") ? ref : ref.slice(0, i);
+  const tail = ref.slice(i + 1);
+  // 尾段含 '/' = 那是 registry 的端口号（如 `reg:5000/ns/app`），不是 tag——不动
+  return tail.includes("/") ? ref : ref.slice(0, i);
 }
 
 /** 解析 v主.次.修 → [n,n,n]；不合形状返回 null（如带 -rc 的预发版——不判）。 */
@@ -70,50 +74,58 @@ function isDowngrade(from, to) {
 }
 
 /** 北京墙钟戳（备份目录名用）：固定 +08:00 偏移、与机器时区无关——与
- *  apps/server/src/shared/time.ts 的 wallClockFromDate 同一算法（D-97 口径；脚本不 import TS 源码，照此对齐）。 */
+ *  apps/server/src/shared/time.ts 的 wallClockFromDate（D-97 单一出处）同一算法；
+ *  形状须与 cli/admin.ts 默认目录名 `nowWallClock().replace(/[:.]/g, "-")` 逐字符一致（改任一处必须同步另一处）。 */
 function beijingStamp() {
-  const BEIJING_OFFSET_MS = 8 * 60 * 60_000;
-  const shifted = new Date(Date.now() + BEIJING_OFFSET_MS);
-  const p = (n) => String(n).padStart(2, "0");
-  return (
-    `${shifted.getUTCFullYear()}-${p(shifted.getUTCMonth() + 1)}-${p(shifted.getUTCDate())}` +
-    `T${p(shifted.getUTCHours())}-${p(shifted.getUTCMinutes())}-${p(shifted.getUTCSeconds())}`
-  );
+  const shifted = new Date(Date.now() + 8 * 60 * 60_000); // UTC+8 后的 UTC 分量 = 北京时间分量
+  return shifted.toISOString().slice(0, 19).replaceAll(":", "-");
 }
 
 // ── 0. 版本核对（ACR 形态）：当前 = **在跑容器的镜像**（查不到才回退 .env 声明）→ 目标 = 最新 release ──
 // 形态判断：.env 设了 APP_IMAGE（ACR 形态）才算得出「当前版本」；本地 build 形态无 tag 可比，跳过核对。
 const env = readDotEnv(root);
-const appImage = (process.env.APP_IMAGE ?? env.vars.APP_IMAGE ?? "").trim();
+// shell 里若 export 了 APP_IMAGE，compose（docker-compose.yml 的 `image: ${APP_IMAGE:-…}`）会优先用它——
+// 本脚本对 .env 的改写将被静默忽略、部署停在旧 tag 却报「升级成功」（审查 2026-10-14）。
+// ⚠️ 这道闸必须**无条件**跑：只在 useImage 分支里查，就会漏掉「shell 有值、.env 无该行」的形态——
+// 那时 useImage=false 走了本地 build 分支，但 compose 实际用的是 shell 的 ACR 值（回归修复 2026-10-14）。
+const shellAppImage = (process.env.APP_IMAGE ?? "").trim();
+if (shellAppImage !== "") {
+  console.error(`\n✗ shell 环境里设置了 APP_IMAGE=${shellAppImage}——compose 会优先用它，本脚本对 .env 的改写将被静默忽略。`);
+  console.error("  请在干净的 shell 里重跑（先 unset APP_IMAGE / 清掉 export）。");
+  process.exit(1);
+}
+const appImage = (env.vars.APP_IMAGE ?? "").trim();
 const useImage = appImage !== "";
 let targetRef = ""; // ACR 形态的目标镜像 ref（步骤 2 改写 .env 用）
 
 if (useImage) {
   // 当前版本以「实际在跑的容器」为准——.env 可能已先被改过或 pull 还没做（审查 2026-10-14：
   // 曾直接读 .env，会把「.env 已改但没升级」误判成已最新而提前退出）。
+  // 查不到分开报因（docker 不可用 vs 容器未运行）——不预判原因、如实归因。
   let liveRef = appImage;
-  let liveFrom = ".env 声明（未找到在跑的 app 容器）";
-  try {
-    const id = capture("docker", ["compose", "ps", "-q", "app"]);
-    if (id !== "") {
-      const insp = capture("docker", ["inspect", "--format", "{{.Config.Image}}", id.split("\n")[0]]);
-      if (insp !== "") {
-        liveRef = insp;
-        liveFrom = "在跑容器";
-      }
-    }
-  } catch {
-    // docker/compose 不可用 → 回退 .env 声明值（后续步骤自会报错，这里不拦）
+  let liveFrom = ".env 声明（app 容器未运行）";
+  const live = liveAppImageRef(root);
+  if ("ref" in live) {
+    liveRef = live.ref;
+    liveFrom = "在跑容器";
+  } else if (live.problem === "docker-unavailable") {
+    liveFrom = ".env 声明（docker/compose 不可用）";
   }
-  const currentTag = tagOf(liveRef);
+  const currentTag = tagOf(liveRef) ?? "(无 tag)";
 
   // 目标版本：UPGRADE_TARGET 显式指定 > gh（带凭据、限流宽）> curl 公开 API（公开仓库免认证）。
+  // 顺序回退（不用嵌套 try 当控制流）；两个失败都记下原因，全拿不到才停。
   let latestTag = (process.env.UPGRADE_TARGET ?? "").trim();
   if (latestTag === "") {
+    let ghErr = null;
     try {
       latestTag = capture("gh", ["api", `repos/${REPO}/releases/latest`, "--jq", ".tag_name"]);
-      if (latestTag === "") throw new Error("gh 返回空 tag");
-    } catch (ghErr) {
+      if (latestTag === "") ghErr = new Error("gh 返回空 tag");
+    } catch (e) {
+      ghErr = e;
+    }
+    if (latestTag === "") {
+      let curlErr = null;
       try {
         const body = capture("curl", [
           "-fsSL",
@@ -123,9 +135,11 @@ if (useImage) {
         ]);
         const parsed = JSON.parse(body);
         latestTag = typeof parsed?.tag_name === "string" ? parsed.tag_name : "";
-        // 附 cause：这是 catch(ghErr) 内抛出的新错（原因链不断——gh 的失败在错误消息里已带上）
-        if (latestTag === "") throw new Error("响应里没有 tag_name", { cause: ghErr });
-      } catch (curlErr) {
+        if (latestTag === "") curlErr = new Error("响应里没有 tag_name");
+      } catch (e) {
+        curlErr = e;
+      }
+      if (latestTag === "") {
         fail(
           "查 GitHub 最新版",
           new Error(
@@ -150,23 +164,23 @@ if (useImage) {
   // docker manifest inspect 走 docker login 凭据（无需额外 AccessKey）。
   // ⚠️ 局限：未登录 ACR 与 tag 不存在，docker 都报 "denied/unauthorized"（实测两者同形）——故这里
   // 只能判「能否取到该 manifest」；取不到即拒绝（宁可停下让人确认，也不冒拉到旧镜像的险）。
-  targetRef = `${baseOf(liveRef)}:${latestTag}`;
-  let inspectErr = "";
-  const synced = (() => {
-    try {
-      capture("docker", ["manifest", "inspect", targetRef]);
-      return true;
-    } catch (e) {
-      inspectErr = String(e.stderr ?? e.message ?? "").trim();
-      return false;
-    }
-  })();
-  if (!synced) {
+  // 目标 ref 的 registry/ns 取自 **.env 的 APP_IMAGE**（本脚本要改的那行），不取在跑容器——
+  // 本地 build 形态的容器镜像是 `summarizing:local`，拿它拼 target 会 inspect 到 Docker Hub（审查 2026-10-14）。
+  targetRef = `${baseOf(appImage)}:${latestTag}`;
+  try {
+    capture("docker", ["manifest", "inspect", targetRef]);
+  } catch (e) {
+    // `||` 而非 `??`：execFileSync 在子进程非零退出但没写 stderr 时给的是空串（不是 undefined），
+    // 用 ?? 会让 e.message（含 "Command failed: …"）永远取不到 → 报错原文留空（审查 2026-10-14）
+    const inspectErr = String(e.stderr || e.message || "").trim();
     console.error(`\n✗ 无法确认 ACR 已有 ${latestTag}（${targetRef}）。显式拒绝升级。`);
     console.error(`  两种可能，逐一排查：`);
     console.error(`   ① CI 还没推完镜像（GitHub Actions 的 image job 未绿）：gh run list -R ${REPO} --limit 3`);
-    console.error(`   ② 服务器未登录 ACR（凭据过期也会这样）：docker login ${baseOf(liveRef).split("/")[0]}`);
+    console.error(`   ② 服务器未登录 ACR（凭据过期也会这样）：docker login ${baseOf(appImage).split("/")[0]}`);
     console.error(`  docker 报错原文：${inspectErr.split("\n").slice(0, 2).join(" / ")}`);
+    if (live.problem === "docker-unavailable") {
+      console.error("  ⚠️ 而且 docker/compose 本身不可用——先确认 docker 已装且 daemon 在跑，再谈上面两种可能。");
+    }
     process.exit(1);
   }
   console.log(`  ✓ ACR 已有 ${latestTag}，继续升级。`);
@@ -212,7 +226,7 @@ try {
       capture("git", ["rev-parse", "--is-inside-work-tree"]);
       isGit = true;
     } catch {
-      isGit = false;
+      // 非 git 工作区（或未装 git）——isGit 保持 false，走「跳过代码更新」（不是错误）
     }
     if (isGit) {
       console.log("[2/5] 更新代码（本地 build 形态：git pull）…");
@@ -241,6 +255,11 @@ try {
 // 任一不过 → 打印回滚指引、非零退出（CI/cron 里跑也能感知成败）。
 try {
   console.log("[4/5] 健康检查（起服务 + 查日志）…");
+  // 先确认 docker 本身可用——否则下面的探测循环会把「docker 不可用」误报成「容器未就绪」，
+  // 让人去查应用/回滚，而真因是 docker（审查 2026-10-14）。
+  if (liveAppImageRef(root).problem === "docker-unavailable") {
+    throw new Error("docker/compose 不可用（探测不到在跑容器）——先确认 docker 已装且 daemon 在跑，再谈健康检查");
+  }
   // 等容器就绪（最多 ~30s：轮询 /api/board 应得 401）
   const deadline = Date.now() + 30_000;
   let healthy = false;
@@ -259,7 +278,9 @@ try {
       healthy = true;
       break;
     } catch {
-      execFileSync(process.execPath, ["-e", "setTimeout(()=>{},3000)"]); // 等 3s 再试
+      // 等 3s 再试：Atomics.wait 主线程同步睡（Node 允许；不起子进程——
+      // 重启期间正是 2C2G 服务器内存最紧的时刻，fork 整个 node 只为睡觉纯浪费）
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
     }
   }
   if (!healthy) throw new Error("容器 30s 内未就绪（/api/board 未回 401）");

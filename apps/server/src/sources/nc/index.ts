@@ -43,35 +43,60 @@ function textFromSegments(segments: NcSegment[] | undefined, rawMessage: string)
   return parts.length > 0 ? parts.join("") : rawMessage;
 }
 
+/** 私聊会话键前缀（拼装 / 剥除 / 白名单归一两处共用同一常量——防各写字符串漂移，审查 2026-10-14）。 */
+const PRIVATE_KEY_PREFIX = "private:";
+
+/** 剥会话键前缀（键不带前缀时原样返回）——`private:10001` → `10001`；前缀为空串时恒等。 */
+function withoutPrefix(prefix: string, key: string): string {
+  return key.startsWith(prefix) ? key.slice(prefix.length) : key;
+}
+
+/** 会话类型原文 → 中文措辞（日志多处共用；兜底取中性「会话」——防同型消息在两处日志里说成不同话）。 */
+function kindWordOf(messageType: string): string {
+  if (messageType === "group") return "群";
+  if (messageType === "private") return "私聊";
+  return "会话";
+}
+
 /** 会话白名单（群 + 私聊统一）：`Record<会话键, 备注名>`（备注名供 sourceLabel）。
  *  会话键：群 = `群号`；私聊 = `private:<对方QQ>`（2026-10-13 私聊支持）——**两 KV 的键都归一到会话键**。
  *  缺省/空对象/非对象 → null（= 未配置 = 全丢，fail-closed，D-84 Q-F）。 */
 function readWhitelist(ctx: SourceContext): Record<string, string> | null {
   const out: Record<string, string> = {};
   /** 收一个 KV 到 out（坏形状忽略；空串备注名不收——会产出 name="" 的身份 → ingest schema 必拒）。
-   *  `prefix` 把 kv 键归一到会话键（私聊 `private:`）；空键不前缀；
-   *  键已带该前缀（用户照日志原样抄）先剥再拼——防 `private:private:10001` 双前缀失配（审查 2026-10-14）。 */
+   *  `prefix` 把 kv 键归一到会话键（私聊 `private:`）；空前缀（群白名单）下，带 private: 前缀的键 = 用户
+   *  填错了栏（私聊号填进了群白名单）——**拒收并留痕**，否则它会与私聊白名单同号条目撞成同一会话键、
+   *  静默覆盖（审查 2026-10-14）。 */
   const collect = (key: string, prefix: string): void => {
     const v = ctx.getSetting(key);
     if (v === null || typeof v !== "object" || Array.isArray(v)) return;
     for (const [k, val] of Object.entries(v)) {
-      const normalized = prefix !== "" && k.startsWith(prefix) ? k.slice(prefix.length) : k;
+      if (prefix === "" && k.startsWith(PRIVATE_KEY_PREFIX)) {
+        ctx.log.warn(
+          `群白名单里的键 ${k} 带 ${PRIVATE_KEY_PREFIX} 前缀（疑似把私聊号填进了群白名单）——已忽略该键。`,
+        );
+        continue;
+      }
+      const normalized = withoutPrefix(prefix, k);
       if (normalized !== "" && typeof val === "string" && val.trim() !== "") {
         out[`${prefix}${normalized}`] = val;
       }
     }
   };
   collect("groups", ""); // 群白名单：键 = 群号
-  collect("privates", "private:"); // 私聊白名单：键 = 对方 QQ 号 → 归一到 private:<QQ>
+  collect("privates", PRIVATE_KEY_PREFIX); // 私聊白名单：键 = 对方 QQ 号 → 归一到 private:<QQ>
   return Object.keys(out).length > 0 ? out : null;
 }
 
 /** 事件 → 会话键：群 = group_id；私聊 = `private:<对方 user_id>`（自己发的不回推，见 NapCat 行为）。
- *  取不到键（私聊却无发信人 id）→ null（无法定位会话，丢弃）。 */
+ *  取不到键（群号空串、私聊无发信人 id）→ null（无法定位会话，丢弃）——空键放行会在白名单外留痕里
+ *  打出「收到群  的消息」这种指不到任何群的误导行（审查 2026-10-14）。 */
 function conversationKey(ev: NcEvent): string | null {
-  if (ev.message_type === "group") return ev.group_id ?? null;
+  if (ev.message_type === "group") {
+    return ev.group_id !== undefined && ev.group_id !== "" ? ev.group_id : null;
+  }
   const peer = ev.sender?.user_id ?? ev.user_id;
-  return peer !== undefined && peer !== "" ? `private:${peer}` : null;
+  return peer !== undefined && peer !== "" ? `${PRIVATE_KEY_PREFIX}${peer}` : null;
 }
 
 /** 从事件取发信人显示名（群名片 > 昵称 > user_id）。 */
@@ -120,7 +145,7 @@ export function makeNcAdapter(): SourceAdapter {
   const sealGroup = (ctx: SourceContext, buf: GroupBuffer): void => {
     const batch = assembleBatch(buf);
     const kind = buf.events[0]?.raw.message_type; // 会话类型取批内首条（同会话键内必一致）
-    const kindWord = kind === "private" ? "私聊" : "群"; // 日志措辞按会话类型（私聊缓冲也走此处）
+    const kindWord = kindWordOf(kind ?? ""); // 日志措辞按会话类型（私聊缓冲也走此处）
     // 全空消息（raw_message 为空且无可展开段）= 无信息量，留痕后丢弃（留缓冲只会无限重试）。
     // hasContent 由协议层给出——行前缀会让 content 恒非空，「有没有信息量」只有它知道（specs/003 评审）。
     if (!batch.hasContent) {
@@ -136,7 +161,7 @@ export function makeNcAdapter(): SourceAdapter {
         sourceLabel: groupNameOf(buf),
         // 身份键：群 → groupId；私聊 → peer（对方 QQ）——语义诚实（弹性字典自由键，D-84）
         ...(kind === "private"
-          ? { peer: buf.groupId.replace(/^private:/, "") }
+          ? { peer: withoutPrefix(PRIVATE_KEY_PREFIX, buf.groupId) }
           : { groupId: buf.groupId }),
         ...(batch.sender === undefined ? {} : { sender: batch.sender }), // 多人批次省略——行协议已逐行署名（specs/003 FR-004）
       },
@@ -187,9 +212,8 @@ export function makeNcAdapter(): SourceAdapter {
           // 只去重不置 state=error：转发多会话、白名单只收一部分是正常用法，置 error 会误报。
           if (!warnedDroppedGroups.has(key)) {
             warnedDroppedGroups.add(key);
-            const kind = ev.message_type === "group" ? "群" : "私聊";
             ctx.log.warn(
-              `收到${kind} ${key} 的消息，但不在白名单（设置 → 信源 → nc 白名单未收录）——已丢弃。` +
+              `收到${kindWordOf(ev.message_type)} ${key} 的消息，但不在白名单（设置 → 信源 → nc 白名单未收录）——已丢弃。` +
                 (whitelist === null ? "（当前白名单为空 = 全部都不收）" : ""),
             );
           }

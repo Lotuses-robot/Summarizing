@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
 import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
+import type { FetchImageResult } from "../agent0/fetchImage";
 import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
 import type { LlmClient } from "../shared/llm";
@@ -847,18 +848,22 @@ describe("流水数据层（specs/004）", () => {
 });
 
 describe("多模态取图（fetch_image，2026-10-13）", () => {
-  /** 造一个带假 fetchImage 的工具集（其余真造）——网络层单测已覆盖，这里只测循环接线。 */
+  /** 造一个带假 fetchImage 的工具集（其余真造）——网络层单测已覆盖，这里只测循环接线；
+   *  需计调用次数/自定义行为的用例传 fetchImageOverride（如预算用例的计数替身）。 */
   function toolsWithImage(
     db: ReturnType<typeof makeDb>,
     image: { dataUrl: string } | { reason: string },
+    fetchImageOverride?: () => Promise<FetchImageResult>,
   ) {
     const base = makeAgentTools(db);
     return {
       ...base,
-      fetchImage: async () =>
-        "dataUrl" in image
-          ? { ok: true as const, dataUrl: image.dataUrl }
-          : { ok: false as const, reason: image.reason },
+      fetchImage:
+        fetchImageOverride ??
+        (async () =>
+          "dataUrl" in image
+            ? { ok: true as const, dataUrl: image.dataUrl }
+            : { ok: false as const, reason: image.reason }),
     };
   }
 
@@ -979,13 +984,10 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
     llm.push({ content: '{"changes":[]}' });
     const raw = seedRaw(db);
     let fetches = 0;
-    const tools = {
-      ...makeAgentTools(db),
-      fetchImage: async () => {
-        fetches += 1;
-        return { ok: false as const, reason: "取图失败：HTTP 404" };
-      },
-    };
+    const tools = toolsWithImage(db, { reason: "取图失败：HTTP 404" }, async () => {
+      fetches += 1;
+      return { ok: false as const, reason: "取图失败：HTTP 404" };
+    });
     const result = await digestRawInput(db, llm, tools, MODEL, raw);
     expect(result.state).toBe("digested");
     // 预算 4（尝试即计）：前 4 次失败已耗光，第 5 次被拒、未打网

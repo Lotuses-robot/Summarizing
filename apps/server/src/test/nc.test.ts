@@ -46,7 +46,7 @@ async function makeNcApp(
   llm: FakeLlm,
   groups: Record<string, string> | null,
   windowMinutes?: number,
-  opts: { fakeTimers?: boolean } = {},
+  opts: { fakeTimers?: boolean; privates?: Record<string, string> } = {},
 ): Promise<TestAccount> {
   if (opts.fakeTimers !== false) useSweepFakeTimers();
   const t = await makeTestAccount({ llm }); // 默认适配器 = 生产注册表（nc）
@@ -55,6 +55,9 @@ async function makeNcApp(
   }
   if (windowMinutes !== undefined) {
     repo.setSourceSetting(t.db, "nc", "windowMinutes", JSON.stringify(windowMinutes));
+  }
+  if (opts.privates !== undefined) {
+    repo.setSourceSetting(t.db, "nc", "privates", JSON.stringify(opts.privates));
   }
   return t;
 }
@@ -451,8 +454,7 @@ describe("nc 适配器：去抖封批全链路", () => {
   it("私聊白名单内 → 封批落库：身份以 peer（对方 QQ）标识、sourceLabel = 备注名（2026-10-13 私聊支持）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
-    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
-    repo.setSourceSetting(t.db, "nc", "privates", JSON.stringify({ "10001": "室友小王" }));
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0, { privates: { "10001": "室友小王" } });
 
     await emit(
       t,
@@ -473,9 +475,10 @@ describe("nc 适配器：去抖封批全链路", () => {
   it("私聊白名单键照日志原样带 private: 前缀 → 仍能匹配（前缀归一，防双前缀失配）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
     // 用户照日志（「私聊 private:10001 …不在白名单」）原样抄进设置——归一时剥前缀后与 private:10001 会话键对上（审查 2026-10-14）
-    repo.setSourceSetting(t.db, "nc", "privates", JSON.stringify({ "private:10001": "室友小王" }));
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0, {
+      privates: { "private:10001": "室友小王" },
+    });
     await emit(
       t,
       groupEvent({

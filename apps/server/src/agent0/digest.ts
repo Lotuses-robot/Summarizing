@@ -271,11 +271,33 @@ async function elicitChangeList(
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
   let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
   let imageBudget = MAX_IMAGE_FETCHES; // 本批取图预算（防模型反复取图撑爆上下文/带宽）
-  let visionDisabled = false; // 模型拒绝读图后置位——后续 fetch_image 直接拒（防死循环）
+  // 连续降级次数（成功一次即清零）。达 2 次才判定「这模型就是不能读图」——单次带图失败更可能是
+  // 瞬时（429/超时），一失败就永久封杀会静默丢掉该批后续所有图片（审查 2026-10-14）。
+  let degradedStreak = 0;
+  let visionDisabled = false;
+  /** 取一次取图额度：够则扣一次返回 null；否则返回拒因人话（回喂给模型、按纯文本继续）。
+   *  守卫与扣减同一处（审查：曾分居两处各自判 `call.name === "fetch_image"`——防两处漂移）。 */
+  const takeImageSlot = (): string | null => {
+    if (visionDisabled) return "读图已降级为纯文本（带图调用失败）——不要再取图";
+    if (imageBudget <= 0) return "本批取图已达上限，请按纯文本处理";
+    imageBudget -= 1; // 尝试即计（含失败——预算防的是反复打网，不只防取到图；审查 2026-10-14）
+    return null;
+  };
   for (let round = 0; round < DIGEST_MAX_ROUNDS; round++) {
-    const turn = await chatWithImageFallback(llm, db, raw, modelTag, messages, () => {
-      visionDisabled = true;
-    });
+    const turn = await chatWithImageFallback(llm, db, raw, modelTag, messages);
+    if (turn.degraded) {
+      degradedStreak += 1;
+      // 连续两次降级 = 模型确实读不了图 → 后续 fetch_image 直接拒（防死循环；单次降级不封杀）
+      if (degradedStreak >= 2) visionDisabled = true;
+      // 剥图落回本批消息体——后续轮次不再带图、不再重复留痕（审查 2026-10-14：曾只在重试调用里剥、
+      // 不落回 messages，导致降级后每轮都重演一次带图失败 + 重复 image_degraded 留痕）。
+      // 整批 messages 只替换一次（降级最多发生一回）：长度清零后逐个 push 已改好的元素，不重建数组。
+      const stripped = stripImages(messages);
+      messages.length = 0;
+      messages.push(...stripped);
+    } else {
+      degradedStreak = 0; // 本轮没降级（含带图成功）→ 复位：不把「瞬时一次」记成「持续不可用」
+    }
     if (turn.toolCalls.length > 0) {
       traced += 1;
       try {
@@ -301,24 +323,20 @@ async function elicitChangeList(
       const ctx = { sourceIdentity: raw.sourceIdentity, eventTime: raw.eventTime };
       const images: string[] = []; // 本轮的图片 data URL（稍后作 user 消息注入模型）
       for (const call of turn.toolCalls) {
-        // 预算耗尽 / 已降级 → fetch_image 直接拒（回喂人话，模型按纯文本继续）
-        if (call.name === "fetch_image" && (imageBudget <= 0 || visionDisabled)) {
-          messages.push({
-            role: "tool",
-            toolCallId: call.id,
-            content: JSON.stringify({
-              ok: false,
-              reason: visionDisabled
-                ? "读图已降级为纯文本（带图调用失败）——不要再取图"
-                : "本批取图已达上限，请按纯文本处理",
-            }),
-          });
-          continue;
+        if (call.name === "fetch_image") {
+          // 预算耗尽 / 已降级 → 直接拒（回喂人话，模型按纯文本继续）
+          const refusal = takeImageSlot();
+          if (refusal !== null) {
+            messages.push({
+              role: "tool",
+              toolCallId: call.id,
+              content: JSON.stringify({ ok: false, reason: refusal }),
+            });
+            continue;
+          }
         }
         const result = await runTool(tools, call.name, call.argsJson, ctx);
         messages.push({ role: "tool", toolCallId: call.id, content: result.text });
-        // 尝试即计预算（含失败——预算防的是反复打网，不只防取到图；审查 2026-10-14）
-        if (call.name === "fetch_image") imageBudget -= 1;
         if (result.image !== null) images.push(result.image);
       }
       // 取回的图作下一条 user 消息注入（OpenAI 协议 tool 结果只能放文本；图走 user 内容块）。
@@ -436,36 +454,35 @@ function stripImages(messages: ChatMsg[]): ChatMsg[] {
 }
 
 /** 调模型；若消息含图且调用抛错，则**剥图重试一次**——不预判原因（模型不支持图 / 请求过大 / 网关抖动
- *  都可能），只如实留痕原始错误。剥图**就地生效**（原地替换 messages），后续轮次不再带图重试、
- *  不再重复留痕；降级后 onVisionDisabled 置位（后续 fetch_image 直接拒，防死循环）。重试仍失败则抛出（外层标 failed）。 */
+ *  都可能），只如实留痕原始错误。返回 degraded=true 表示本轮降级过——**剥图落回与置位归调用方**
+ *  （helper 不改调用方数据；重试仍失败则抛出，外层标 failed）。 */
 async function chatWithImageFallback(
   llm: LlmClient,
   db: Db,
   raw: RawInput,
   modelTag: string,
   messages: ChatMsg[],
-  onVisionDisabled: () => void,
-): Promise<{ content: string | null; toolCalls: ToolCall[] }> {
+): Promise<{ content: string | null; toolCalls: ToolCall[]; degraded: boolean }> {
   const args = { system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS };
-  if (!hasImage(messages)) return llm.chat(args);
+  if (!hasImage(messages)) return { ...(await llm.chat(args)), degraded: false };
   try {
-    return await llm.chat(args);
+    return { ...(await llm.chat(args)), degraded: false };
   } catch (err) {
+    const msg = errText(err);
+    // 先跑剥图重试，**成功后才留痕**——若重试也抛（429/5xx 等），本批整体 failed，
+    // 不应留下「已剥图重试、本批不再注入图片」的假痕（审查 2026-10-14）
+    const retried = await llm.chat({ ...args, messages: stripImages(messages) });
     appendPipelineEventBestEffort(
       db,
       raw.id,
       {
         action: "image_degraded",
-        detail: `带图调用失败（${errText(err)}），已剥图重试、本批不再注入图片`,
-        payload: { error: errText(err) },
+        detail: `带图调用失败（${msg}），已剥图重试、本批不再注入图片`,
+        payload: { error: msg },
       },
       { actor: "agent0", model: modelTag },
     );
-    onVisionDisabled();
-    // 就地剥图：args.messages 与调用方的 messages 是同一数组——剥完后续轮次不再带图（审查 2026-10-14：
-    // 曾只在重试调用里剥、不落回 messages，导致降级后每轮都重演一次带图失败 + 重复 image_degraded 留痕）
-    messages.splice(0, messages.length, ...stripImages(messages));
-    return llm.chat(args);
+    return { ...retried, degraded: true };
   }
 }
 

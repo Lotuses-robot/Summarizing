@@ -6,6 +6,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readDotEnv } from "./lib/dotenv.mjs";
+import { liveAppImageRef } from "./lib/docker.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, "data");
@@ -28,14 +29,17 @@ const ps = cap("docker", ["compose", "ps", "--format", "table {{.Service}}\t{{.S
 console.log(ps ?? "  (取不到——docker compose 不可用？)");
 
 // 2. 版本（在跑容器的镜像 tag；.env 声明值并列显示——两者不一致说明改过没 pull/up）
+// 部署声明只认 .env（与 upgrade.mjs 同口径——曾读 shell 值却标成「.env 声明」，与升级脚本各执一词，审查 2026-10-14）
 console.log("\n[版本]");
-const appImage = (process.env.APP_IMAGE ?? dotenv.vars.APP_IMAGE ?? "").trim();
-const appId = cap("docker", ["compose", "ps", "-q", "app"]);
-const liveImage =
-  appId === null || appId === ""
-    ? null
-    : cap("docker", ["inspect", "--format", "{{.Config.Image}}", appId.split("\n")[0]]);
-console.log(`  在跑镜像：${liveImage ?? "(取不到——app 容器未运行？)"}`);
+const appImage = (dotenv.vars.APP_IMAGE ?? "").trim();
+const live = liveAppImageRef(root);
+const liveImage = "ref" in live ? live.ref : null;
+console.log(
+  `  在跑镜像：${
+    liveImage ??
+    (live.problem === "docker-unavailable" ? "(取不到——docker/compose 不可用)" : "(app 容器未运行)")
+  }`,
+);
 console.log(appImage !== "" ? `  .env 声明：${appImage}` : "  .env 无 APP_IMAGE（本地 build 形态）");
 if (liveImage !== null && appImage !== "" && liveImage !== appImage) {
   console.log("  ⚠️ 两者不一致——.env 改过但还没 pull/up，或手动改过 compose 环境");
@@ -83,9 +87,12 @@ try {
   if (!existsSync(backupsDir)) {
     console.log("  (无 data/backups/——还没跑过 backup，或备份在别处)");
   } else {
-    const entries = readdirSync(backupsDir);
-    const dirs = entries.filter((e) => statSync(path.join(backupsDir, e)).isDirectory()).sort();
-    const flat = entries.filter((e) => !statSync(path.join(backupsDir, e)).isDirectory());
+    const entries = readdirSync(backupsDir, { withFileTypes: true }); // 类型随目录一并取，省 2N 次 stat
+    const dirs = entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
+    const flat = entries.filter((e) => !e.isDirectory()).map((e) => e.name);
     if (dirs.length === 0 && flat.length === 0) {
       console.log("  (空——无备份)");
     } else {

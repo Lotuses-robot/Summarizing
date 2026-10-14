@@ -6,7 +6,6 @@ import {
   sourceLabelOf,
   type GetItemResult,
   type RawInput,
-  type SourceIdentity,
   dueDateElement,
   elementSubject,
 } from "@summarizing/shared";
@@ -94,7 +93,7 @@ export function ItemBody({ id }: { id: string }) {
   const freeElements = item.elements.filter((e) => e.label !== "name" && e.label !== "summary");
   const summaryElement = item.elements.find((e) => e.label === "summary");
   const summaryEvidence = summaryElement === undefined ? [] : evidenceFor("summary");
-  // 来源信息：从证据批次收集来源身份，按「来源类型 + 身份串」去重（弹性字典自由键，用户 2026-10-14）；
+  // 来源信息：逐批次铺开（一行 = 一个进站批次，**不按身份串去重/合并**——见 collectSources，用户 2026-10-14）；
   // 一个事项的证据可跨多批次/多来源，全部如实列出
   const sources = collectSources(detail);
 
@@ -194,13 +193,14 @@ export function ItemBody({ id }: { id: string }) {
             <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
           </h3>
           {sources.map((src) => {
-            const open = openSources.includes(src.key);
+            const open = openSources.includes(src.raw.id);
             return (
-              <div key={src.key} className="mt-3">
+              <div key={src.raw.id} className="mt-3">
                 {/* 收起态行 = [信源类型] sourceLabel（用户 2026-10-14 定：nc 放最前、不放别的）。
                     点行展开/收起——手势与元素行同款；行与批次一一对应，同标签多批次 = 多行 */}
-                <p className="cursor-pointer text-sm" onClick={() => toggleSource(src.key)}>
-                  <b className="text-ink-muted">[{src.sourceType}]</b> {sourceLabelOf(src.identity)}
+                <p className="cursor-pointer text-sm" onClick={() => toggleSource(src.raw.id)}>
+                  <b className="text-ink-muted">[{src.raw.sourceType}]</b>{" "}
+                  {sourceLabelOf(src.raw.sourceIdentity)}
                 </p>
                 {/* 展开区（引文同款左缘缩进线）：① 除保留键外的其余自由键逐条成行；
                     ② 本批次自身一行，行内「看原文」直达该批次原文浮窗 */}
@@ -268,13 +268,10 @@ export function ItemBody({ id }: { id: string }) {
   );
 }
 
-/** 来源信息行：**一个进站批次 = 一行**（用户 2026-10-14 定）。 */
+/** 来源信息行：**一个进站批次 = 一行**（用户 2026-10-14 定）——raw 即行本体（行键 = raw.id），entries 是它的派生展示。 */
 interface SourceRow {
-  key: string; // 批次 id——折叠状态与 React key 共用
-  sourceType: string;
-  identity: SourceIdentity; // 整份保留（渲染与排障都用它；sourceLabel 由 sourceLabelOf 现取）
+  raw: RawInput; // 本行对应的批次（展开区自由键与「看原文」都由它派生）
   entries: [string, string][]; // 除 sourceLabel 外的自由键值对（键按字典序稳定）
-  raw: RawInput; // 本行对应的批次（展开区「看原文」直达）
 }
 
 /** 从事项详情的证据批次逐批次铺开来源行（用户 2026-10-14 加「来源信息」栏）。
@@ -294,13 +291,7 @@ function collectSources(detail: GetItemResult): SourceRow[] {
             : JSON.stringify(v),
         ])
         .sort(([a], [b]) => a.localeCompare(b));
-      return {
-        key: raw.id,
-        sourceType: raw.sourceType,
-        identity: raw.sourceIdentity,
-        entries,
-        raw,
-      };
+      return { raw, entries };
     });
 }
 
