@@ -5,9 +5,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readDotEnv } from "./lib/dotenv.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, "data");
+const dotenv = readDotEnv(root); // .env 我们自己读（node 不自动加载；compose 才认识 .env）
 
 /** 跑一条命令取 stdout（失败返回 null，不抛——诊断脚本要能容错继续）。 */
 function cap(cmd, args) {
@@ -25,10 +27,19 @@ console.log("\n[容器]");
 const ps = cap("docker", ["compose", "ps", "--format", "table {{.Service}}\t{{.Status}}"]);
 console.log(ps ?? "  (取不到——docker compose 不可用？)");
 
-// 2. 版本（当前镜像 tag）
+// 2. 版本（在跑容器的镜像 tag；.env 声明值并列显示——两者不一致说明改过没 pull/up）
 console.log("\n[版本]");
-const appImage = (process.env.APP_IMAGE ?? "").trim();
-console.log(appImage !== "" ? `  镜像：${appImage}` : "  本地 build 形态（无 APP_IMAGE）");
+const appImage = (process.env.APP_IMAGE ?? dotenv.vars.APP_IMAGE ?? "").trim();
+const appId = cap("docker", ["compose", "ps", "-q", "app"]);
+const liveImage =
+  appId === null || appId === ""
+    ? null
+    : cap("docker", ["inspect", "--format", "{{.Config.Image}}", appId.split("\n")[0]]);
+console.log(`  在跑镜像：${liveImage ?? "(取不到——app 容器未运行？)"}`);
+console.log(appImage !== "" ? `  .env 声明：${appImage}` : "  .env 无 APP_IMAGE（本地 build 形态）");
+if (liveImage !== null && appImage !== "" && liveImage !== appImage) {
+  console.log("  ⚠️ 两者不一致——.env 改过但还没 pull/up，或手动改过 compose 环境");
+}
 
 // 3. 最近错误（从 app 日志 grep 关键前缀）
 console.log("\n[最近错误（app 日志尾部）]");
@@ -65,20 +76,30 @@ const dataSize = (() => {
 })();
 console.log(`  data/ 合计：${dataSize}`);
 
-// 5. 备份（data/backups/ 最近一次）
+// 5. 备份（data/backups/：admin backup 的戳目录 + 兼容旧版平铺文件）
 console.log("\n[备份]");
-const backupsDir = path.join(dataDir, "backups");
-if (!existsSync(backupsDir)) {
-  console.log("  (无 data/backups/——还没跑过 backup，或备份在别处)");
-} else {
-  const dirs = readdirSync(backupsDir).sort();
-  if (dirs.length === 0) console.log("  (空——无备份)");
-  else {
-    const latest = dirs[dirs.length - 1];
-    const st = statSync(path.join(backupsDir, latest));
-    console.log(`  最近：${latest}（${st.mtime.toISOString()}）`);
-    console.log(`  共 ${dirs.length} 份：${dirs.slice(-5).join(", ")}`);
+try {
+  const backupsDir = path.join(dataDir, "backups");
+  if (!existsSync(backupsDir)) {
+    console.log("  (无 data/backups/——还没跑过 backup，或备份在别处)");
+  } else {
+    const entries = readdirSync(backupsDir);
+    const dirs = entries.filter((e) => statSync(path.join(backupsDir, e)).isDirectory()).sort();
+    const flat = entries.filter((e) => !statSync(path.join(backupsDir, e)).isDirectory());
+    if (dirs.length === 0 && flat.length === 0) {
+      console.log("  (空——无备份)");
+    } else {
+      if (dirs.length > 0) {
+        console.log(`  最近：${dirs[dirs.length - 1]}/（共 ${dirs.length} 份：${dirs.slice(-5).join(", ")}）`);
+      }
+      if (flat.length > 0) {
+        // 旧版 backup --out 直落文件的形态（每次覆盖同名）——提醒别把它当多份备份
+        console.log(`  平铺文件 ${flat.length} 个（旧形态，会互相覆盖）：${flat.slice(0, 5).join(", ")}`);
+      }
+    }
   }
+} catch {
+  console.log("  (取不到——data/backups/ 读取失败)");
 }
 
 console.log("\n提示：细节排查用 `docker compose logs -f app`；在线/告警看 Uptime Kuma（docs/13 五）。");

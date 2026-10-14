@@ -45,7 +45,7 @@ const ADMIN_USAGE = `用法（运维命令）：
   passwd:reset <username>    重置密码（全端下线；交互输入新密码）
   invite:new [--days N]      生成一次性邀请码（默认 7 天；设 BASE_URL 时附完整注册链接）
   invite:revoke <code>       作废未使用的邀请码
-  backup [--out DIR]         在线备份全部库（system.db + users/*.db → DIR，默认 ./backups/<时间戳>）
+  backup [--out DIR]         在线备份全部库（system.db + users/*.db → DIR，默认 <dataRoot>/backups/<时间戳>）
   restore <DIR>              从备份目录还原全部库（**须先停服**）`;
 
 /** 按用户名取账户；不存在/格式坏抛人话错误。 */
@@ -95,9 +95,10 @@ async function runBackupCommand(
     } else if (arg !== undefined) {
       throw new Error("用法：backup [--out DIR]");
     }
-    // 默认落 dataRoot 同级的 backups/<北京时间戳>/（相对 dataRoot，容器里 dataRoot=/app/data）
-    const dir =
-      out ?? path.join(deps.dataRoot, "..", "backups", nowWallClock().replace(/[:.]/g, "-"));
+    // 默认落 **dataRoot 内的** backups/<北京时间戳>/——容器里 dataRoot=/app/data（compose 只挂 ./data），
+    // 备份必须落在被挂载的目录内才留得住（审查 2026-10-14：原默认 dataRoot/../backups 在容器里 =
+    // /app/backups，未挂载、容器重建即丢）；宿主 dev 同款落 <repo>/data/backups/<戳>/
+    const dir = out ?? path.join(deps.dataRoot, "backups", nowWallClock().replace(/[:.]/g, "-"));
     const written = await backupAll(layout, dir);
     if (written.length === 0) {
       io.log("没有可备份的库（dataRoot 下无 system.db / users/*.db）");

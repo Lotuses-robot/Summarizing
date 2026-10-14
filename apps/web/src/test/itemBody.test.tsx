@@ -140,7 +140,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     expect(screen.queryByText(/按往年惯例推算/)).not.toBeInTheDocument();
   });
 
-  it("来源信息栏：一行一来源（[信源] 标签），点行展开自由键与全部批次、批次行直达原文", async () => {
+  it("来源信息栏：一行一批次（不按身份串合并），各行独立展开、批次行直达原文", async () => {
     stubFetch(
       makeDetail({
         rawInputs: {
@@ -153,12 +153,13 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
             eventTime: null,
             digestState: "digested",
           },
-          // 同来源、不同批次 → 合并到一个来源下（批次全列，不重复出行）
+          // 同来源、不同批次，且身份键形状不同（一个带 sender 一个不带）→ 仍各占一行：
+          // 哪些键逐批稳定是适配器的形状知识，前端不假设、不合并（用户 2026-10-14 定）
           raw2: {
             id: "raw2",
             content: "补发",
             sourceType: "nc",
-            sourceIdentity: { sourceLabel: "英语课群", groupId: "940641749", sender: "学习委员" },
+            sourceIdentity: { sourceLabel: "英语课群", groupId: "940641749" },
             receivedAt: "2026-09-27T10:00:00",
             eventTime: null,
             digestState: "digested",
@@ -168,32 +169,41 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     );
     render(<ItemBody id="it1" />);
     await waitFor(() => expect(screen.getByText("来源信息")).toBeInTheDocument());
-    // 来源计数 = 1（两条批次同来源去重）
-    expect(screen.getByText("来源信息").parentElement).toHaveTextContent("1");
-    // 收起态行 = [类型] 标签（不放证据计数、不放看原文——用户 2026-10-14 定）
-    const row = screen.getByText("[nc]").parentElement;
-    expect(row).toHaveTextContent("[nc] 英语课群");
+    // 计数 = 批次数（2）；两行收起态都只有 [nc] 英语课群（不放别的——用户 2026-10-14 定）
+    expect(screen.getByText("来源信息").parentElement).toHaveTextContent("2");
+    const rows = screen.getAllByText("[nc]");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.parentElement).toHaveTextContent("[nc] 英语课群");
     expect(screen.queryByText("[groupId]")).not.toBeInTheDocument();
-    // 点行展开：① 自由键逐条成行（键按字典序：groupId < sender）② 全部批次各一行（倒序：新批次在前）
-    fireEvent.click(screen.getByText("[nc]"));
+    // 展开第一行（新批次在前 = raw2）：只列本批次的自由键（没有 sender 就是不列——不猜）
+    const firstRow = rows[0];
+    if (firstRow === undefined) throw new Error("没有来源行");
+    fireEvent.click(firstRow);
     expect(screen.getByText("[groupId]").parentElement).toHaveTextContent("[groupId] 940641749");
-    expect(screen.getByText("[sender]").parentElement).toHaveTextContent("[sender] 学习委员");
+    expect(screen.queryByText("[sender]")).not.toBeInTheDocument();
     expect(screen.getByText(/raw2 · 2026-09-27 10:00:00/)).toBeInTheDocument();
-    expect(screen.getByText(/raw1 · 2026-09-26 10:00:00/)).toBeInTheDocument();
     // 批次行「看原文」直达该批次原文（无待高亮句 → 整段平铺）
-    const openButtons = screen.getAllByText("看原文");
-    expect(openButtons).toHaveLength(2);
-    const first = openButtons[0];
-    if (first === undefined) throw new Error("批次行没有「看原文」");
-    fireEvent.click(first);
+    fireEvent.click(screen.getByText("看原文"));
     const overlayText = await screen.findByText("补发");
     expect(overlayText.tagName).toBe("P");
     act(() => {
       handleEsc();
     });
     expect(screen.queryByText("补发")).not.toBeInTheDocument();
-    // 再点行收起
-    fireEvent.click(screen.getByText("[nc]"));
+    // 第二行独立展开：它有 sender、批次行是 raw1——各是各的
+    const secondRow = rows[1];
+    if (secondRow === undefined) throw new Error("没有第二个来源行");
+    fireEvent.click(secondRow);
+    expect(screen.getByText("[sender]").parentElement).toHaveTextContent("[sender] 学习委员");
+    expect(screen.getByText(/raw1 · 2026-09-26 10:00:00/)).toBeInTheDocument();
+    expect(screen.getAllByText("看原文")).toHaveLength(2);
+    // 收起第一行 → 只剩第二行自己的键与批次行
+    fireEvent.click(firstRow);
+    expect(screen.queryByText(/raw2 · /)).not.toBeInTheDocument();
+    expect(screen.getAllByText("[groupId]")).toHaveLength(1);
+    expect(screen.getByText("[sender]")).toBeInTheDocument();
+    // 再点第二行收起
+    fireEvent.click(secondRow);
     expect(screen.queryByText("[groupId]")).not.toBeInTheDocument();
   });
 

@@ -470,6 +470,42 @@ describe("nc 适配器：去抖封批全链路", () => {
     expect(raw.sourceIdentity["peer"]).toBe("10001"); // 身份键 = peer（非 groupId）
   });
 
+  it("私聊白名单键照日志原样带 private: 前缀 → 仍能匹配（前缀归一，防双前缀失配）", async () => {
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    const t = await makeNcApp(llm, { g1: "英语群" }, 0);
+    // 用户照日志（「私聊 private:10001 …不在白名单」）原样抄进设置——归一时剥前缀后与 private:10001 会话键对上（审查 2026-10-14）
+    repo.setSourceSetting(t.db, "nc", "privates", JSON.stringify({ "private:10001": "室友小王" }));
+    await emit(
+      t,
+      groupEvent({
+        groupId: "g1",
+        messageId: "pm1",
+        text: "明天带饭卡",
+        time: 1790595828,
+        messageType: "private",
+      }),
+    );
+    const raw = await sealAndWaitDigested(t.db);
+    expect(raw.sourceIdentity["peer"]).toBe("10001");
+    expect(raw.sourceIdentity["sourceLabel"]).toBe("室友小王");
+  });
+
+  it("私聊事件缺发信人 id（定位不了会话）→ 204 丢，不落档", async () => {
+    const t = await makeNcApp(new FakeLlm(), { g1: "英语群" });
+    const res = await emit(t, {
+      post_type: "message",
+      message_type: "private",
+      message_id: "pm-noSender",
+      raw_message: "谁的私聊",
+      time: 1790595828,
+      sender: {}, // 群号缺席 + 发信人 id 全无 → 会话键定位不了 → 丢弃（而不是猜一个会话）
+    });
+    expect(res.statusCode).toBe(204);
+    sweepNow();
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
+  });
+
   it("重推同一 message_id → 只投递一次", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });

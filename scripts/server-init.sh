@@ -3,9 +3,10 @@
 # 做四件事：装 Docker → 防火墙只开 80/443/SSH → 开 swap → 建 data/ 并设属主（uid 1000）。
 # 面向：阿里云 Ubuntu/Debian。
 #
-# 用法：sudo ./server-init.sh <部署目录>
-#   <部署目录> = docker-compose.yml 所在目录（如 ~/summarizing 或 /opt/summarizing）。
-#   省略则用当前目录。
+# 用法：sudo ./server-init.sh [部署目录] [--data-only]
+#   <部署目录> = docker-compose.yml 所在目录（如 ~/summarizing 或 /opt/summarizing）。省略则用当前目录。
+#   --data-only = 只修 data/ 属主（可反复跑，位置随意）。两个参数顺序不限（审查 2026-10-14：
+#   旧版按死位置取参——`server-init.sh --data-only` 会把 "--data-only" 当目录名建出一坨垃圾目录）。
 #
 # ⚠️ 顺序很关键：**先建好目录（含 data/）再 docker compose up**。
 #   若 data/ 是 compose up 时才由 Docker 建的，会归 root → 容器内 node(1000) 写不进
@@ -14,11 +15,19 @@
 set -euo pipefail
 
 SWAP_GB=2
-REPO_DIR="${1:-$PWD}"
-DATA_ONLY="${2:-}"
+REPO_DIR=""
+DATA_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --data-only) DATA_ONLY=1 ;;
+    -*) echo "未知参数：$arg（支持：<部署目录> / --data-only）" >&2; exit 1 ;;
+    *) REPO_DIR="$arg" ;;
+  esac
+done
+REPO_DIR="${REPO_DIR:-$PWD}"
 
 # ── --data-only：只修 data/ 属主（可反复跑；compose up 后若忘了、或目录被重建时用）──
-if [ "$DATA_ONLY" = "--data-only" ]; then
+if [ "$DATA_ONLY" -eq 1 ]; then
   echo "==> 只修 data/ 属主：${REPO_DIR}/data"
   mkdir -p "${REPO_DIR}/data"
   chown -R 1000:1000 "${REPO_DIR}/data"
@@ -33,9 +42,12 @@ if ! command -v docker >/dev/null 2>&1; then
     echo "    官方源不可用，改用阿里云 Docker 源…"
     install -m 0755 -d /etc/apt/keyrings
     apt-get install -y ca-certificates curl gnupg
-    curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg \
+    # 发行版识别：阿里云源按发行版分路径（ubuntu/debian）——写死 ubuntu 在 Debian 机器上 404（审查 2026-10-14）
+    DISTRO="$(. /etc/os-release && echo "${ID:-ubuntu}")"
+    case "$DISTRO" in ubuntu | debian) ;; *) DISTRO="ubuntu" ;; esac
+    curl -fsSL "https://mirrors.aliyun.com/docker-ce/linux/${DISTRO}/gpg" \
       | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/${DISTRO} $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
       > /etc/apt/sources.list.d/docker.list
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin

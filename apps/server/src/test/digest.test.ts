@@ -913,10 +913,11 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
     expect(anyImage).toBe(false);
   });
 
-  it("模型不支持读图：带图调用失败 → 剥图重试一次 + image_degraded 留痕", async () => {
+  it("模型不支持读图：带图调用失败 → 剥图重试一次 + image_degraded 留痕（剥图就地生效，后续轮不再带图）", async () => {
     const db = makeDb(":memory:");
-    // 定制 LLM：首轮吐取图工具调用；此后凡消息带图即抛错（模拟网关拒绝 image_url），
-    // 剥图后（无图）正常返回。以此真实走通「带图失败 → 降级重试」这条路径。
+    // 定制 LLM：首轮吐取图工具调用；此后凡消息带图即抛错（模拟网关拒绝 image_url），剥图后正常。
+    // 第 3 次再吐一个普通工具调用，逼出第四轮——验证降级后的轮次不再带图（审查 2026-10-14：
+    // 曾只在重试那一次调用里剥图、不落回 messages，降级后每轮都重演带图失败 + 重复 image_degraded）。
     const calls: { hasImage: boolean }[] = [];
     const llm: LlmClient = {
       async chat(args) {
@@ -940,6 +941,12 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
             ],
           };
         }
+        if (calls.length === 3) {
+          return {
+            content: null,
+            toolCalls: [{ id: "t2", name: "search_items", argsJson: '{"query":"x"}' }],
+          };
+        }
         return { content: '{"changes":[]}', toolCalls: [] };
       },
     };
@@ -947,9 +954,47 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
     const tools = toolsWithImage(db, { dataUrl: "data:image/jpeg;base64,AAAA" });
     const result = await digestRawInput(db, llm, tools, MODEL, raw);
     expect(result.state).toBe("digested");
-    // 有一次带图调用（失败）→ 剥图重试（无图）→ 共三次 chat
+    // 恰好一次带图调用（失败）→ 剥图重试（无图）→ 普通工具轮（无图）→ 终轮（无图）
     expect(calls.filter((c) => c.hasImage)).toHaveLength(1);
+    expect(calls).toHaveLength(4);
     const events = repo.listPipelineEvents(db, raw.id);
-    expect(events.some((e) => e.action === "image_degraded")).toBe(true);
+    expect(events.filter((e) => e.action === "image_degraded")).toHaveLength(1);
+  });
+
+  it("取图预算按尝试计数：失败也耗预算——第 5 次取图直接拒、不再打网", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    for (let i = 1; i <= 5; i++) {
+      llm.push({
+        content: null,
+        toolCalls: [
+          {
+            id: `t${i}`,
+            name: "fetch_image",
+            argsJson: JSON.stringify({ url: `https://x/${i}.jpg` }),
+          },
+        ],
+      });
+    }
+    llm.push({ content: '{"changes":[]}' });
+    const raw = seedRaw(db);
+    let fetches = 0;
+    const tools = {
+      ...makeAgentTools(db),
+      fetchImage: async () => {
+        fetches += 1;
+        return { ok: false as const, reason: "取图失败：HTTP 404" };
+      },
+    };
+    const result = await digestRawInput(db, llm, tools, MODEL, raw);
+    expect(result.state).toBe("digested");
+    // 预算 4（尝试即计）：前 4 次失败已耗光，第 5 次被拒、未打网
+    expect(fetches).toBe(4);
+    // 第 5 次的工具回喂是「已达上限」拒语（第 6 次调用的消息里可见）
+    const last = chatAt(llm, 5);
+    const refused = last.messages.some(
+      (m) => m.role === "tool" && typeof m.content === "string" && m.content.includes("已达上限"),
+    );
+    expect(refused).toBe(true);
   });
 });

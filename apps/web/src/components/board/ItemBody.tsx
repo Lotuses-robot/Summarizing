@@ -23,8 +23,6 @@ const ACTION_LABELS: Record<string, string> = {
   complete_item: "标完成",
   reopen_item: "恢复待办",
   archive_item: "归档",
-  unarchive_item: "撤回归档",
-  record_note: "留痕",
   digest_note: "留痕",
 };
 import { api } from "../../api";
@@ -200,12 +198,12 @@ export function ItemBody({ id }: { id: string }) {
             return (
               <div key={src.key} className="mt-3">
                 {/* 收起态行 = [信源类型] sourceLabel（用户 2026-10-14 定：nc 放最前、不放别的）。
-                    点行展开/收起——手势与元素行同款 */}
+                    点行展开/收起——手势与元素行同款；行与批次一一对应，同标签多批次 = 多行 */}
                 <p className="cursor-pointer text-sm" onClick={() => toggleSource(src.key)}>
                   <b className="text-ink-muted">[{src.sourceType}]</b> {sourceLabelOf(src.identity)}
                 </p>
-                {/* 展开区（引文同款左缘缩进线）：① 除类型/标签外的其余自由键逐条成行；
-                    ② 该来源名下的全部批次各一行，行内「看原文」直达（批次数不限、一律全列） */}
+                {/* 展开区（引文同款左缘缩进线）：① 除保留键外的其余自由键逐条成行；
+                    ② 本批次自身一行，行内「看原文」直达该批次原文浮窗 */}
                 {open && (
                   <>
                     {src.entries.map(([k, v]) => (
@@ -216,21 +214,16 @@ export function ItemBody({ id }: { id: string }) {
                         <b>[{k}]</b> {v}
                       </blockquote>
                     ))}
-                    {src.raws.map((raw) => (
-                      <blockquote
-                        key={raw.id}
-                        className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted"
+                    <blockquote className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted">
+                      <b>[批次]</b> {src.raw.id.slice(0, 6)} · {fmtFullTime(src.raw.receivedAt)}
+                      {" · "}
+                      <button
+                        className="text-accent hover:underline"
+                        onClick={() => setQuote({ raw: src.raw, text: "" })}
                       >
-                        <b>[批次]</b> {raw.id.slice(0, 6)} · {fmtFullTime(raw.receivedAt)}
-                        {" · "}
-                        <button
-                          className="text-accent hover:underline"
-                          onClick={() => setQuote({ raw, text: "" })}
-                        >
-                          看原文
-                        </button>
-                      </blockquote>
-                    ))}
+                        看原文
+                      </button>
+                    </blockquote>
                   </>
                 )}
               </div>
@@ -275,52 +268,40 @@ export function ItemBody({ id }: { id: string }) {
   );
 }
 
-/** 来源信息行：一个来源 = 类型 + 身份（整份弹性字典）+ 自由键值对 + 名下批次（用户 2026-10-14 定稿）。 */
+/** 来源信息行：**一个进站批次 = 一行**（用户 2026-10-14 定）。 */
 interface SourceRow {
-  key: string; // 稳定键（类型 + 身份串）——折叠状态与 React key 共用
+  key: string; // 批次 id——折叠状态与 React key 共用
   sourceType: string;
   identity: SourceIdentity; // 整份保留（渲染与排障都用它；sourceLabel 由 sourceLabelOf 现取）
   entries: [string, string][]; // 除 sourceLabel 外的自由键值对（键按字典序稳定）
-  raws: RawInput[]; // 该来源名下的批次（按接收时刻倒序——最新在前），展开区逐行列出
+  raw: RawInput; // 本行对应的批次（展开区「看原文」直达）
 }
 
-/** 从事项详情的证据批次收集去重来源（用户 2026-10-14 加「来源信息」栏）。
- *  一个事项的证据可来自多批次/多来源——全部如实列出（不合并成一条，不同来源=不同出处）。
- *  去重键 = 来源类型 + 完整身份串；`sourceLabel` 单列在行首，其余键铺成 entries（弹性字典自由键）。 */
+/** 从事项详情的证据批次逐批次铺开来源行（用户 2026-10-14 加「来源信息」栏）。
+ *  **不按身份串合并**——哪些键逐批变化（如 sender 时有时无）是适配器的形状知识，前端不假设；
+ *  同一来源进来了几个批次就几行（新批次在前），各自展开各见各的自由键与原文。 */
 function collectSources(detail: GetItemResult): SourceRow[] {
-  const rows: SourceRow[] = [];
-  const byKey = new Map<string, SourceRow>();
-  const raws = Object.values(detail.rawInputs).sort((a, b) =>
-    b.receivedAt.localeCompare(a.receivedAt),
-  );
-  for (const raw of raws) {
-    const key = `${raw.sourceType}::${sourceIdentityLabel(raw.sourceIdentity)}`;
-    const existing = byKey.get(key);
-    if (existing !== undefined) {
-      existing.raws.push(raw); // 同来源的下一批次（已按接收时刻倒序）
-      continue;
-    }
-    // 自由键值对（除保留键 sourceLabel）——值转字符串展示，键按字典序稳定排序（同一来源每次渲染一致）
-    const entries = Object.entries(raw.sourceIdentity)
-      .filter(([k]) => k !== "sourceLabel")
-      .map(([k, v]): [string, string] => [
-        k,
-        typeof v === "string" || typeof v === "number" || typeof v === "boolean"
-          ? String(v)
-          : JSON.stringify(v),
-      ])
-      .sort(([a], [b]) => a.localeCompare(b));
-    const row: SourceRow = {
-      key,
-      sourceType: raw.sourceType,
-      identity: raw.sourceIdentity,
-      entries,
-      raws: [raw],
-    };
-    byKey.set(key, row);
-    rows.push(row);
-  }
-  return rows;
+  return Object.values(detail.rawInputs)
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+    .map((raw) => {
+      // 自由键值对（除保留键 sourceLabel）——值转字符串展示，键按字典序稳定排序（同一批次每次渲染一致）
+      const entries = Object.entries(raw.sourceIdentity)
+        .filter(([k]) => k !== "sourceLabel")
+        .map(([k, v]): [string, string] => [
+          k,
+          typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+            ? String(v)
+            : JSON.stringify(v),
+        ])
+        .sort(([a], [b]) => a.localeCompare(b));
+      return {
+        key: raw.id,
+        sourceType: raw.sourceType,
+        identity: raw.sourceIdentity,
+        entries,
+        raw,
+      };
+    });
 }
 
 /** 某元素的引文块：片段 + 批次短 id + 「看原文」悬浮窗入口（基本信息与元素区共用）。 */

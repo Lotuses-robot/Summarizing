@@ -186,7 +186,7 @@ describe("运维命令层（backup/restore 走 registry 之外）", () => {
         logs.push(l);
       },
     };
-    // backup 到显式目录（默认目录在 os.tmpdir() 同级、跨用例共享，会串味——显式给 --out）
+    // backup 到显式目录（--out 照旧支持；restore 必须能按同一目录还原）
     const out = path.join(tmpDir(), "ops-backup");
     await runAdmin(["backup", "--out", out], { dataRoot: root, io });
     expect(existsSync(path.join(out, "system.db"))).toBe(true);
@@ -204,18 +204,16 @@ describe("运维命令层（backup/restore 走 registry 之外）", () => {
     reg3.$client.close();
   });
 
-  it("默认备份目录名是北京时间戳形状", async () => {
+  it("默认备份目录 = dataRoot/backups/<北京时间戳>（容器里才留得住——审查 2026-10-14）", async () => {
     const { runAdmin } = await import("../cli/admin");
     const root = tmpDir();
     const reg = makeRegistryDb(path.join(root, "system.db"));
     reg.$client.close();
     const io = { prompt: () => Promise.resolve(""), log: () => {} };
     await runAdmin(["backup"], { dataRoot: root, io });
-    const stamps = readdirSync(path.join(root, "..", "backups"));
+    const stamps = readdirSync(path.join(root, "backups"));
     expect(stamps.some((s) => /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/.test(s))).toBe(true);
-    // 清掉本次在共享目录留下的备份（避免影响下次运行/其它用例）
-    for (const s of stamps) {
-      rmSync(path.join(root, "..", "backups", s), { recursive: true, force: true });
-    }
+    // 备份落在 dataRoot 内（容器里 dataRoot=/app/data 是挂载点——落在外面容器重建即丢）
+    expect(existsSync(path.join(root, "backups", stamps[0] ?? "", "system.db"))).toBe(true);
   });
 });

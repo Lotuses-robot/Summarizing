@@ -309,7 +309,7 @@ async function elicitChangeList(
             content: JSON.stringify({
               ok: false,
               reason: visionDisabled
-                ? "当前模型不支持读图，已降级为纯文本——不要再取图"
+                ? "读图已降级为纯文本（带图调用失败）——不要再取图"
                 : "本批取图已达上限，请按纯文本处理",
             }),
           });
@@ -317,10 +317,9 @@ async function elicitChangeList(
         }
         const result = await runTool(tools, call.name, call.argsJson, ctx);
         messages.push({ role: "tool", toolCallId: call.id, content: result.text });
-        if (result.image !== null && imageBudget > 0) {
-          imageBudget -= 1;
-          images.push(result.image);
-        }
+        // 尝试即计预算（含失败——预算防的是反复打网，不只防取到图；审查 2026-10-14）
+        if (call.name === "fetch_image") imageBudget -= 1;
+        if (result.image !== null) images.push(result.image);
       }
       // 取回的图作下一条 user 消息注入（OpenAI 协议 tool 结果只能放文本；图走 user 内容块）。
       // 降级后再不注入（否则模型仍收到图 = 白重试）。
@@ -409,7 +408,7 @@ async function runTool(
   }
 }
 
-/** 本批最多取几张图（防模型反复取图把上下文/带宽撑爆）。 */
+/** 本批最多取几次图（尝试即计——失败的取图也耗预算，防对失效 URL 反复打网）。 */
 const MAX_IMAGE_FETCHES = 4;
 
 /** 消息里是否含图片内容块（决定是否需要走「剥图重试」这条路）。 */
@@ -422,22 +421,23 @@ function hasImage(messages: ChatMsg[]): boolean {
   );
 }
 
-/** 剥掉所有图片内容块——带图调用失败（模型不支持读图）时的降级重试：不丢任何文本工具结果，
+/** 剥掉所有图片内容块——带图调用失败时的降级重试：不丢任何文本工具结果，
  *  只把 user 消息的图片块换成占位文本（否则空内容块会被网关拒）。 */
 function stripImages(messages: ChatMsg[]): ChatMsg[] {
   return messages.map((m) => {
     if (m.role !== "user" || !Array.isArray(m.content)) return m;
     const parts = m.content.map((p) =>
       p.type === "image_url"
-        ? { type: "text" as const, text: "（图片已省略：当前模型不支持读图）" }
+        ? { type: "text" as const, text: "（图片已省略：带图调用失败，本批按纯文本处理）" }
         : p,
     );
     return { role: "user", content: parts };
   });
 }
 
-/** 调模型；若消息含图且调用抛错，则判定为「模型不支持读图」，留痕一次并**剥图重试一次**。
- *  降级为纯文本后 onVisionDisabled 置位（后续 fetch_image 直接拒，防死循环）。重试仍失败则抛出（外层标 failed）。 */
+/** 调模型；若消息含图且调用抛错，则**剥图重试一次**——不预判原因（模型不支持图 / 请求过大 / 网关抖动
+ *  都可能），只如实留痕原始错误。剥图**就地生效**（原地替换 messages），后续轮次不再带图重试、
+ *  不再重复留痕；降级后 onVisionDisabled 置位（后续 fetch_image 直接拒，防死循环）。重试仍失败则抛出（外层标 failed）。 */
 async function chatWithImageFallback(
   llm: LlmClient,
   db: Db,
@@ -456,13 +456,16 @@ async function chatWithImageFallback(
       raw.id,
       {
         action: "image_degraded",
-        detail: `模型不支持读图（${errText(err)}），本批降级为纯文本处理`,
+        detail: `带图调用失败（${errText(err)}），已剥图重试、本批不再注入图片`,
         payload: { error: errText(err) },
       },
       { actor: "agent0", model: modelTag },
     );
     onVisionDisabled();
-    return llm.chat({ ...args, messages: stripImages(messages) });
+    // 就地剥图：args.messages 与调用方的 messages 是同一数组——剥完后续轮次不再带图（审查 2026-10-14：
+    // 曾只在重试调用里剥、不落回 messages，导致降级后每轮都重演一次带图失败 + 重复 image_degraded 留痕）
+    messages.splice(0, messages.length, ...stripImages(messages));
+    return llm.chat(args);
   }
 }
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { parseWallClock } from "../../shared/time";
 
-// nc 事件形状（只读对接，D-84 §3.1）：只收群消息，其余 204 丢弃。
+// nc 事件形状（只读对接，D-84 §3.1）：只收白名单会话（群 + 私聊）的消息，其余 204 丢弃。
 // schema 住边界——nc 协议私有，不进 packages/shared（那是跨边界契约层）。
 
 /** nc 消息段（message 数组元素）：只声明我们要读的两处（type 与 data），
@@ -12,7 +12,7 @@ const NcSegmentSchema = z.object({
 });
 export type NcSegment = z.infer<typeof NcSegmentSchema>;
 
-/** nc 上报的群消息事件（取用到的字段；message 段数组显式声明以免类型断言，其余未知字段放过）。
+/** nc 上报的消息事件（取用到的字段；message 段数组显式声明以免类型断言，其余未知字段放过）。
  *  ⚠️ 凡 nc 变体可能发 null 的宽松字段一律 nullish（NTQQ 系桥接实测会发 null）——严格形状会让
  *  整条事件 safeParse 失败 → 204 静默丢（三轮评审；role 为本轮新增字段，nickname/card/user_id
  *  为同款顺修）。
@@ -58,7 +58,7 @@ export const NcEventSchema = z.object({
 });
 export type NcEvent = z.infer<typeof NcEventSchema>;
 
-// ── 打包缓冲（信源私有内存态，按群分组；D-84 §3.3 不建事件表）──
+// ── 打包缓冲（信源私有内存态，按会话分组；D-84 §3.3 不建事件表）──
 
 export interface BufferedEvent {
   messageId: string;
@@ -66,7 +66,7 @@ export interface BufferedEvent {
   sender: string; // 发信人显示名（群名片 > 昵称 > user_id）
   senderId: string;
   role?: string; // 群角色原文（owner/admin/member；nc 变体可能发漂移值——显示时归一，未知不显示）
-  groupName: string; // 白名单里的群备注名（入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
+  groupName: string; // 白名单里的会话备注名（群名 / 私聊对方备注；入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
   at: string; // 机械时刻（消息自带时刻；桥接发 null 时按接收时刻）——只用于去抖与行前缀
   trueTime: boolean; // at 是否消息自带真时刻——false 时 eventTime 必须置 null（01§5.3 禁接收兜底）
   raw: NcEvent; // 原始事件留底

@@ -10,7 +10,7 @@ import {
   type NcSegment,
 } from "./types";
 
-// nc 只读适配器（D-84 §3）：HTTP WebHook 快收 204 → 私有内存缓冲（按群分组）
+// nc 只读适配器（D-84 §3）：HTTP WebHook 快收 204 → 私有内存缓冲（按会话分组）
 // → 去抖封批 → ctx.ingest（与手动源同一条管线）。只读：不发消息、不代操作。
 //
 // 归属与生命周期：缓冲区是本适配器私有内存态，core 不读写；崩溃丢最近 ≤1 窗口
@@ -49,12 +49,16 @@ function textFromSegments(segments: NcSegment[] | undefined, rawMessage: string)
 function readWhitelist(ctx: SourceContext): Record<string, string> | null {
   const out: Record<string, string> = {};
   /** 收一个 KV 到 out（坏形状忽略；空串备注名不收——会产出 name="" 的身份 → ingest schema 必拒）。
-   *  `prefix` 把 kv 键归一到会话键（私聊 `private:`）；空键不前缀。 */
+   *  `prefix` 把 kv 键归一到会话键（私聊 `private:`）；空键不前缀；
+   *  键已带该前缀（用户照日志原样抄）先剥再拼——防 `private:private:10001` 双前缀失配（审查 2026-10-14）。 */
   const collect = (key: string, prefix: string): void => {
     const v = ctx.getSetting(key);
     if (v === null || typeof v !== "object" || Array.isArray(v)) return;
     for (const [k, val] of Object.entries(v)) {
-      if (k !== "" && typeof val === "string" && val.trim() !== "") out[`${prefix}${k}`] = val;
+      const normalized = prefix !== "" && k.startsWith(prefix) ? k.slice(prefix.length) : k;
+      if (normalized !== "" && typeof val === "string" && val.trim() !== "") {
+        out[`${prefix}${normalized}`] = val;
+      }
     }
   };
   collect("groups", ""); // 群白名单：键 = 群号
@@ -91,7 +95,7 @@ export function makeNcAdapter(): SourceAdapter {
   // 缓冲与去重集合是适配器实例级私有态（跨 register 调用保留；测试用工厂隔离）
   const buffers = new Map<string, GroupBuffer>();
   const recentIds = new Set<string>(); // 已封批消息 id（Set 保序，超限丢最旧）
-  const warnedDroppedGroups = new Set<string>(); // 已留痕过"白名单外丢弃"的群号（每群只报一次，防刷屏——A14 2026-10-13）
+  const warnedDroppedGroups = new Set<string>(); // 已留痕过"白名单外丢弃"的会话键（每个只报一次，防刷屏——A14 2026-10-13）
   // register 时注入的运行时依赖（stop 在 register 之外被调，故存引用）
   let runtime: { ctx: SourceContext; windowMinutes: () => number } | null = null;
 
@@ -115,15 +119,16 @@ export function makeNcAdapter(): SourceAdapter {
    *  组装端已保证载荷恒合法（见 groupNameOf / 组装兜底），ingest 拒收只剩真瞬态故障，重试才成立。 */
   const sealGroup = (ctx: SourceContext, buf: GroupBuffer): void => {
     const batch = assembleBatch(buf);
+    const kind = buf.events[0]?.raw.message_type; // 会话类型取批内首条（同会话键内必一致）
+    const kindWord = kind === "private" ? "私聊" : "群"; // 日志措辞按会话类型（私聊缓冲也走此处）
     // 全空消息（raw_message 为空且无可展开段）= 无信息量，留痕后丢弃（留缓冲只会无限重试）。
     // hasContent 由协议层给出——行前缀会让 content 恒非空，「有没有信息量」只有它知道（specs/003 评审）。
     if (!batch.hasContent) {
-      ctx.log.warn(`群 ${buf.groupId} 的批次内容为空，丢弃（${buf.events.length} 条）`);
+      ctx.log.warn(`${kindWord} ${buf.groupId} 的批次内容为空，丢弃（${buf.events.length} 条）`);
       for (const e of buf.events) rememberId(e.messageId);
       buffers.delete(buf.groupId);
       return;
     }
-    const kind = buf.events[0]?.raw.message_type; // 会话类型取批内首条（同会话键内必一致）
     const result = ctx.ingest({
       content: batch.content,
       sourceType: NC_SOURCE_NAME,
@@ -140,7 +145,7 @@ export function makeNcAdapter(): SourceAdapter {
     });
     if (!result.ok) {
       // 落库失败（只剩瞬态故障可能）：留痕但不登记 id、不清缓冲——下轮重试
-      ctx.log.error(`封批失败（群 ${buf.groupId}）：${result.reason}`);
+      ctx.log.error(`封批失败（${kindWord} ${buf.groupId}）：${result.reason}`);
       return;
     }
     for (const e of buf.events) rememberId(e.messageId);
@@ -261,9 +266,9 @@ export function makeNcAdapter(): SourceAdapter {
   };
 }
 
-/** 取组内首条事件携带的群备注名（入缓冲时已定）——保证非空（ingest schema 的 name 非空校验）。 */
+/** 取组内首条事件携带的会话备注名（入缓冲时已定）——保证非空（ingest schema 的 name 非空校验）。 */
 function groupNameOf(buf: GroupBuffer): string {
   const name = buf.events[0]?.groupName.trim();
   if (name !== undefined && name !== "") return name;
-  return buf.groupId !== "" ? buf.groupId : "未知群";
+  return buf.groupId !== "" ? buf.groupId : "未知来源";
 }
