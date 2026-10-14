@@ -190,16 +190,18 @@ export function ItemBody({ id }: { id: string }) {
             <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
           </h3>
           {sources.map((src, i) => (
-            <div key={i} className="mt-2">
+            <div key={i} className="mt-3">
+              {/* 与信息元素同款「[标签] 内容」语法（用户 2026-10-14）：来源标签作 [x]、类型作正文 */}
               <p className="text-sm">
-                <b className="text-ink-muted">{sourceLabelOf(src.identity)}</b>
-                <span className="ml-1.5 text-xs text-ink-muted">{src.sourceType}</span>
+                <b className="text-ink-muted">[{sourceLabelOf(src.identity)}]</b> {src.sourceType}
               </p>
-              {src.entries.length > 0 && (
-                <p className="mt-0.5 text-xs text-ink-muted">
-                  {src.entries.map(([k, v]) => `${k}=${v}`).join(" · ")}
+              {/* 自由键值对逐条成行（同「[标签] 内容」语法）——任意信源任意键都自适应：
+                  不拼接定长串，各占一行随内容换行，键多键长都不溢出 */}
+              {src.entries.map(([k, v]) => (
+                <p key={k} className="mt-1 pl-3 text-xs text-ink-muted">
+                  <b>[{k}]</b> {v}
                 </p>
-              )}
+              ))}
             </div>
           ))}
         </div>

@@ -170,9 +170,11 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     await waitFor(() => expect(screen.getByText("来源信息")).toBeInTheDocument());
     // 来源计数 = 1（两条批次同来源去重）
     expect(screen.getByText("来源信息").parentElement).toHaveTextContent("1");
-    // 自由键值对铺开：sourceLabel 单列在行首，groupId/sender 铺成 k=v（键按字典序：groupId < sender）
-    expect(screen.getByText("英语课群")).toBeInTheDocument();
-    expect(screen.getByText("groupId=940641749 · sender=学习委员")).toBeInTheDocument();
+    // 与信息元素同款「[标签] 内容」语法：来源标签作 [x]、类型作正文；自由键值对逐条成行
+    expect(screen.getByText("[英语课群]")).toBeInTheDocument();
+    // 自由键值对各占一行（键各自成 [key]，任意信源任意键自适应；键按字典序：groupId < sender）
+    expect(screen.getByText("[groupId]").parentElement).toHaveTextContent("[groupId] 940641749");
+    expect(screen.getByText("[sender]").parentElement).toHaveTextContent("[sender] 学习委员");
   });
 
   it("「看原文」打开引文悬浮窗：批次原文 + 高亮引文句", async () => {
