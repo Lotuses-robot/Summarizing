@@ -140,7 +140,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     expect(screen.queryByText(/按往年惯例推算/)).not.toBeInTheDocument();
   });
 
-  it("来源信息栏：铺开来源的自由键值对（保留键 sourceLabel 单列、其余键排序、多来源去重）", async () => {
+  it("来源信息栏：一行一来源（[信源] 标签），点行展开自由键与全部批次、批次行直达原文", async () => {
     stubFetch(
       makeDetail({
         rawInputs: {
@@ -153,7 +153,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
             eventTime: null,
             digestState: "digested",
           },
-          // 同来源、不同批次 → 去重（只出现一次）
+          // 同来源、不同批次 → 合并到一个来源下（批次全列，不重复出行）
           raw2: {
             id: "raw2",
             content: "补发",
@@ -170,12 +170,31 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     await waitFor(() => expect(screen.getByText("来源信息")).toBeInTheDocument());
     // 来源计数 = 1（两条批次同来源去重）
     expect(screen.getByText("来源信息").parentElement).toHaveTextContent("1");
-    // 与基本信息/信息元素统一的「[键] 值」行式：来源标签 → [信息来源]、类型 → [类型]
-    expect(screen.getByText("[信息来源]").parentElement).toHaveTextContent("[信息来源] 英语课群");
-    expect(screen.getByText("[类型]").parentElement).toHaveTextContent("[类型] nc");
-    // 自由键值对各占一行（键各自成 [key]，任意信源任意键自适应；键按字典序：groupId < sender）
+    // 收起态行 = [类型] 标签（不放证据计数、不放看原文——用户 2026-10-14 定）
+    const row = screen.getByText("[nc]").parentElement;
+    expect(row).toHaveTextContent("[nc] 英语课群");
+    expect(screen.queryByText("[groupId]")).not.toBeInTheDocument();
+    // 点行展开：① 自由键逐条成行（键按字典序：groupId < sender）② 全部批次各一行（倒序：新批次在前）
+    fireEvent.click(screen.getByText("[nc]"));
     expect(screen.getByText("[groupId]").parentElement).toHaveTextContent("[groupId] 940641749");
     expect(screen.getByText("[sender]").parentElement).toHaveTextContent("[sender] 学习委员");
+    expect(screen.getByText(/raw2 · 2026-09-27 10:00:00/)).toBeInTheDocument();
+    expect(screen.getByText(/raw1 · 2026-09-26 10:00:00/)).toBeInTheDocument();
+    // 批次行「看原文」直达该批次原文（无待高亮句 → 整段平铺）
+    const openButtons = screen.getAllByText("看原文");
+    expect(openButtons).toHaveLength(2);
+    const first = openButtons[0];
+    if (first === undefined) throw new Error("批次行没有「看原文」");
+    fireEvent.click(first);
+    const overlayText = await screen.findByText("补发");
+    expect(overlayText.tagName).toBe("P");
+    act(() => {
+      handleEsc();
+    });
+    expect(screen.queryByText("补发")).not.toBeInTheDocument();
+    // 再点行收起
+    fireEvent.click(screen.getByText("[nc]"));
+    expect(screen.queryByText("[groupId]")).not.toBeInTheDocument();
   });
 
   it("「看原文」打开引文悬浮窗：批次原文 + 高亮引文句", async () => {

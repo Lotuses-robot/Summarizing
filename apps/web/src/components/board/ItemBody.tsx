@@ -37,6 +37,7 @@ import { QuoteOverlay } from "./QuoteOverlay";
 export function ItemBody({ id }: { id: string }) {
   const [detail, setDetail] = useState<GetItemResult | null>(null);
   const [openQuotes, setOpenQuotes] = useState<readonly string[]>([]);
+  const [openSources, setOpenSources] = useState<readonly string[]>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [quote, setQuote] = useState<{ raw: RawInput; text: string } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -61,6 +62,11 @@ export function ItemBody({ id }: { id: string }) {
     setOpenQuotes((cur) =>
       cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label],
     );
+  };
+
+  /** 切换某来源的展开（与元素行同款手势：默认收起、点行开/合——用户 2026-10-14）。 */
+  const toggleSource = (key: string) => {
+    setOpenSources((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
   };
 
   if (failed) {
@@ -189,23 +195,47 @@ export function ItemBody({ id }: { id: string }) {
             来源信息{" "}
             <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
           </h3>
-          {sources.map((src, i) => (
-            <div key={i} className="mt-2">
-              {/* 与基本信息/信息元素统一为「[键] 值」行式（用户 2026-10-14）：
-                  来源标签 → [信息来源]、类型 → [类型]，自由键值对按各自键名逐条成行 */}
-              <p className="text-sm">
-                <b className="text-ink-muted">[信息来源]</b> {sourceLabelOf(src.identity)}
-              </p>
-              <p className="mt-1 text-sm">
-                <b className="text-ink-muted">[类型]</b> {src.sourceType}
-              </p>
-              {src.entries.map(([k, v]) => (
-                <p key={k} className="mt-1 text-sm">
-                  <b className="text-ink-muted">[{k}]</b> {v}
+          {sources.map((src) => {
+            const open = openSources.includes(src.key);
+            return (
+              <div key={src.key} className="mt-3">
+                {/* 收起态行 = [信源类型] sourceLabel（用户 2026-10-14 定：nc 放最前、不放别的）。
+                    点行展开/收起——手势与元素行同款 */}
+                <p className="cursor-pointer text-sm" onClick={() => toggleSource(src.key)}>
+                  <b className="text-ink-muted">[{src.sourceType}]</b> {sourceLabelOf(src.identity)}
                 </p>
-              ))}
-            </div>
-          ))}
+                {/* 展开区（引文同款左缘缩进线）：① 除类型/标签外的其余自由键逐条成行；
+                    ② 该来源名下的全部批次各一行，行内「看原文」直达（批次数不限、一律全列） */}
+                {open && (
+                  <>
+                    {src.entries.map(([k, v]) => (
+                      <blockquote
+                        key={k}
+                        className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted"
+                      >
+                        <b>[{k}]</b> {v}
+                      </blockquote>
+                    ))}
+                    {src.raws.map((raw) => (
+                      <blockquote
+                        key={raw.id}
+                        className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted"
+                      >
+                        <b>[批次]</b> {raw.id.slice(0, 6)} · {fmtFullTime(raw.receivedAt)}
+                        {" · "}
+                        <button
+                          className="text-accent hover:underline"
+                          onClick={() => setQuote({ raw, text: "" })}
+                        >
+                          看原文
+                        </button>
+                      </blockquote>
+                    ))}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -245,11 +275,13 @@ export function ItemBody({ id }: { id: string }) {
   );
 }
 
-/** 来源信息行：一个来源 = 类型 + 身份 + 铺开的自由键值对（sourceLabel 之外，键按字典序稳定）。 */
+/** 来源信息行：一个来源 = 类型 + 身份（整份弹性字典）+ 自由键值对 + 名下批次（用户 2026-10-14 定稿）。 */
 interface SourceRow {
+  key: string; // 稳定键（类型 + 身份串）——折叠状态与 React key 共用
   sourceType: string;
-  identity: SourceIdentity;
-  entries: [string, string][];
+  identity: SourceIdentity; // 整份保留（渲染与排障都用它；sourceLabel 由 sourceLabelOf 现取）
+  entries: [string, string][]; // 除 sourceLabel 外的自由键值对（键按字典序稳定）
+  raws: RawInput[]; // 该来源名下的批次（按接收时刻倒序——最新在前），展开区逐行列出
 }
 
 /** 从事项详情的证据批次收集去重来源（用户 2026-10-14 加「来源信息」栏）。
@@ -257,11 +289,17 @@ interface SourceRow {
  *  去重键 = 来源类型 + 完整身份串；`sourceLabel` 单列在行首，其余键铺成 entries（弹性字典自由键）。 */
 function collectSources(detail: GetItemResult): SourceRow[] {
   const rows: SourceRow[] = [];
-  const seen = new Set<string>();
-  for (const raw of Object.values(detail.rawInputs)) {
+  const byKey = new Map<string, SourceRow>();
+  const raws = Object.values(detail.rawInputs).sort((a, b) =>
+    b.receivedAt.localeCompare(a.receivedAt),
+  );
+  for (const raw of raws) {
     const key = `${raw.sourceType}::${sourceIdentityLabel(raw.sourceIdentity)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const existing = byKey.get(key);
+    if (existing !== undefined) {
+      existing.raws.push(raw); // 同来源的下一批次（已按接收时刻倒序）
+      continue;
+    }
     // 自由键值对（除保留键 sourceLabel）——值转字符串展示，键按字典序稳定排序（同一来源每次渲染一致）
     const entries = Object.entries(raw.sourceIdentity)
       .filter(([k]) => k !== "sourceLabel")
@@ -272,7 +310,15 @@ function collectSources(detail: GetItemResult): SourceRow[] {
           : JSON.stringify(v),
       ])
       .sort(([a], [b]) => a.localeCompare(b));
-    rows.push({ sourceType: raw.sourceType, identity: raw.sourceIdentity, entries });
+    const row: SourceRow = {
+      key,
+      sourceType: raw.sourceType,
+      identity: raw.sourceIdentity,
+      entries,
+      raws: [raw],
+    };
+    byKey.set(key, row);
+    rows.push(row);
   }
   return rows;
 }

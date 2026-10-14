@@ -4,7 +4,8 @@ import { pushEscLayer } from "../../lib/escLayer";
 import { fmtFullTime } from "../../lib/time";
 
 /** 引文悬浮窗（05§三 ㉜）：显示所属批次完整原文并高亮引文那句；点遮罩 / Esc 关闭。
- *  高亮用 indexOf 精确定位，定位不到（引文与原文有空白差异）就整段平铺不高亮——如实展示不编造。 */
+ *  高亮用 indexOf 精确定位，定位不到（引文与原文有空白差异）就整段平铺不高亮——如实展示不编造。
+ *  quote 为空串 = 非引文入口（从来源区的批次行进来，无特定待高亮句）→ 整段平铺。 */
 export function QuoteOverlay({
   rawInput,
   quote,
@@ -19,7 +20,7 @@ export function QuoteOverlay({
   closeRef.current = onClose;
   useEffect(() => pushEscLayer(() => closeRef.current()), []);
 
-  const idx = rawInput.content.indexOf(quote);
+  const idx = quote === "" ? -1 : rawInput.content.indexOf(quote);
 
   return (
     // 遮罩点击 = 关闭；内层 stopPropagation 让阅读区的点击不冒泡
