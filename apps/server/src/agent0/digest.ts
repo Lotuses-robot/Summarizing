@@ -1,6 +1,7 @@
 import {
   DIGEST_MAX_ROUNDS,
   errText,
+  FetchImageArgsSchema,
   GetItemArgsSchema,
   SearchKbArgsSchema,
   SearchItemsArgsSchema,
@@ -13,7 +14,7 @@ import {
 } from "@summarizing/shared";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import type { ChatMsg, LlmClient } from "../shared/llm";
+import type { ChatMsg, LlmClient, ToolCall } from "../shared/llm";
 import { describeRejections, parseChangeList, runFence } from "../executor/fence";
 import { DIGEST_SYSTEM_PROMPT } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
@@ -269,8 +270,12 @@ async function elicitChangeList(
 ): Promise<ChangeList> {
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
   let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
+  let imageBudget = MAX_IMAGE_FETCHES; // 本批取图预算（防模型反复取图撑爆上下文/带宽）
+  let visionDisabled = false; // 模型拒绝读图后置位——后续 fetch_image 直接拒（防死循环）
   for (let round = 0; round < DIGEST_MAX_ROUNDS; round++) {
-    const turn = await llm.chat({ system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS });
+    const turn = await chatWithImageFallback(llm, db, raw, modelTag, messages, () => {
+      visionDisabled = true;
+    });
     if (turn.toolCalls.length > 0) {
       traced += 1;
       try {
@@ -294,11 +299,35 @@ async function elicitChangeList(
       }
       messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
       const ctx = { sourceIdentity: raw.sourceIdentity, eventTime: raw.eventTime };
+      const images: string[] = []; // 本轮的图片 data URL（稍后作 user 消息注入模型）
       for (const call of turn.toolCalls) {
+        // 预算耗尽 / 已降级 → fetch_image 直接拒（回喂人话，模型按纯文本继续）
+        if (call.name === "fetch_image" && (imageBudget <= 0 || visionDisabled)) {
+          messages.push({
+            role: "tool",
+            toolCallId: call.id,
+            content: JSON.stringify({
+              ok: false,
+              reason: visionDisabled
+                ? "当前模型不支持读图，已降级为纯文本——不要再取图"
+                : "本批取图已达上限，请按纯文本处理",
+            }),
+          });
+          continue;
+        }
+        const result = await runTool(tools, call.name, call.argsJson, ctx);
+        messages.push({ role: "tool", toolCallId: call.id, content: result.text });
+        if (result.image !== null && imageBudget > 0) {
+          imageBudget -= 1;
+          images.push(result.image);
+        }
+      }
+      // 取回的图作下一条 user 消息注入（OpenAI 协议 tool 结果只能放文本；图走 user 内容块）。
+      // 降级后再不注入（否则模型仍收到图 = 白重试）。
+      if (images.length > 0 && !visionDisabled) {
         messages.push({
-          role: "tool",
-          toolCallId: call.id,
-          content: await runTool(tools, call.name, call.argsJson, ctx),
+          role: "user",
+          content: images.map((url) => ({ type: "image_url", image_url: { url } })),
         });
       }
       continue;
@@ -313,37 +342,127 @@ async function elicitChangeList(
   throw new Error(`工具循环超过 ${DIGEST_MAX_ROUNDS} 轮仍未产出合法变更清单`);
 }
 
-/** 执行一次工具调用并返回 JSON 结果；工具报错回喂给模型自行调整，不中断循环。
+/** 工具调用结果：text 是回喂模型的 JSON 文本；image 非空 = 该工具取回一张图（data URL），
+ *  由调用方注入下一条 user 消息（OpenAI 协议的 tool 结果只能放文本）。 */
+interface ToolRun {
+  text: string;
+  image: string | null;
+}
+
+/** 执行一次工具调用并返回结果；工具报错回喂给模型自行调整，不中断循环。
  *  ctx = 当前批次参照（信源+时刻）——信源阶段工具（search_recent_raws/search_uncertain）靠它做接近度。 */
 async function runTool(
   tools: AgentTools,
   name: string,
   argsJson: string,
   ctx: ToolContext,
-): Promise<string> {
+): Promise<ToolRun> {
   try {
     const args: unknown = JSON.parse(argsJson);
     switch (name) {
       case "search_items":
-        return JSON.stringify(await tools.searchItems(SearchItemsArgsSchema.parse(args)));
+        return {
+          text: JSON.stringify(await tools.searchItems(SearchItemsArgsSchema.parse(args))),
+          image: null,
+        };
       case "search_kb":
-        return JSON.stringify(await tools.searchKb(SearchKbArgsSchema.parse(args)));
+        return {
+          text: JSON.stringify(await tools.searchKb(SearchKbArgsSchema.parse(args))),
+          image: null,
+        };
       case "get_item":
-        return JSON.stringify(await tools.getItem(GetItemArgsSchema.parse(args)));
+        return {
+          text: JSON.stringify(await tools.getItem(GetItemArgsSchema.parse(args))),
+          image: null,
+        };
       case "search_recent_raws":
-        return JSON.stringify(
-          await tools.searchRecentRaws(SearchRecentRawsArgsSchema.parse(args), ctx),
-        );
+        return {
+          text: JSON.stringify(
+            await tools.searchRecentRaws(SearchRecentRawsArgsSchema.parse(args), ctx),
+          ),
+          image: null,
+        };
       case "search_uncertain":
-        return JSON.stringify(
-          await tools.searchUncertain(SearchUncertainArgsSchema.parse(args), ctx),
-        );
+        return {
+          text: JSON.stringify(
+            await tools.searchUncertain(SearchUncertainArgsSchema.parse(args), ctx),
+          ),
+          image: null,
+        };
+      case "fetch_image": {
+        const result = await tools.fetchImage(FetchImageArgsSchema.parse(args));
+        if (result.ok) {
+          // 回喂给模型的是「已附上图」的提示（base64 不进 tool 文本，避免重复占上下文——图在 user 消息里）
+          return {
+            text: JSON.stringify({ ok: true, note: "图片已附在接下来的一条消息里" }),
+            image: result.dataUrl,
+          };
+        }
+        return { text: JSON.stringify(result), image: null };
+      }
       default:
-        return JSON.stringify({ error: `未知工具: ${name}` });
+        return { text: JSON.stringify({ error: `未知工具: ${name}` }), image: null };
     }
   } catch (err) {
     // 工具报错回给模型让它自己调整，而不是中断整个循环
-    return JSON.stringify({ error: errText(err) });
+    return { text: JSON.stringify({ error: errText(err) }), image: null };
+  }
+}
+
+/** 本批最多取几张图（防模型反复取图把上下文/带宽撑爆）。 */
+const MAX_IMAGE_FETCHES = 4;
+
+/** 消息里是否含图片内容块（决定是否需要走「剥图重试」这条路）。 */
+function hasImage(messages: ChatMsg[]): boolean {
+  return messages.some(
+    (m) =>
+      m.role === "user" &&
+      Array.isArray(m.content) &&
+      m.content.some((p) => p.type === "image_url"),
+  );
+}
+
+/** 剥掉所有图片内容块——带图调用失败（模型不支持读图）时的降级重试：不丢任何文本工具结果，
+ *  只把 user 消息的图片块换成占位文本（否则空内容块会被网关拒）。 */
+function stripImages(messages: ChatMsg[]): ChatMsg[] {
+  return messages.map((m) => {
+    if (m.role !== "user" || !Array.isArray(m.content)) return m;
+    const parts = m.content.map((p) =>
+      p.type === "image_url"
+        ? { type: "text" as const, text: "（图片已省略：当前模型不支持读图）" }
+        : p,
+    );
+    return { role: "user", content: parts };
+  });
+}
+
+/** 调模型；若消息含图且调用抛错，则判定为「模型不支持读图」，留痕一次并**剥图重试一次**。
+ *  降级为纯文本后 onVisionDisabled 置位（后续 fetch_image 直接拒，防死循环）。重试仍失败则抛出（外层标 failed）。 */
+async function chatWithImageFallback(
+  llm: LlmClient,
+  db: Db,
+  raw: RawInput,
+  modelTag: string,
+  messages: ChatMsg[],
+  onVisionDisabled: () => void,
+): Promise<{ content: string | null; toolCalls: ToolCall[] }> {
+  const args = { system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS };
+  if (!hasImage(messages)) return llm.chat(args);
+  try {
+    return await llm.chat(args);
+  } catch (err) {
+    appendPipelineEventBestEffort(
+      db,
+      raw.id,
+      {
+        action: "image_degraded",
+        detail: `模型不支持读图（${errText(err)}），本批降级为纯文本处理`,
+        payload: { error: errText(err) },
+      },
+      { actor: "agent0", model: modelTag },
+    );
+    onVisionDisabled();
+    return llm.chat({ ...args, messages: stripImages(messages) });
   }
 }
 

@@ -80,13 +80,16 @@ export const DIGEST_SYSTEM_PROMPT = `你是 agent0（裁决者），负责消化
 6. 只要 dueDate 来自推断（而非原文直取），必须写 note 说明依据。
 
 【检索面——你可以在消化前主动回查，何时查、查什么由你判断】
-系统提供四类只读检索工具：search_items（已有事项）、get_item（单事项全貌）、search_recent_raws（历史进站批次：时间相近 + 同来源）、search_uncertain（存疑信息库 open 条目）。新批次的碎片可能补全过去某条拿不准的信息、也可能与旧事项合并——**该不该查、查哪个，由你根据本批内容自主决定**，不必每批都翻库；但当你察觉「本批像某条旧信息的另一半」时，去 search_uncertain / search_recent_raws 找一找，命中就合并应用并 resolve_uncertain（merged，resolvedRef 填合并去向）。
+系统提供五类只读检索工具：search_items（已有事项）、get_item（单事项全貌）、search_recent_raws（历史进站批次：时间相近 + 同来源）、search_uncertain（存疑信息库 open 条目）、fetch_image（取回正文里 [图片](url) 占位对应的图看内容）。新批次的碎片可能补全过去某条拿不准的信息、也可能与旧事项合并——**该不该查、查哪个，由你根据本批内容自主决定**，不必每批都翻库；但当你察觉「本批像某条旧信息的另一半」时，去 search_uncertain / search_recent_raws 找一找，命中就合并应用并 resolve_uncertain（merged，resolvedRef 填合并去向）。
+
+【图片信息——正文里的 [图片](url) 占位】
+正文中形如「[图片](url)」的是图片占位（截图/海报/通知图）。**当图里可能藏着对提取有用的信息时（如截图里的截止日期、报名入口、通知正文），用 fetch_image 取回来看**——url 逐字取自占位的链接，禁自己编造。取回的图会随后附给你。图里的文字信息同样按上面所有规则提取（引文指向该图所在批次）。⚠️ 取不到（过期/非图片/超限/模型不支持读图）就按纯文本处理，**不要反复重试取图**——占位链接本身已作为原文留档。
 
 【输出纪律】
 1. quotes 必须逐字摘自原文，不得改写、不得概括；每条引文声明自己为谁作证。
 2. elements 尽量提取，label 用一两个词自拟。
 3. ⚠️ 新建事项必须一次性写全所有元素（name + dueDate + summary + 自由元素都在 create_item 的 elements 里）。不要先 create_item 再 update_item 补——你拿不到刚创建事项的 id。update_item 只用于工具查到 id 的既有事项。
-4. 检索阶段可用工具：search_items / get_item / search_recent_raws / search_uncertain（search_kb 当前恒空，不用调）。
+4. 检索阶段可用工具：search_items / get_item / search_recent_raws / search_uncertain / fetch_image（search_kb 当前恒空，不用调）。
 
 【输出格式】
 ${CHANGE_FORMAT_DOC}

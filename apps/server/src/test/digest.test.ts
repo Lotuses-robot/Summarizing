@@ -3,6 +3,7 @@ import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summa
 import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
 import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
+import type { LlmClient } from "../shared/llm";
 import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { makeAgentTools } from "../agent0/tools";
 import { makeDb } from "../storage/db";
@@ -842,5 +843,113 @@ describe("流水数据层（specs/004）", () => {
       thought: "我先查查看",
     });
     expect(traces[1]?.payload).toMatchObject({ round: 2, tools: ["get_item"] });
+  });
+});
+
+describe("多模态取图（fetch_image，2026-10-13）", () => {
+  /** 造一个带假 fetchImage 的工具集（其余真造）——网络层单测已覆盖，这里只测循环接线。 */
+  function toolsWithImage(
+    db: ReturnType<typeof makeDb>,
+    image: { dataUrl: string } | { reason: string },
+  ) {
+    const base = makeAgentTools(db);
+    return {
+      ...base,
+      fetchImage: async () =>
+        "dataUrl" in image
+          ? { ok: true as const, dataUrl: image.dataUrl }
+          : { ok: false as const, reason: image.reason },
+    };
+  }
+
+  it("取图成功：图作下一条 user 消息注入模型（image_url 内容块）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [
+        { id: "t1", name: "fetch_image", argsJson: JSON.stringify({ url: "https://x/a.jpg" }) },
+      ],
+    });
+    llm.push({ content: '{"changes":[]}' }); // 看图后零变更合法
+    const raw = seedRaw(db);
+    const tools = toolsWithImage(db, { dataUrl: "data:image/jpeg;base64,AAAA" });
+    const result = await digestRawInput(db, llm, tools, MODEL, raw);
+    expect(result.state).toBe("digested");
+
+    // 第二次调用（看图后那轮）的消息里应含一条带 image_url 内容块的 user 消息
+    const second = chatAt(llm, 1);
+    const withImage = second.messages.find(
+      (m) =>
+        m.role === "user" &&
+        Array.isArray(m.content) &&
+        m.content.some((p) => p.type === "image_url"),
+    );
+    expect(withImage).toBeDefined();
+  });
+
+  it("取图失败：回喂 error，不注入图，模型按纯文本继续（消化不中断）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [
+        { id: "t1", name: "fetch_image", argsJson: JSON.stringify({ url: "https://x/a.jpg" }) },
+      ],
+    });
+    llm.push({ content: '{"changes":[]}' });
+    const raw = seedRaw(db);
+    const tools = toolsWithImage(db, { reason: "取图失败：HTTP 404" });
+    const result = await digestRawInput(db, llm, tools, MODEL, raw);
+    expect(result.state).toBe("digested");
+    // 无图注入（第二次调用的消息里没有 image_url 内容块）
+    const second = chatAt(llm, 1);
+    const anyImage = second.messages.some(
+      (m) =>
+        m.role === "user" &&
+        Array.isArray(m.content) &&
+        m.content.some((p) => p.type === "image_url"),
+    );
+    expect(anyImage).toBe(false);
+  });
+
+  it("模型不支持读图：带图调用失败 → 剥图重试一次 + image_degraded 留痕", async () => {
+    const db = makeDb(":memory:");
+    // 定制 LLM：首轮吐取图工具调用；此后凡消息带图即抛错（模拟网关拒绝 image_url），
+    // 剥图后（无图）正常返回。以此真实走通「带图失败 → 降级重试」这条路径。
+    const calls: { hasImage: boolean }[] = [];
+    const llm: LlmClient = {
+      async chat(args) {
+        const hasImg = args.messages.some(
+          (m) =>
+            m.role === "user" &&
+            Array.isArray(m.content) &&
+            m.content.some((p) => p.type === "image_url"),
+        );
+        calls.push({ hasImage: hasImg });
+        if (hasImg) throw new Error("模型不支持图片输入");
+        if (calls.length === 1) {
+          return {
+            content: null,
+            toolCalls: [
+              {
+                id: "t1",
+                name: "fetch_image",
+                argsJson: JSON.stringify({ url: "https://x/a.jpg" }),
+              },
+            ],
+          };
+        }
+        return { content: '{"changes":[]}', toolCalls: [] };
+      },
+    };
+    const raw = seedRaw(db);
+    const tools = toolsWithImage(db, { dataUrl: "data:image/jpeg;base64,AAAA" });
+    const result = await digestRawInput(db, llm, tools, MODEL, raw);
+    expect(result.state).toBe("digested");
+    // 有一次带图调用（失败）→ 剥图重试（无图）→ 共三次 chat
+    expect(calls.filter((c) => c.hasImage)).toHaveLength(1);
+    const events = repo.listPipelineEvents(db, raw.id);
+    expect(events.some((e) => e.action === "image_degraded")).toBe(true);
   });
 });

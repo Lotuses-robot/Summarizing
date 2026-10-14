@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  FetchImageArgsSchema,
   GetItemArgsSchema,
   SearchItemsArgsSchema,
   SearchKbArgsSchema,
@@ -7,6 +8,7 @@ import {
   SearchRecentRawsResultSchema,
   SearchUncertainArgsSchema,
   SearchUncertainResultSchema,
+  type FetchImageArgs,
   type GetItemArgs,
   type GetItemResult,
   type SearchKbArgs,
@@ -23,9 +25,11 @@ import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ToolDef } from "../shared/llm";
 import { parseWallClock } from "../shared/time";
+import { fetchImage, type FetchImageResult } from "./fetchImage";
 
 // agent0 的检索工具（01§4.14）：全部真代码检索，LLM 永不裸操作存储。
 // search_recent_raws / search_uncertain 归信源阶段（D-85）：前者找碎片兄弟，后者查存疑库复原。
+// fetch_image 归多模态初步（2026-10-13）：正文里的 `[图片](url)` 占位，agent0 自行取回查看。
 
 export const TOOL_DEFS: ToolDef[] = [
   {
@@ -55,6 +59,12 @@ export const TOOL_DEFS: ToolDef[] = [
       "检索存疑信息库（open 条目：过去拿不准的原始信息）——命中即可能是本批的上下文，合并应用后 resolve_uncertain",
     parametersJsonSchema: z.toJSONSchema(SearchUncertainArgsSchema),
   },
+  {
+    name: "fetch_image",
+    description:
+      "查看正文里 [图片](url) 占位对应的图片内容（截图/海报里的文字信息）。url 逐字取自本批原文的占位，不要自己编。只允许图片直链；取不到就按纯文本处理，不要重试。",
+    parametersJsonSchema: z.toJSONSchema(FetchImageArgsSchema),
+  },
 ];
 
 /** 检索工具的当前批次参照（服务端隐式注入，agent0 不拼参数）——供接近度排序。 */
@@ -69,6 +79,7 @@ export interface AgentTools {
   getItem(args: GetItemArgs): Promise<GetItemResult>;
   searchRecentRaws(args: SearchRecentRawsArgs, ctx: ToolContext): Promise<SearchRecentRawsResult>;
   searchUncertain(args: SearchUncertainArgs, ctx: ToolContext): Promise<SearchUncertainResult>;
+  fetchImage(args: FetchImageArgs): Promise<FetchImageResult>;
 }
 
 /** 造出 agent0 的检索工具集：全部只读真代码检索，写权不在这里（01§4.14）。 */
@@ -131,6 +142,10 @@ export function makeAgentTools(db: Db): AgentTools {
             reason: u.reason,
           })),
       });
+    },
+    async fetchImage({ url }) {
+      // 取图执行层（SSRF 四道闸 + MIME/魔数/大小/超时全在 fetchImage.ts）；失败归一成 ok:false
+      return fetchImage(url);
     },
   };
 }

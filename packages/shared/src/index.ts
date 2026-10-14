@@ -448,6 +448,13 @@ export type UncertainHit = z.infer<typeof UncertainHitSchema>;
 export const SearchUncertainResultSchema = z.object({ entries: z.array(UncertainHitSchema) });
 export type SearchUncertainResult = z.infer<typeof SearchUncertainResultSchema>;
 
+// ─────────── agent0 多模态工具（图片，2026-10-13）───────────
+
+/** fetch_image：取回 [图片](url) 占位的图片实际查看（多模态初步）。只允许图片直链——
+ *  协议/内网/格式/大小校验在服务端执行层（agent0/fetchImage.ts），schema 只管形状。 */
+export const FetchImageArgsSchema = z.object({ url: z.string().min(1) });
+export type FetchImageArgs = z.infer<typeof FetchImageArgsSchema>;
+
 // ───────────────────────── 看板（01§4.3 状态制四段；D-89）─────────────────────────
 
 export const ItemRowSchema = z.object({

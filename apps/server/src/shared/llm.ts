@@ -6,8 +6,13 @@ import type { AiSettings } from "@summarizing/shared";
 
 export type ToolCall = { id: string; name: string; argsJson: string };
 
+/** 用户消息的内容块（多模态）：文本 + 图片（data URL 或直链）——OpenAI 兼容协议的通用子集。
+ *  图片走 user 消息而非 tool 消息：协议的 tool 结果只能放文本（fetch_image 的注入路径，digest.ts）。 */
+type ChatContentPart =
+  { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 export type ChatMsg =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string | ChatContentPart[] }
   | { role: "assistant"; content: string | null; toolCalls?: ToolCall[] }
   | { role: "tool"; content: string; toolCallId: string };
 
@@ -90,11 +95,22 @@ export function makeUnconfiguredLlm(): TaggedLlm {
   };
 }
 
-/** 内部消息格式 → OpenAI SDK 消息格式（含工具调用的双向转换）。 */
+/** 内部消息格式 → OpenAI SDK 消息格式（含工具调用的双向转换；多模态内容块逐块重建，
+ *  让 SDK 联合类型自行校验形状，不做类型绕过）。 */
 function toOpenAiMessage(msg: ChatMsg): OpenAI.Chat.Completions.ChatCompletionMessageParam {
   switch (msg.role) {
     case "user":
-      return { role: "user", content: msg.content };
+      if (typeof msg.content === "string") {
+        return { role: "user", content: msg.content };
+      }
+      return {
+        role: "user",
+        content: msg.content.map((part) =>
+          part.type === "text"
+            ? { type: "text" as const, text: part.text }
+            : { type: "image_url" as const, image_url: { url: part.image_url.url } },
+        ),
+      };
     case "assistant":
       return {
         role: "assistant",

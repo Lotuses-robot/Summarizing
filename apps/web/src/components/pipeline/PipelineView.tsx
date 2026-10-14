@@ -38,6 +38,7 @@ function eventDot(action: string): string {
   if (action === "digest_failed") return "bg-red-500";
   if (action === "fence_reject") return "bg-amber-500";
   if (action === "digest_trace" || action === "repair_round") return "bg-sky-500";
+  if (action === "image_degraded") return "bg-amber-500";
   return "bg-zinc-400";
 }
 
