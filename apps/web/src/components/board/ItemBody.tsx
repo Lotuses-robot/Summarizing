@@ -6,6 +6,7 @@ import {
   sourceLabelOf,
   type GetItemResult,
   type RawInput,
+  type SourceIdentity,
   dueDateElement,
   elementSubject,
 } from "@summarizing/shared";
@@ -89,6 +90,9 @@ export function ItemBody({ id }: { id: string }) {
   const freeElements = item.elements.filter((e) => e.label !== "name" && e.label !== "summary");
   const summaryElement = item.elements.find((e) => e.label === "summary");
   const summaryEvidence = summaryElement === undefined ? [] : evidenceFor("summary");
+  // 来源信息：从证据批次收集来源身份，按「来源类型 + 身份串」去重（弹性字典自由键，用户 2026-10-14）；
+  // 一个事项的证据可跨多批次/多来源，全部如实列出
+  const sources = collectSources(detail);
 
   return (
     <div className="text-sm">
@@ -179,6 +183,28 @@ export function ItemBody({ id }: { id: string }) {
         })}
       </div>
 
+      {sources.length > 0 && (
+        <div className="border-t border-line p-3">
+          <h3 className="text-sm font-semibold">
+            来源信息{" "}
+            <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
+          </h3>
+          {sources.map((src, i) => (
+            <div key={i} className="mt-2">
+              <p className="text-sm">
+                <b className="text-ink-muted">{sourceLabelOf(src.identity)}</b>
+                <span className="ml-1.5 text-xs text-ink-muted">{src.sourceType}</span>
+              </p>
+              {src.entries.length > 0 && (
+                <p className="mt-0.5 text-xs text-ink-muted">
+                  {src.entries.map(([k, v]) => `${k}=${v}`).join(" · ")}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="border-t border-line p-3">
         <button
           className="flex w-full items-center gap-2 text-left font-semibold"
@@ -213,6 +239,38 @@ export function ItemBody({ id }: { id: string }) {
       )}
     </div>
   );
+}
+
+/** 来源信息行：一个来源 = 类型 + 身份 + 铺开的自由键值对（sourceLabel 之外，键按字典序稳定）。 */
+interface SourceRow {
+  sourceType: string;
+  identity: SourceIdentity;
+  entries: [string, string][];
+}
+
+/** 从事项详情的证据批次收集去重来源（用户 2026-10-14 加「来源信息」栏）。
+ *  一个事项的证据可来自多批次/多来源——全部如实列出（不合并成一条，不同来源=不同出处）。
+ *  去重键 = 来源类型 + 完整身份串；`sourceLabel` 单列在行首，其余键铺成 entries（弹性字典自由键）。 */
+function collectSources(detail: GetItemResult): SourceRow[] {
+  const rows: SourceRow[] = [];
+  const seen = new Set<string>();
+  for (const raw of Object.values(detail.rawInputs)) {
+    const key = `${raw.sourceType}::${sourceIdentityLabel(raw.sourceIdentity)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // 自由键值对（除保留键 sourceLabel）——值转字符串展示，键按字典序稳定排序（同一来源每次渲染一致）
+    const entries = Object.entries(raw.sourceIdentity)
+      .filter(([k]) => k !== "sourceLabel")
+      .map(([k, v]): [string, string] => [
+        k,
+        typeof v === "string" || typeof v === "number" || typeof v === "boolean"
+          ? String(v)
+          : JSON.stringify(v),
+      ])
+      .sort(([a], [b]) => a.localeCompare(b));
+    rows.push({ sourceType: raw.sourceType, identity: raw.sourceIdentity, entries });
+  }
+  return rows;
 }
 
 /** 某元素的引文块：片段 + 批次短 id + 「看原文」悬浮窗入口（基本信息与元素区共用）。 */

@@ -140,6 +140,41 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     expect(screen.queryByText(/按往年惯例推算/)).not.toBeInTheDocument();
   });
 
+  it("来源信息栏：铺开来源的自由键值对（保留键 sourceLabel 单列、其余键排序、多来源去重）", async () => {
+    stubFetch(
+      makeDetail({
+        rawInputs: {
+          raw1: {
+            id: "raw1",
+            content: "群通知",
+            sourceType: "nc",
+            sourceIdentity: { sourceLabel: "英语课群", groupId: "940641749", sender: "学习委员" },
+            receivedAt: "2026-09-26T10:00:00",
+            eventTime: null,
+            digestState: "digested",
+          },
+          // 同来源、不同批次 → 去重（只出现一次）
+          raw2: {
+            id: "raw2",
+            content: "补发",
+            sourceType: "nc",
+            sourceIdentity: { sourceLabel: "英语课群", groupId: "940641749", sender: "学习委员" },
+            receivedAt: "2026-09-27T10:00:00",
+            eventTime: null,
+            digestState: "digested",
+          },
+        },
+      }),
+    );
+    render(<ItemBody id="it1" />);
+    await waitFor(() => expect(screen.getByText("来源信息")).toBeInTheDocument());
+    // 来源计数 = 1（两条批次同来源去重）
+    expect(screen.getByText("来源信息").parentElement).toHaveTextContent("1");
+    // 自由键值对铺开：sourceLabel 单列在行首，groupId/sender 铺成 k=v（键按字典序：groupId < sender）
+    expect(screen.getByText("英语课群")).toBeInTheDocument();
+    expect(screen.getByText("groupId=940641749 · sender=学习委员")).toBeInTheDocument();
+  });
+
   it("「看原文」打开引文悬浮窗：批次原文 + 高亮引文句", async () => {
     stubFetch(makeDetail());
     render(<ItemBody id="it1" />);
