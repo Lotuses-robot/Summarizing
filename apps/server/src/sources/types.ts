@@ -4,7 +4,7 @@ import type { IngestRequest, SettingField } from "@summarizing/shared";
 // 信源适配器契约（D-84 立，D-88 重设计）：core 交出「八件套」手段，把变数全部留在信源内
 // ——信源自己解释协议、自己打包、自己管设置；core 不感知任何具体源的协议，也**不知道有哪些信源**。
 //
-// 业界依据（HA / VS Code / Telegraf 横向对比，见 docs/10 §T0）：清理用**注册表**（容多资源、
+// 业界依据（HA / VS Code / Telegraf / Obsidian 横向对比，决策见台账 D-88）：清理用**注册表**（容多资源、
 // 单源内后注册先撤销），错误由 core 在边界兜底（无沙箱），启动钩子可异步可失败而不拖垮其它信源。
 
 /** 信源投递的标准批次：契约同 IngestRequest + 可选 raw 归档（信源原始载荷留底，D-84）。 */

@@ -31,7 +31,7 @@ const BoardArgsSchema = z.object({});
 const IngestArgsSchema = z.object({ content: z.string().min(1) });
 const ChitchatArgsSchema = z.object({ content: z.string().min(1) });
 const SweepArgsSchema = z.object({});
-/** 人工移除单条存疑（A10 / docs/10 T4②）：id 由模型从 search_uncertain 结果里取（真实 id 才可命中）。 */
+/** 人工移除单条存疑（A10；端点 D-87④）：id 由模型从 search_uncertain 结果里取（真实 id 才可命中）。 */
 const ResolveUncertainArgsSchema = z.object({ id: z.string().min(1) });
 
 const FRONT_TOOL_DEFS: ToolDef[] = [
@@ -278,7 +278,7 @@ async function runTool(
         return JSON.stringify({ ok: true, ...result, summary: describeSweep(result) });
       }
       case "resolve_uncertain": {
-        // A10（docs/10 T4②）：存疑库人工移除的对话工具——与审核页 `PUT /api/uncertain/:id` 两套可互替。
+        // A10（端点 D-87④）：存疑库人工移除的对话工具——与审核页 `PUT /api/uncertain/:id` 两套可互替。
         // 语义对齐该端点：不存在 / 已被处置（非 open）/ 成功。resolvedRef="chat" 留痕来源。
         const { id } = ResolveUncertainArgsSchema.parse(args);
         const exists = repo.getUncertainInput(db, id);
