@@ -99,7 +99,7 @@ export function ItemBody({ id }: { id: string }) {
       <div className="p-3">
         <h3 className="text-sm font-semibold">基本信息</h3>
         <p className="mt-2">
-          ddl：
+          <b className="text-ink-muted">[ddl]</b>{" "}
           {dueText !== null ? (
             <>
               {fmtFullTime(dueText)}
@@ -135,7 +135,7 @@ export function ItemBody({ id }: { id: string }) {
                 if (summaryEvidence.length > 0) toggleQuotes("summary");
               }}
             >
-              {summaryElement.text}
+              <b className="text-ink-muted">[sum]</b> {summaryElement.text}
               {summaryEvidence.length > 0 && (
                 <span className="text-xs text-accent"> · 证据({summaryEvidence.length})</span>
               )}
@@ -190,16 +190,18 @@ export function ItemBody({ id }: { id: string }) {
             <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
           </h3>
           {sources.map((src, i) => (
-            <div key={i} className="mt-3">
-              {/* 与信息元素同款「[标签] 内容」语法（用户 2026-10-14）：来源标签作 [x]、类型作正文 */}
+            <div key={i} className="mt-2">
+              {/* 与基本信息/信息元素统一为「[键] 值」行式（用户 2026-10-14）：
+                  来源标签 → [信息来源]、类型 → [类型]，自由键值对按各自键名逐条成行 */}
               <p className="text-sm">
-                <b className="text-ink-muted">[{sourceLabelOf(src.identity)}]</b> {src.sourceType}
+                <b className="text-ink-muted">[信息来源]</b> {sourceLabelOf(src.identity)}
               </p>
-              {/* 自由键值对逐条成行（同「[标签] 内容」语法）——任意信源任意键都自适应：
-                  不拼接定长串，各占一行随内容换行，键多键长都不溢出 */}
+              <p className="mt-1 text-sm">
+                <b className="text-ink-muted">[类型]</b> {src.sourceType}
+              </p>
               {src.entries.map(([k, v]) => (
-                <p key={k} className="mt-1 pl-3 text-xs text-ink-muted">
-                  <b>[{k}]</b> {v}
+                <p key={k} className="mt-1 text-sm">
+                  <b className="text-ink-muted">[{k}]</b> {v}
                 </p>
               ))}
             </div>

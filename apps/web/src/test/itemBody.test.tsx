@@ -170,8 +170,9 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     await waitFor(() => expect(screen.getByText("来源信息")).toBeInTheDocument());
     // 来源计数 = 1（两条批次同来源去重）
     expect(screen.getByText("来源信息").parentElement).toHaveTextContent("1");
-    // 与信息元素同款「[标签] 内容」语法：来源标签作 [x]、类型作正文；自由键值对逐条成行
-    expect(screen.getByText("[英语课群]")).toBeInTheDocument();
+    // 与基本信息/信息元素统一的「[键] 值」行式：来源标签 → [信息来源]、类型 → [类型]
+    expect(screen.getByText("[信息来源]").parentElement).toHaveTextContent("[信息来源] 英语课群");
+    expect(screen.getByText("[类型]").parentElement).toHaveTextContent("[类型] nc");
     // 自由键值对各占一行（键各自成 [key]，任意信源任意键自适应；键按字典序：groupId < sender）
     expect(screen.getByText("[groupId]").parentElement).toHaveTextContent("[groupId] 940641749");
     expect(screen.getByText("[sender]").parentElement).toHaveTextContent("[sender] 学习委员");
