@@ -8,9 +8,10 @@ import { runFence } from "../executor/fence";
 const RAW_TEXT = "数据结构 老师说下周要交第三次作业 好像还要交实验报告？";
 
 /** 造一条围栏用的 RawInput（引文校验要对着原文比对）。 */
-function seedFenceRaw(db: ReturnType<typeof makeDb>) {
+/** 造一条待校验的原始批次（默认用 RAW_TEXT；可传自定义 content——多模态用例要含图片占位）。 */
+function seedFenceRaw(db: ReturnType<typeof makeDb>, content: string = RAW_TEXT) {
   return repo.insertRawInput(db, {
-    content: RAW_TEXT,
+    content,
     sourceType: "paste",
     sourceIdentity: { sourceLabel: "s" },
     receivedAt: "2026-09-24T10:00:00",
@@ -72,7 +73,8 @@ describe("围栏行为校验", () => {
         {
           action: "update_item",
           itemId: "nope",
-          setElements: [{ label: "dueDate", text: "2026-10-01T00:00:00", quotes: [] }],
+          elements: [{ label: "dueDate", text: "2026-10-01T00:00:00", quotes: [] }],
+          tags: [],
           resolveDoubt: false,
         },
       ],
@@ -105,7 +107,7 @@ describe("围栏行为校验", () => {
 });
 
 describe("围栏：固定元素防误用（第 2 轮审查）", () => {
-  it("update_item 的 setElements 含 name → 拒收（防双 name）", () => {
+  it("update_item 的 elements 含 name → 拒收（防双 name）", () => {
     const db = makeDb(":memory:");
     // 直接塞版本（模拟已存在）
     repo.appendItemVersion(db, {
@@ -125,15 +127,18 @@ describe("围栏：固定元素防误用（第 2 轮审查）", () => {
         {
           action: "update_item",
           itemId: "i1",
-          setElements: [{ label: "name", text: "B", quotes: [] }],
+          elements: [{ label: "name", text: "B", quotes: [] }],
+          tags: [],
           resolveDoubt: false,
         },
       ],
     });
     expect(r.rejected[0]?.reason).toContain("name");
   });
+});
 
-  it("add_element 补固定元素 dueDate → 拒收", () => {
+describe("围栏：多模态标签强制（D-104）", () => {
+  it("更新事项引用了 [图片](url) 占位但没带「多模态/图片」标签 → 拒收", () => {
     const db = makeDb(":memory:");
     repo.appendItemVersion(db, {
       itemId: "i1",
@@ -147,16 +152,50 @@ describe("围栏：固定元素防误用（第 2 轮审查）", () => {
       },
       by: { actor: "t", model: null },
     });
-    const r = runFence(db, seedFenceRaw(db), {
+    // 原文含图片占位；元素引文引它，但 tags 没带多模态标签
+    const raw = seedFenceRaw(db, "报名截止 10 月 20 日 [图片](https://x/a.jpg)");
+    const r = runFence(db, raw, {
       changes: [
         {
-          action: "add_element",
+          action: "update_item",
           itemId: "i1",
-          element: { label: "dueDate", text: "2026-10-01T00:00:00", quotes: [] },
+          elements: [{ label: "报名入口", text: "见海报", quotes: ["[图片](https://x/a.jpg)"] }],
+          tags: [],
+          resolveDoubt: false,
         },
       ],
     });
-    expect(r.rejected[0]?.reason).toContain("固定元素");
+    expect(r.rejected[0]?.reason).toContain("多模态/图片");
+  });
+
+  it("引用 [图片](url) 占位且带了「多模态/图片」标签 → 接受", () => {
+    const db = makeDb(":memory:");
+    repo.appendItemVersion(db, {
+      itemId: "i1",
+      action: "create_item",
+      detail: "seed",
+      snapshot: {
+        elements: [{ label: "name", text: "A" }],
+        tags: [],
+        status: "todo",
+        doubtNote: null,
+      },
+      by: { actor: "t", model: null },
+    });
+    const raw = seedFenceRaw(db, "报名截止 10 月 20 日 [图片](https://x/a.jpg)");
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "update_item",
+          itemId: "i1",
+          elements: [{ label: "报名入口", text: "见海报", quotes: ["[图片](https://x/a.jpg)"] }],
+          tags: ["多模态/图片"],
+          resolveDoubt: false,
+        },
+      ],
+    });
+    expect(r.rejected).toHaveLength(0);
+    expect(r.accepted).toHaveLength(1);
   });
 });
 

@@ -124,7 +124,8 @@ describe("agent0 消化管线", () => {
           {
             action: "update_item",
             itemId: "nope",
-            setElements: [{ label: "dueDate", text: "2026-10-08T00:00:00", quotes: [] }],
+            elements: [{ label: "dueDate", text: "2026-10-08T00:00:00", quotes: [] }],
+            tags: [],
             resolveDoubt: false,
           },
         ],
@@ -164,7 +165,8 @@ describe("agent0 消化管线", () => {
     const badItem = {
       action: "update_item",
       itemId: "nope",
-      setElements: [{ label: "dueDate", text: "2026-10-08T00:00:00", quotes: [] }],
+      elements: [{ label: "dueDate", text: "2026-10-08T00:00:00", quotes: [] }],
+      tags: [],
       resolveDoubt: false,
     };
     llm.push({ content: JSON.stringify({ changes: [badItem] }) });
@@ -231,7 +233,7 @@ describe("agent0 消化管线", () => {
     );
   });
 
-  it("⑧ 既有事项路径：update_item / add_element 用工具查到的真实 ID", async () => {
+  it("⑧ 既有事项路径：update_item 用工具查到的真实 ID", async () => {
     const db = makeDb(":memory:");
     // 造一个日期未知的既有事项
     const llmSeed = new FakeLlm();
@@ -265,7 +267,7 @@ describe("agent0 消化管线", () => {
           {
             action: "update_item",
             itemId: existing.id,
-            setElements: [
+            elements: [
               {
                 label: "dueDate",
                 text: "2026-10-15T23:59:59",
@@ -273,6 +275,7 @@ describe("agent0 消化管线", () => {
                 quotes: ["现场展示改到10月15日"],
               },
             ],
+            tags: [],
             resolveDoubt: false,
           },
           {
@@ -368,7 +371,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
           {
             action: "update_item",
             itemId: item.id,
-            setElements: [
+            elements: [
               {
                 label: "dueDate",
                 text: "2026-10-08T23:59:59",
@@ -376,6 +379,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
                 quotes: ["提交截止10月8日23:59"],
               },
             ],
+            tags: [],
             resolveDoubt: false,
           },
         ],
@@ -701,7 +705,7 @@ describe("矛盾决断（S-6 / D-85）：有据取舍留痕，判不了入库", 
           {
             action: "update_item",
             itemId: item.id,
-            setElements: [
+            elements: [
               {
                 label: "dueDate",
                 text: "2026-11-08T23:59:59",
@@ -709,6 +713,7 @@ describe("矛盾决断（S-6 / D-85）：有据取舍留痕，判不了入库", 
                 quotes: ["展示改到11月8日"],
               },
             ],
+            tags: [],
             resolveDoubt: false,
           },
           {

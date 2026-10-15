@@ -10,7 +10,7 @@ export const itemVersions = sqliteTable(
   {
     id: text("id").primaryKey(),
     itemId: text("item_id").notNull(),
-    action: text("action").notNull(), // create_item / update_item / add_element / …
+    action: text("action").notNull(), // create_item / update_item / park_uncertain / …
     detail: text("detail").notNull(), // 面向用户的一句话（处理记录直接展示）
     snapshot: text("snapshot").notNull(), // JSON: {elements, tags, status, doubtNote}
     at: text("at").notNull(),

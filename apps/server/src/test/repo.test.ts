@@ -193,7 +193,8 @@ describe("executeChanges 事务原子性", () => {
           {
             action: "update_item",
             itemId: "missing-item",
-            setElements: [{ label: "dueDate", text: "2026-10-01T00:00:00", quotes: [] }],
+            elements: [{ label: "dueDate", text: "2026-10-01T00:00:00", quotes: [] }],
+            tags: [],
             resolveDoubt: false,
           },
         ],
@@ -207,7 +208,7 @@ describe("executeChanges 事务原子性", () => {
 });
 
 describe("版本链边界（第 4 轮补测）", () => {
-  it("update_item 的 setElements 为空 → 不产生版本（执行器跳过无变化更新）", () => {
+  it("update_item 的 elements 为空 → 不产生版本（执行器跳过无变化更新）", () => {
     const db = makeDb(":memory:");
     const raw = seedRaw(db);
     createHomeworkItem(db, raw, "2026-09-30T23:59:59");
@@ -218,7 +219,7 @@ describe("版本链边界（第 4 轮补测）", () => {
     executeChanges(
       db,
       raw,
-      [{ action: "update_item", itemId: item.id, setElements: [], resolveDoubt: false }],
+      [{ action: "update_item", itemId: item.id, elements: [], tags: [], resolveDoubt: false }],
       { actor: "agent0", model: "test" },
     );
     expect(repo.deriveHistory(db, item.id).length).toBe(before);

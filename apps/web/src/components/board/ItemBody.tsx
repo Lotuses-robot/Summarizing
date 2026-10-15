@@ -17,7 +17,6 @@ const DDL_NOTE_KEY = "@ddl-note";
 const ACTION_LABELS: Record<string, string> = {
   create_item: "新建",
   update_item: "修改",
-  add_element: "补充元素",
   resolve_doubt: "解除存疑",
   complete_item: "标完成",
   reopen_item: "恢复待办",

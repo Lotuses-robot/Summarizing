@@ -1,7 +1,8 @@
 import {
   ElementSchema,
-  FIXED_LABELS,
   ChangeListSchema,
+  quoteHasLinkPlaceholder,
+  MULTIMODAL_IMAGE_TAG,
   type ChangeItem,
   type ChangeList,
   type RawInput,
@@ -55,36 +56,23 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
         const quoteErr = checkQuotes(el, raw.content);
         if (quoteErr !== null) return quoteErr;
       }
-      return null;
+      return checkMultimodalTag(item.elements, item.tags);
     }
     case "update_item": {
       if (!repo.itemExists(db, item.itemId)) {
         return `itemId 不存在: ${item.itemId}`;
       }
-      // setElements 不得动固定元素 name（改语义名走 create_item；防双 name 投毒）
-      if (item.setElements.some((e) => e.label === "name")) {
+      // elements 不得动固定元素 name（改语义名走 create_item；防双 name 投毒）
+      if (item.elements.some((e) => e.label === "name")) {
         return "update_item 不得修改 name 元素（语义名由创建时确定）";
       }
-      for (const el of item.setElements) {
+      for (const el of item.elements) {
         const err = checkElement(el);
         if (err !== null) return `元素 ${el.label} 不合法：${err}`;
         const quoteErr = checkQuotes(el, raw.content);
         if (quoteErr !== null) return quoteErr;
       }
-      return null;
-    }
-    case "add_element": {
-      if (!repo.itemExists(db, item.itemId)) {
-        return `itemId 不存在: ${item.itemId}`;
-      }
-      // 不得补固定元素（name/dueDate/summary 走 update_item 的 setElements；防重复与冒名）
-      const isFixed = FIXED_LABELS.some((l) => l === item.element.label);
-      if (!isFixed) {
-        const err = checkElement(item.element);
-        if (err !== null) return err;
-        return checkQuotes(item.element, raw.content);
-      }
-      return `add_element 不得补固定元素「${item.element.label}」（请用 update_item）`;
+      return checkMultimodalTag(item.elements, item.tags);
     }
     case "resolve_doubt":
     case "complete_item": {
@@ -146,6 +134,16 @@ function checkQuotes(el: { quotes: string[] }, rawContent: string): string | nul
       const preview = quote.length > 20 ? `${quote.slice(0, 20)}…` : quote;
       return `引文不是原文逐字（空白归一后未命中）：「${preview}」——quotes 必须逐字摘自原文`;
     }
+  }
+  return null;
+}
+
+/** 多模态标签强制（D-104）：任一元素的引文含 `[]()` 占位（引自图片等非文本内容）→ 事项标签必须含
+ *  「多模态/图片」，否则拒收。防「读了图却不标记」——保证读图内容在界面上可辨识（前端据此高亮）。 */
+function checkMultimodalTag(elements: { quotes: string[] }[], tags: string[]): string | null {
+  const citesPlaceholder = elements.some((el) => el.quotes.some(quoteHasLinkPlaceholder));
+  if (citesPlaceholder && !tags.includes(MULTIMODAL_IMAGE_TAG)) {
+    return `元素引文引用了图片/链接占位（[]()），事项标签必须含「${MULTIMODAL_IMAGE_TAG}」`;
   }
   return null;
 }

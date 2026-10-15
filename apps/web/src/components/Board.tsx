@@ -3,6 +3,7 @@ import { Archive, Check, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
 import {
   dueDateElement,
   itemName,
+  MULTIMODAL_IMAGE_TAG,
   relativeDueText,
   wallClockToEpoch,
   type BoardView,
@@ -169,8 +170,16 @@ function Row({
         {item.tags.map((t) => (
           <button
             key={t}
-            className="chip shrink-0 cursor-pointer hover:text-accent"
-            title={`筛选标签「${t}」`}
+            className={cn(
+              "chip shrink-0 cursor-pointer hover:text-accent",
+              // 多模态标签（D-104）：读图得来的内容——高亮区分，一眼可辨（不静默）
+              t === MULTIMODAL_IMAGE_TAG && "border-accent/60 bg-accent/10 text-accent",
+            )}
+            title={
+              t === MULTIMODAL_IMAGE_TAG
+                ? "此事项含读图得来的内容（AI 从图片识别）"
+                : `筛选标签「${t}」`
+            }
             onClick={(e) => {
               e.stopPropagation();
               onTag(t);

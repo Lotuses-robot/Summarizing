@@ -73,6 +73,15 @@ export function elementSubject(label: string): string {
   return `元素:${label}`;
 }
 
+/** 多模态事项标签（D-104）：含读图得来内容的事项必须带它。前缀空间 `多模态/`——以后可加别的模态。 */
+export const MULTIMODAL_IMAGE_TAG = "多模态/图片";
+
+/** 引文里是否含 markdown 链接占位（`[](...)` 形态，如 nc 图片段产出的 `[图片](url)`）。
+ *  判据单一出处：围栏用它决定「是否强制多模态标签」——出现 `[]()` 即视为「这条结论引自图片等非文本内容」。 */
+export function quoteHasLinkPlaceholder(quote: string): boolean {
+  return /\[[^\]]*\]\([^)]*\)/.test(quote);
+}
+
 export const ItemSchema = z
   .object({
     id: z.string(),
@@ -267,7 +276,7 @@ export function provenanceLabel(p: Provenance): string {
 export const ItemVersionSchema = z.object({
   id: z.string(),
   itemId: z.string(),
-  action: z.string(), // create_item / update_item / add_element / …
+  action: z.string(), // create_item / update_item / park_uncertain / …
   detail: z.string(), // 面向用户的一句话（处理记录直接展示）
   snapshot: z.object({
     elements: z.array(ElementSchema),
@@ -302,14 +311,12 @@ export const ChangeItemSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("update_item"),
     itemId: z.string(),
-    setElements: z.array(ElementInputSchema), // 按 label 覆盖/新增（upsert）
+    elements: z.array(ElementInputSchema), // 按 label 覆盖/新增（upsert）——不删除
+    tags: z.array(z.string().min(1)), // 增量追加（只列要加的标签；不覆盖、不删除）
     resolveDoubt: z.boolean(), // true = 同时解除存疑
   }),
-  z.object({
-    action: z.literal("add_element"),
-    itemId: z.string(),
-    element: ElementInputSchema,
-  }),
+  // add_element 已删（D-104）：其能力 = update_item 给一个不在列表里的 label（upsert 新增）；
+  // 一并收敛命名——内容侧动作用 elements/tags，且元素/标签/名字一律「只增改、不删」。
   // mark_doubt 已删（D-85：agent0 拿不准改入存疑信息库 park_uncertain，不再新增存疑事项）
   z.object({
     action: z.literal("resolve_doubt"),

@@ -71,47 +71,32 @@ function applyChanges(
       case "update_item": {
         const current = repo.deriveItem(tx, item.itemId);
         if (!current) throw new Error(`item not found: ${item.itemId}`); // 围栏已验，双保险
-        // 空 setElements 且不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
-        if (item.setElements.length === 0 && !item.resolveDoubt) {
+        // 空 elements、不追加标签、也不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
+        if (item.elements.length === 0 && item.tags.length === 0 && !item.resolveDoubt) {
           break;
         }
-        const elements = upsertElements(current.elements, item.setElements);
+        const elements = upsertElements(current.elements, item.elements);
+        // 标签增量追加（去重；不覆盖、不删除——D-104 统一「只增改不删」）
+        const tags = [...current.tags];
+        for (const t of item.tags) {
+          if (!tags.includes(t)) tags.push(t);
+        }
         repo.appendItemVersion(tx, {
           itemId: current.id,
           action: "update_item",
-          detail: `更新事项「${itemName(elements)}」：${item.setElements
+          detail: `更新事项「${itemName(elements)}」：${item.elements
             .map((e) => e.label)
             .join("、")}`,
           snapshot: {
             elements,
-            tags: current.tags,
+            tags,
             status: current.status,
             doubtNote: item.resolveDoubt ? null : current.doubtNote,
           },
           by,
         });
-        attachElementEvidence(tx, raw, current.id, item.setElements, by);
+        attachElementEvidence(tx, raw, current.id, item.elements, by);
         details.push(`更新事项「${itemName(elements)}」`);
-        break;
-      }
-      case "add_element": {
-        const current = repo.deriveItem(tx, item.itemId);
-        if (!current) throw new Error(`item not found: ${item.itemId}`); // 围栏已验，双保险
-        const element = buildElement(item.element);
-        repo.appendItemVersion(tx, {
-          itemId: current.id,
-          action: "add_element",
-          detail: `补充元素「${element.label}」：${element.text}`,
-          snapshot: {
-            elements: [...current.elements, element],
-            tags: current.tags,
-            status: current.status,
-            doubtNote: current.doubtNote,
-          },
-          by,
-        });
-        attachElementEvidence(tx, raw, current.id, [item.element], by);
-        details.push(`「${itemName(current.elements)}」补充元素「${element.label}」`);
         break;
       }
       case "resolve_doubt": {
@@ -257,7 +242,7 @@ function buildElement(e: ElementInput): Element {
   return parsed.data;
 }
 
-/** 按 label 覆盖/新增元素（update_item 的 setElements 语义）。 */
+/** 按 label 覆盖/新增元素（update_item 的 elements 语义，upsert——不删除）。 */
 function upsertElements(current: Element[], sets: ElementInput[]): Element[] {
   const next = current.map((el) => ({ ...el }));
   for (const set of sets) {

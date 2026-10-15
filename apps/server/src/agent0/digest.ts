@@ -137,7 +137,7 @@ export async function digestRawInput(
 
     const { details } = executeChanges(db, raw, accepted, by);
 
-    // 谓词与计数同源（details.length）——执行器会静默跳过空 setElements 的项，
+    // 谓词与计数同源（details.length）——执行器会静默跳过空 elements 的项，
     // 按 accepted 计数会虚报「应用 N 项」（九轮评审）。
     const note =
       details.length === 0
@@ -145,7 +145,7 @@ export async function digestRawInput(
         : `应用 ${details.length} 项变更：${details.join("；")}`;
     // digest_done 留痕尽力而为——此处已在 executeChanges 提交（digested）之后，审计写失败
     // 绝不允许窜进外层 catch 把已消化批次错标 failed → 重试双落库（七轮评审）。
-    // 计数用 details.length（执行器实写数）而非 accepted.length——空 setElements 会被执行器
+    // 计数用 details.length（执行器实写数）而非 accepted.length——空 elements 会被执行器
     // 静默跳过，按 accepted 计数会虚报（九轮评审）。
     appendPipelineEventBestEffort(
       db,
