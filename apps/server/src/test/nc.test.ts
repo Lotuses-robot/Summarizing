@@ -472,10 +472,10 @@ describe("nc 适配器：去抖封批全链路", () => {
     expect(raw.sourceIdentity["peer"]).toBe("10001"); // 身份键 = peer（非 groupId）
   });
 
-  it("私聊白名单键照日志原样带 private: 前缀 → 仍能匹配（前缀归一，防双前缀失配）", async () => {
+  it("私聊白名单键填了带 private: 前缀的写法 → 与消息比不上，不收（键原样比对，不替用户适配）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    // 用户照日志（「私聊 private:10001 …不在白名单」）原样抄进设置——归一时剥前缀后与 private:10001 会话键对上（审查 2026-10-14）
+    // 用户该填裸 QQ 号；填了带前缀的写法就比对不上——设计如此（填错即收不到，代码不猜）
     const t = await makeNcApp(llm, { g1: "英语群" }, 0, {
       privates: { "private:10001": "室友小王" },
     });
@@ -489,9 +489,8 @@ describe("nc 适配器：去抖封批全链路", () => {
         messageType: "private",
       }),
     );
-    const raw = await sealAndWaitDigested(t.db);
-    expect(raw.sourceIdentity["peer"]).toBe("10001");
-    expect(raw.sourceIdentity["sourceLabel"]).toBe("室友小王");
+    sweepNow();
+    expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0); // 未落档（白名单未命中）
   });
 
   it("私聊事件缺发信人 id（定位不了会话）→ 204 丢，不落档", async () => {

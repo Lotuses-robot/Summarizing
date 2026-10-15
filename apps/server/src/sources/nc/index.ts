@@ -43,13 +43,8 @@ function textFromSegments(segments: NcSegment[] | undefined, rawMessage: string)
   return parts.length > 0 ? parts.join("") : rawMessage;
 }
 
-/** 私聊会话键前缀（拼装 / 剥除 / 白名单归一两处共用同一常量——防各写字符串漂移，审查 2026-10-14）。 */
+/** 私聊会话键前缀：区分 NapCat 推回来的群/私聊消息（群 = 群号、私聊 = `private:<对方QQ>`）。 */
 const PRIVATE_KEY_PREFIX = "private:";
-
-/** 剥会话键前缀（键不带前缀时原样返回）——`private:10001` → `10001`；前缀为空串时恒等。 */
-function withoutPrefix(prefix: string, key: string): string {
-  return key.startsWith(prefix) ? key.slice(prefix.length) : key;
-}
 
 /** 会话类型原文 → 中文措辞（日志多处共用；兜底取中性「会话」——防同型消息在两处日志里说成不同话）。 */
 function kindWordOf(messageType: string): string {
@@ -58,45 +53,41 @@ function kindWordOf(messageType: string): string {
   return "会话";
 }
 
-/** 会话白名单（群 + 私聊统一）：`Record<会话键, 备注名>`（备注名供 sourceLabel）。
- *  会话键：群 = `群号`；私聊 = `private:<对方QQ>`（2026-10-13 私聊支持）——**两 KV 的键都归一到会话键**。
+/** 会话白名单：`Record<键, 备注名>`（备注名供 sourceLabel）；键 = 群号 / 对方 QQ 号，原样取用。
  *  缺省/空对象/非对象 → null（= 未配置 = 全丢，fail-closed，D-84 Q-F）。 */
 function readWhitelist(ctx: SourceContext): Record<string, string> | null {
   const out: Record<string, string> = {};
-  /** 收一个 KV 到 out（坏形状忽略；空串备注名不收——会产出 name="" 的身份 → ingest schema 必拒）。
-   *  `prefix` 把 kv 键归一到会话键（私聊 `private:`）；空前缀（群白名单）下，带 private: 前缀的键 = 用户
-   *  填错了栏（私聊号填进了群白名单）——**拒收并留痕**，否则它会与私聊白名单同号条目撞成同一会话键、
-   *  静默覆盖（审查 2026-10-14）。 */
-  const collect = (key: string, prefix: string): void => {
+  /** 收一个 KV 到 out（坏形状忽略；空串键/空串备注名不收）。 */
+  const collect = (key: string): void => {
     const v = ctx.getSetting(key);
     if (v === null || typeof v !== "object" || Array.isArray(v)) return;
     for (const [k, val] of Object.entries(v)) {
-      if (prefix === "" && k.startsWith(PRIVATE_KEY_PREFIX)) {
-        ctx.log.warn(
-          `群白名单里的键 ${k} 带 ${PRIVATE_KEY_PREFIX} 前缀（疑似把私聊号填进了群白名单）——已忽略该键。`,
-        );
-        continue;
-      }
-      const normalized = withoutPrefix(prefix, k);
-      if (normalized !== "" && typeof val === "string" && val.trim() !== "") {
-        out[`${prefix}${normalized}`] = val;
-      }
+      if (k !== "" && typeof val === "string" && val.trim() !== "") out[k] = val;
     }
   };
-  collect("groups", ""); // 群白名单：键 = 群号
-  collect("privates", PRIVATE_KEY_PREFIX); // 私聊白名单：键 = 对方 QQ 号 → 归一到 private:<QQ>
+  collect("groups");
+  collect("privates");
   return Object.keys(out).length > 0 ? out : null;
 }
 
 /** 事件 → 会话键：群 = group_id；私聊 = `private:<对方 user_id>`（自己发的不回推，见 NapCat 行为）。
- *  取不到键（群号空串、私聊无发信人 id）→ null（无法定位会话，丢弃）——空键放行会在白名单外留痕里
- *  打出「收到群  的消息」这种指不到任何群的误导行（审查 2026-10-14）。 */
+ *  取不到键（群号空串、私聊无发信人 id）→ null（无法定位会话，丢弃）。 */
 function conversationKey(ev: NcEvent): string | null {
   if (ev.message_type === "group") {
     return ev.group_id !== undefined && ev.group_id !== "" ? ev.group_id : null;
   }
   const peer = ev.sender?.user_id ?? ev.user_id;
   return peer !== undefined && peer !== "" ? `${PRIVATE_KEY_PREFIX}${peer}` : null;
+}
+
+/** 拿事件去白名单查备注名：群按群号比、私聊按裸 QQ 号比。 */
+function whitelistLabel(
+  ev: NcEvent,
+  key: string,
+  whitelist: Record<string, string>,
+): string | undefined {
+  const userKey = ev.message_type === "group" ? key : key.slice(PRIVATE_KEY_PREFIX.length);
+  return whitelist[userKey];
 }
 
 /** 从事件取发信人显示名（群名片 > 昵称 > user_id）。 */
@@ -159,9 +150,9 @@ export function makeNcAdapter(): SourceAdapter {
       sourceType: NC_SOURCE_NAME,
       sourceIdentity: {
         sourceLabel: groupNameOf(buf),
-        // 身份键：群 → groupId；私聊 → peer（对方 QQ）——语义诚实（弹性字典自由键，D-84）
+        // 身份键：群 → groupId；私聊 → peer（对方 QQ，取会话键剥掉前缀后的裸号）——语义诚实（弹性字典自由键，D-84）
         ...(kind === "private"
-          ? { peer: withoutPrefix(PRIVATE_KEY_PREFIX, buf.groupId) }
+          ? { peer: buf.groupId.slice(PRIVATE_KEY_PREFIX.length) }
           : { groupId: buf.groupId }),
         ...(batch.sender === undefined ? {} : { sender: batch.sender }), // 多人批次省略——行协议已逐行署名（specs/003 FR-004）
       },
@@ -205,7 +196,7 @@ export function makeNcAdapter(): SourceAdapter {
         const key = conversationKey(ev);
         if (key === null) return reply.code(204).send(); // 定位不了会话（私聊无发信人 id 等）→ 丢
         const whitelist = readWhitelist(ctx);
-        const label = whitelist?.[key];
+        const label = whitelist === null ? undefined : whitelistLabel(ev, key, whitelist);
         if (whitelist === null || label === undefined) {
           // A14（2026-10-13）：白名单外静默丢曾是"配置错了（如群号填反）用户无从感知"的黑洞。
           // 每会话留痕一次（warn → [source:nc] 前缀进 stderr/日志）——用户可据此对照修正白名单。
