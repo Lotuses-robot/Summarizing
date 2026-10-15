@@ -4,6 +4,7 @@ import {
   relativeDueText,
   sourceIdentityLabel,
   sourceLabelOf,
+  FIXED_LABELS,
   type GetItemResult,
   type RawInput,
   dueDateElement,
@@ -89,7 +90,9 @@ export function ItemBody({ id }: { id: string }) {
   const evidenceFor = (label: string) =>
     detail.evidence.filter((e) => e.subject === elementSubject(label));
   // 摘要在基本信息区展示（用户 2026-09-26：与元素区重复）；ddl 同理。元素区只放自由元素
-  const freeElements = item.elements.filter((e) => e.label !== "name" && e.label !== "summary");
+  // 元素区只放自由元素——固定元素（name/dueDate/summary）各有专门位置：name 是标题、summary 与
+  // dueDate 在基本信息区（[ddl]）。filter 用 FIXED_LABELS 单一出处（手写字面量会漏改——D-64 警告的脆弱点）。
+  const freeElements = item.elements.filter((e) => !FIXED_LABELS.some((l) => l === e.label));
   const summaryElement = item.elements.find((e) => e.label === "summary");
   const summaryEvidence = summaryElement === undefined ? [] : evidenceFor("summary");
   // 来源信息：逐批次铺开（一行 = 一个进站批次，**不按身份串去重/合并**——见 collectSources，用户 2026-10-14）；

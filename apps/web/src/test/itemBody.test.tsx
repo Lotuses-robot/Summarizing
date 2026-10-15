@@ -42,6 +42,15 @@ function makeDetail(overrides: Partial<GetItemResult> = {}): GetItemResult {
         capturedAt: "2026-09-26T10:00:00",
         capturedBy: "agent0:test",
       },
+      {
+        id: "ev2",
+        itemId: "it1",
+        subject: "元素:链接",
+        fragmentId: "fr1",
+        pointer: null,
+        capturedAt: "2026-09-26T10:00:00",
+        capturedBy: "agent0:test",
+      },
     ],
     fragments: [
       { id: "fr1", content: "英语作业 9 月 30 号截止", contentHash: "h", rawInputId: "raw1" },
@@ -83,16 +92,19 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     stubFetch(makeDetail());
     render(<ItemBody id="it1" />);
 
-    // 引文默认收起：原文按钮不可见，但证据计数可见
-    await waitFor(() => expect(screen.getByText("[dueDate]")).toBeInTheDocument());
+    // dueDate 是固定元素：只在基本信息区以 [ddl] 出现一次，**不进元素区**（曾两处重复显示）
+    await waitFor(() => expect(screen.getByText("[ddl]")).toBeInTheDocument());
+    expect(screen.queryByText("[dueDate]")).not.toBeInTheDocument();
+    // 自由元素「链接」平铺可见，其引文默认收起（证据计数可见）
+    await waitFor(() => expect(screen.getByText("[链接]")).toBeInTheDocument());
     expect(screen.getByText("· 证据(1)")).toBeInTheDocument();
     expect(screen.queryByText("看原文")).not.toBeInTheDocument();
 
     // 点元素行展开引文（引文是唯一折叠层）
-    fireEvent.click(screen.getByText("[dueDate]"));
+    fireEvent.click(screen.getByText("[链接]"));
     expect(screen.getByText("看原文")).toBeInTheDocument();
     // 再点收起
-    fireEvent.click(screen.getByText("[dueDate]"));
+    fireEvent.click(screen.getByText("[链接]"));
     expect(screen.queryByText("看原文")).not.toBeInTheDocument();
 
     // 版本史默认收，只显计数；点开见明细
@@ -210,7 +222,7 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
   it("「看原文」打开引文悬浮窗：批次原文 + 高亮引文句", async () => {
     stubFetch(makeDetail());
     render(<ItemBody id="it1" />);
-    fireEvent.click(await screen.findByText("[dueDate]"));
+    fireEvent.click(await screen.findByText("[链接]"));
     // 引文旁标来源（D-89 选 B）：裸 sourceLabel 可见，hover 是**完整身份串**（含其余键）
     const label = screen.getByTitle("QQ（groupId=123 · sender=学习委员）");
     expect(label).toHaveTextContent("QQ");

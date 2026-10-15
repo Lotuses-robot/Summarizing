@@ -27,7 +27,7 @@
   <a href="#"><img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind v4" /></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-每账户一库-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-296%20passing-brightgreen?style=flat-square" alt="tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-365%20passing-brightgreen?style=flat-square" alt="tests" /></a>
 </p>
 
 ## 它解决什么
@@ -42,7 +42,9 @@
 - **群机器人接入**：群里消息自动进站，按白名单过滤，合并成批后自动消化成事项。
 - **对话录入**：像聊天一样丢信息，AI 自己判断怎么处理；也可以 @ 提及看板上的事项。
 - **自动整理**：抽日期、抽要素、找归属、合并同一件事的多次提及；推断出来的日期会标「推断」。
+- **会读图**：群里发来的截图、海报、通知图，AI 能打开看清里面的字——截图上的截止日期、报名入口等信息照常提取（这类内容会标「多模态/图片」标签，一眼可辨是「看图得来」而非原文明说）。取不到（如链接过期）就按纯文字处理，不会因为一张图卡住。
 - **证据链**：事项的每个元素都能点开查来源——逐字引文、来源身份、原始批次。
+- **来源信息**：展开一个事项能看到它的每一条消息来自哪（一行一条进站消息，点开见来源的全部细节与原文入口）。
 - **存疑信息库**：拿不准的先存进库里，之后可以合并、丢弃，也可以让 AI 定期复核。不确定就不猜。
 - **修改留痕**：每次改动都追加一份完整快照，历史随时可查。
 - **信源可扩展**：新的消息来源按统一契约接入（[开发信源 →](SOURCE-GUIDE.md)）；信源自己声明设置项，界面自动渲染表单。
@@ -68,7 +70,7 @@ npm run dev                # 打开 http://localhost:5173 登录 → 设置 → 
 装完之后，常用检查：
 
 ```bash
-npm test              # vitest（296 个用例）
+npm test              # vitest（365 个用例）
 npm run check         # 类型 + 代码规范 + 测试
 npm run check:dead    # 死代码检查
 npm run build -w @summarizing/web
