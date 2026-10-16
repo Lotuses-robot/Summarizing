@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {
+  applyTagChanges,
   ElementSchema,
   elementSubject,
   itemName,
@@ -71,16 +72,17 @@ function applyChanges(
       case "update_item": {
         const current = repo.deriveItem(tx, item.itemId);
         if (!current) throw new Error(`item not found: ${item.itemId}`); // 围栏已验，双保险
-        // 空 elements、不追加标签、也不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
-        if (item.elements.length === 0 && item.tags.length === 0 && !item.resolveDoubt) {
+        // 空 elements、无标签改动、也不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
+        if (
+          item.elements.length === 0 &&
+          Object.keys(item.tags).length === 0 &&
+          !item.resolveDoubt
+        ) {
           break;
         }
         const elements = upsertElements(current.elements, item.elements);
-        // 标签增量追加（去重；不覆盖、不删除——D-104 统一「只增改不删」）
-        const tags = [...current.tags];
-        for (const t of item.tags) {
-          if (!tags.includes(t)) tags.push(t);
-        }
+        // 标签改动 map（旧→新：增/删/改，D-105）——单一出处 shared applyTagChanges
+        const tags = applyTagChanges(current.tags, item.tags);
         repo.appendItemVersion(tx, {
           itemId: current.id,
           action: "update_item",

@@ -15,7 +15,7 @@ const CHANGE_FORMAT_DOC = `变更清单的确切格式（字段名必须逐字�
   {"action":"update_item",
    "itemId":"已有事项ID",
    "elements":[{"label":"dueDate","text":"2026-10-15T23:59:59","note":null,"quotes":["原文片段"]}],
-   "tags":["要追加的标签（只列要加的；不填就留空 []）"],
+   "tags":{"":"要新增的标签","要删的旧标签":"","要改的旧标签":"改成的新标签"},
    "resolveDoubt":false},
   {"action":"park_uncertain","content":"原话逐字","needsHuman":60,"reason":"缺截止日期、来源非官方"},
   {"action":"resolve_uncertain","id":"库条目ID","outcome":"merged 或 discarded","note":"一句话说明","resolvedRef":"合并去向ID（merged 时必填）"},
@@ -28,7 +28,7 @@ const CHANGE_FORMAT_DOC = `变更清单的确切格式（字段名必须逐字�
 - 固定元素 label：name（必填，语义名，禁裸日期）/ dueDate（本地时间 YYYY-MM-DDTHH:mm:ss，日期未知就省略此元素）/ summary（**主干一句话**，见下）/ 还可加自由标签（链接、地点、材料…）。
 - ⚠️ **summary 只写主干**：一两句说清「这是件什么事」（谁的事、要做什么），让用户扫一眼就明白大概。**具体细节一律搬到信息元素里**——时间（除 dueDate 本身）、入口、材料、要求、注意事项、分组方式等都别写进 summary（它们已在下方元素中更有条理地罗列）。判据：summary 若出现「XX 平台」「须以 … 为单位」「截止 …」「入口 …」这类细则，就是写多了，删掉它。
 - **元素的** note 只写推断依据；quotes 逐字摘自原文；拿不准的信息一律走 park_uncertain 入存疑信息库（不再有 mark_doubt）。
-- **更新既有事项只能用 update_item**：elements 按 label 覆盖/新增（给不在列表里的 label 即新增），tags 只列要**追加**的标签（不覆盖、不删除）。元素/标签/名字一律只增改、不删。
+- **更新既有事项只能用 update_item**：elements 按 label 覆盖/新增（给不在列表里的 label 即新增）。tags 是**改动 map（旧→新）**：「」→「新」= 加标签、「旧」→「」= 删标签、「旧」→「新」= 改标签名；没标签可改就写 {}。元素只增改不删；标签可增删改；name 不得动。
 - ⚠️ **读了图（fetch_image）后提取的内容**：相关元素的 quotes 必须写上那段「[图片](url)」占位（它逐字在原文里），且该事项的 tags 必须含「多模态/图片」——否则被围栏拒收。这是为了在界面上标出"这条来自读图"（前端据此高亮）。`;
 
 export const DIGEST_SYSTEM_PROMPT = `你是 agent0（裁决者），负责消化一条新录入的原始信息，产出变更清单。

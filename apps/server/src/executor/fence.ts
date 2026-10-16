@@ -1,4 +1,5 @@
 import {
+  applyTagChanges,
   ElementSchema,
   ChangeListSchema,
   quoteHasLinkPlaceholder,
@@ -59,7 +60,8 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
       return checkMultimodalTag(item.elements, item.tags);
     }
     case "update_item": {
-      if (!repo.itemExists(db, item.itemId)) {
+      const current = repo.deriveItem(db, item.itemId);
+      if (!current) {
         return `itemId 不存在: ${item.itemId}`;
       }
       // elements 不得动固定元素 name（改语义名走 create_item；防双 name 投毒）
@@ -72,7 +74,8 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
         const quoteErr = checkQuotes(el, raw.content);
         if (quoteErr !== null) return quoteErr;
       }
-      return checkMultimodalTag(item.elements, item.tags);
+      // 多模态强制按「改动应用后的标签集」判（读图内容并进已有事项时，改动 map 里带上「多模态/图片」即可）
+      return checkMultimodalTag(item.elements, applyTagChanges(current.tags, item.tags));
     }
     case "resolve_doubt":
     case "complete_item": {

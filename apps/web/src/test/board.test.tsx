@@ -52,6 +52,45 @@ describe("Board（四段看板，D-89）", () => {
     expect(screen.getByText("已交表")).toBeInTheDocument();
   });
 
+  it("段头计数随筛选变：过滤后计数 = 显示条数（曾固定显示段内总数）", () => {
+    const { rerender } = render(
+      <Board
+        board={view({
+          scheduled: [
+            makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
+            makeRow({ id: "s2", name: "数学作业", tags: ["数学课"], due: "2026-09-29 18:00" }),
+          ],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 无筛选：段头计数 = 2；两行都可见
+    expect(screen.getByText("已排期").parentElement).toHaveTextContent("2");
+    expect(screen.getByText("英语作业")).toBeInTheDocument();
+    expect(screen.getByText("数学作业")).toBeInTheDocument();
+    // 按「数学课」筛选 → 段头计数变 1；只剩数学作业
+    rerender(
+      <Board
+        board={view({
+          scheduled: [
+            makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
+            makeRow({ id: "s2", name: "数学作业", tags: ["数学课"], due: "2026-09-29 18:00" }),
+          ],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: ["数学课"] }}
+        onTagClick={() => {}}
+      />,
+    );
+    expect(screen.getByText("已排期").parentElement).toHaveTextContent("1");
+    expect(screen.queryByText("英语作业")).not.toBeInTheDocument();
+    expect(screen.getByText("数学作业")).toBeInTheDocument();
+  });
+
   it("四段渲染：已归档段默认折叠、点段头展开；带 doubtNote 的行按日期正常渲染（D-89）", () => {
     render(
       <Board

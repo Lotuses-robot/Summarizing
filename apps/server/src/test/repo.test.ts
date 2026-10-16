@@ -194,7 +194,7 @@ describe("executeChanges 事务原子性", () => {
             action: "update_item",
             itemId: "missing-item",
             elements: [{ label: "dueDate", text: "2026-10-01T00:00:00", quotes: [] }],
-            tags: [],
+            tags: {},
             resolveDoubt: false,
           },
         ],
@@ -219,10 +219,57 @@ describe("版本链边界（第 4 轮补测）", () => {
     executeChanges(
       db,
       raw,
-      [{ action: "update_item", itemId: item.id, elements: [], tags: [], resolveDoubt: false }],
+      [{ action: "update_item", itemId: item.id, elements: [], tags: {}, resolveDoubt: false }],
       { actor: "agent0", model: "test" },
     );
     expect(repo.deriveHistory(db, item.id).length).toBe(before);
+  });
+
+  it('update_item 的 tags 改动 map：增（""→新）/ 删（旧→""）/ 改（旧→新）一次生效（D-105）', () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    createHomeworkItem(db, raw, "2026-09-30T23:59:59");
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("未创建");
+    // 先塞一个已知标签集（英语课/作业）
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "update_item",
+          itemId: item.id,
+          elements: [],
+          tags: { "": "英语课" },
+          resolveDoubt: false,
+        },
+        {
+          action: "update_item",
+          itemId: item.id,
+          elements: [],
+          tags: { "": "作业" },
+          resolveDoubt: false,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+    expect(repo.deriveItems(db)[0]?.tags.sort()).toEqual(["作业", "英语课"]);
+    // 一次 map 里同时：加「考试」、删「作业」、把「英语课」改成「英语」
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "update_item",
+          itemId: item.id,
+          elements: [],
+          tags: { "": "考试", 作业: "", 英语课: "英语" },
+          resolveDoubt: false,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+    expect(repo.deriveItems(db)[0]?.tags.sort()).toEqual(["考试", "英语"].sort());
   });
 
   it("元素 quotes 缺失（default []）→ 事项正常落库、零证据", () => {

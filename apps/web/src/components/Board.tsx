@@ -242,7 +242,8 @@ function Row({
   );
 }
 
-/** 看板段：计数头（总计数，不随筛选变）+ 折叠 + 空态一句话（禁愧疚/鸡血措辞）。 */
+/** 看板段：计数头（**显示条数——随筛选变**）+ 折叠 + 空态一句话（禁愧疚/鸡血措辞）。
+ *  total = 段内总条数（不随筛选变），仅用于区分「这段本就空」与「筛选后无匹配」。 */
 function Section({
   title,
   rows,
@@ -287,7 +288,7 @@ function Section({
         )}
         {title}
         <span className="rounded-full bg-canvas px-1.5 text-xs font-normal text-ink-muted">
-          {total}
+          {rows.length}
         </span>
       </button>
       {!folded && (
