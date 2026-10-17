@@ -90,6 +90,7 @@ export function appendItemVersion(
       elements: Item["elements"];
       tags: string[];
       status: Item["status"];
+      kind: Item["kind"];
       doubtNote: string | null;
     };
     by: Provenance;
@@ -159,20 +160,6 @@ export function completedAtOf(db: DbOrTx, itemId: string): string | null {
     }
   }
   return null;
-}
-
-/** 归档前的处置状态（撤回归档只撤归档、不改完成状态，用户 2026-09-27 二轮）：
- *  自版本链最新向旧找第一个「非 archived 状态」的版本——按状态而非 action 跳过，
- *  防 agent0/confirm 对归档项的改动（archived 状态版本）顶链造成撤回失效。 */
-export function preArchivedStatus(db: DbOrTx, itemId: string): Item["status"] {
-  const history = deriveHistory(db, itemId);
-  for (let i = history.length - 1; i >= 0; i--) {
-    const v = history[i];
-    if (v && v.snapshot.status !== "archived") {
-      return v.snapshot.status;
-    }
-  }
-  return "todo";
 }
 
 /** 派生单个事项；不存在（无任何版本）返回 null。 */

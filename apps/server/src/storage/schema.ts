@@ -12,7 +12,7 @@ export const itemVersions = sqliteTable(
     itemId: text("item_id").notNull(),
     action: text("action").notNull(), // create_item / update_item / park_uncertain / …
     detail: text("detail").notNull(), // 面向用户的一句话（处理记录直接展示）
-    snapshot: text("snapshot").notNull(), // JSON: {elements, tags, status, doubtNote}
+    snapshot: text("snapshot").notNull(), // JSON: {elements, tags, status, kind, doubtNote}
     at: text("at").notNull(),
     by: text("by").notNull(), // 含模型标识
     revokedBy: text("revoked_by"), // 预留未用（撤回功能暂缓，D-79）

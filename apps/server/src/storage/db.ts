@@ -168,6 +168,16 @@ function ensureSchema(sqlite: Database.Database): void {
   // 解析成 {actor, model}；已是对象（json_valid 且 json_type=object）的不动。幂等。
   migrateByToProvenance(sqlite, "item_versions");
   migrateByToProvenance(sqlite, "pipeline_events");
+
+  // ── 取消归档（007 / FR-018）：存量 status=archived 快照并入完成态（archived → done）──
+  // 读路径 ItemSchema.status 收窄为 todo/done 后对 archived 零容忍——不迁则存量归档事项令
+  // deriveItem/deriveItemsWithVersion 的 ItemSchema.parse 抛错、全站读路径 500。只改 status 值，
+  // 不删版本链、不动其它字段。幂等（第二次无 archived 行，0 更新）。随 SCHEMA_VERSION=2 走迁移前自动备份。
+  sqlite.exec(`
+    UPDATE item_versions
+    SET snapshot = json_set(snapshot, '$.status', 'done')
+    WHERE json_valid(snapshot) AND json_extract(snapshot, '$.status') = 'archived'
+  `);
 }
 
 /** source_settings 若还带着旧列名 plugin（改名中断的中间态）→ 补跑列改名（幂等）。 */

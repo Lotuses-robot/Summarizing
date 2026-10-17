@@ -106,7 +106,8 @@ export const ItemSchema = z
     id: z.string(),
     elements: z.array(ElementSchema),
     tags: z.array(z.string().min(1)), // 归类（独立字段，不挂证据）
-    status: z.enum(["todo", "done", "archived"]), // 处置状态（archived 于 D-83 启用；shelved 仍预留）；过期 = 派生
+    status: z.enum(["todo", "done"]), // 处置状态（archived 已随 007 取消、迁为 done，FR-018；trashed 回收站第二刀加）
+    kind: z.enum(["task", "notice"]).default("task"), // 分类轴（007）：task=事项 / notice=通知；存量快照无此字段→task
     doubtNote: z.string().nullable(), // 非 null = 存疑中（01§4.12；判据从严 D-59）
   })
   .superRefine((item, ctx) => {
@@ -126,7 +127,8 @@ export type Item = z.infer<typeof ItemSchema>;
 export const ItemSnapshotSchema = z.object({
   elements: z.array(ElementSchema),
   tags: z.array(z.string().min(1)),
-  status: z.enum(["todo", "done", "archived"]),
+  status: z.enum(["todo", "done"]),
+  kind: z.enum(["task", "notice"]).default("task"),
   doubtNote: z.string().nullable(),
 });
 export type ItemSnapshot = z.infer<typeof ItemSnapshotSchema>;
@@ -300,7 +302,8 @@ export const ItemVersionSchema = z.object({
   snapshot: z.object({
     elements: z.array(ElementSchema),
     tags: z.array(z.string()),
-    status: z.enum(["todo", "done", "archived"]), // 快照同 Item（D-83 启用 archived）
+    status: z.enum(["todo", "done"]), // 快照同 Item（archived 已随 007 取消）
+    kind: z.enum(["task", "notice"]).default("task"), // 分类轴（007）
     doubtNote: z.string().nullable(),
   }),
   at: z.string(), // 北京墙钟
@@ -325,6 +328,7 @@ export const ChangeItemSchema = z.discriminatedUnion("action", [
     action: z.literal("create_item"),
     elements: z.array(ElementInputSchema).min(1),
     tags: z.array(z.string().min(1)),
+    kind: z.enum(["task", "notice"]).optional(), // 分类轴（007）：缺省 task；通知=notice（不得含 dueDate，围栏强制 FR-003）
     doubtNote: z.string().nullable(),
   }),
   z
@@ -334,6 +338,7 @@ export const ChangeItemSchema = z.discriminatedUnion("action", [
       elements: z.array(ElementInputSchema), // 按 label 覆盖/新增（upsert）——不删除
       // 标签改动 map（旧→新）：`""→"新"` 增、`"旧"→""` 删、`"旧"→"新"` 改；两空非法（由 superRefine 拒）。
       tags: z.record(z.string(), z.string()),
+      kind: z.enum(["task", "notice"]).optional(), // 切换分类轴（007）：缺席=不改；ddl 形状约束由围栏强制（FR-014）
       resolveDoubt: z.boolean(), // true = 同时解除存疑
     })
     .superRefine((item, ctx) => {
@@ -507,13 +512,12 @@ export const ItemRowSchema = z.object({
 });
 export type ItemRow = z.infer<typeof ItemRowSchema>;
 
-// 看板四段（01§4.3 / D-80 五段 → D-89 四段）：日期未知 → 已排期 → 已完成 → 已归档
+// 看板三段（01§4.3；D-80 五段 → D-89 四段 → 007 取消归档后三段）：日期未知 → 已排期 → 已完成
 // （存疑段已随 D-89 退场：拿不准的信息进存疑信息库，独立审核页——不再占看板）
 export const BoardViewSchema = z.object({
   undated: z.array(ItemRowSchema), // 日期未知段
   scheduled: z.array(ItemRowSchema), // 已排期（按 ddl 升序）
   done: z.array(ItemRowSchema), // 已完成（默认折叠；status="done" 全量归此段）
-  archived: z.array(ItemRowSchema), // 已归档段（D-83 最小归档启用；搁置流仍留信源阶段）
   failedRawInputs: z.array(RawInputSchema), // 「未处理」横幅
 });
 export type BoardView = z.infer<typeof BoardViewSchema>;

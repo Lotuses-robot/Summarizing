@@ -148,20 +148,26 @@ function fragFrom(rawIndex: number, quote: string): string {
   return repo.getOrCreateFragment(db, quote, rawId).id;
 }
 
-/** 建一个事项（单版本）——返回 itemId。 */
+/** 建一个事项（单版本）——返回 itemId。演示事项全为 task（通知另有专段演示）。 */
 function makeItem(
   action: string,
   detail: string,
   snapshot: {
     elements: { label: string; text: string; note?: string | null }[];
     tags: string[];
-    status: "todo" | "done" | "archived";
+    status: "todo" | "done";
     doubtNote: string | null;
   },
   atAgoMs: number,
 ): string {
   const itemId = randomUUID();
-  const v = repo.appendItemVersion(db, { itemId, action, detail, snapshot, by: BY });
+  const v = repo.appendItemVersion(db, {
+    itemId,
+    action,
+    detail,
+    snapshot: { ...snapshot, kind: "task" },
+    by: BY,
+  });
   client.prepare("UPDATE item_versions SET at = ? WHERE id = ?").run(wallClockAgo(atAgoMs), v.id);
   return itemId;
 }
@@ -354,6 +360,7 @@ ev(itemE, "元素:name", fragFrom(5, "《形势与政策》论文"));
       ],
       tags: ["课程"],
       status: "done",
+      kind: "task",
       doubtNote: null,
     },
     by: { actor: "用户", model: null },
@@ -363,7 +370,7 @@ ev(itemE, "元素:name", fragFrom(5, "《形势与政策》论文"));
     .run(wallClockAgo(2 * HOUR), done.id);
 }
 
-// F. 社团值班（完成 → 归档——三个版本）
+// F. 社团值班（完成——归档已随 007 取消）
 const itemF = makeItem(
   "create_item",
   "从社团大群提取：招新值班",
@@ -393,6 +400,7 @@ ev(itemF, "元素:name", fragFrom(6, "本周六招新摊位值班"));
       ],
       tags: ["社团"],
       status: "done",
+      kind: "task",
       doubtNote: null,
     },
     by: { actor: "用户", model: null },
@@ -400,26 +408,6 @@ ev(itemF, "元素:name", fragFrom(6, "本周六招新摊位值班"));
   client
     .prepare("UPDATE item_versions SET at = ? WHERE id = ?")
     .run(wallClockAgo(4 * DAY), done.id);
-
-  const arch = repo.appendItemVersion(db, {
-    itemId: itemF,
-    action: "archive_item",
-    detail: "用户点归档：旧事清出待办",
-    snapshot: {
-      elements: [
-        { label: "name", text: "社团招新摊位值班（周六上午）", note: null },
-        { label: "summary", text: "周六上午在招新摊位值班。", note: null },
-        { label: "地点", text: "东区操场 A12 摊位", note: null },
-      ],
-      tags: ["社团"],
-      status: "archived",
-      doubtNote: null,
-    },
-    by: { actor: "用户", model: null },
-  });
-  client
-    .prepare("UPDATE item_versions SET at = ? WHERE id = ?")
-    .run(wallClockAgo(3 * DAY), arch.id);
 }
 
 // ── 已读标记：「新」微标只留给 G（图书馆还书）──

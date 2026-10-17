@@ -61,6 +61,7 @@ function applyChanges(
             elements,
             tags: item.tags,
             status: "todo",
+            kind: item.kind ?? "task", // 分类轴（007）：缺省 task；通知=notice（无 dueDate，围栏已强制）
             doubtNote: item.doubtNote,
           },
           by,
@@ -72,14 +73,16 @@ function applyChanges(
       case "update_item": {
         const current = repo.deriveItem(tx, item.itemId);
         if (!current) throw new Error(`item not found: ${item.itemId}`); // 围栏已验，双保险
-        // 空 elements、无标签改动、也不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
+        // 空 elements、无标签改动、不切换 kind、也不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
         if (
           item.elements.length === 0 &&
           Object.keys(item.tags).length === 0 &&
+          item.kind === undefined &&
           !item.resolveDoubt
         ) {
           break;
         }
+        // elements 不受 dueDate 缺席影响（upsert 只增改）；kind 切换的 ddl 形状约束由围栏在执行前强制（FR-014）
         const elements = upsertElements(current.elements, item.elements);
         // 标签改动 map（旧→新：增/删/改，D-105）——单一出处 shared applyTagChanges
         const tags = applyTagChanges(current.tags, item.tags);
@@ -93,6 +96,7 @@ function applyChanges(
             elements,
             tags,
             status: current.status,
+            kind: item.kind ?? current.kind, // 分类轴（007）：缺席=沿用，显式=切换（ddl 形状已由围栏校验）
             doubtNote: item.resolveDoubt ? null : current.doubtNote,
           },
           by,
@@ -112,6 +116,7 @@ function applyChanges(
             elements: current.elements,
             tags: current.tags,
             status: current.status,
+            kind: current.kind,
             doubtNote: null,
           },
           by,
@@ -130,6 +135,7 @@ function applyChanges(
             elements: current.elements,
             tags: current.tags,
             status: "done",
+            kind: current.kind,
             doubtNote: current.doubtNote,
           },
           by,
@@ -160,6 +166,7 @@ function applyChanges(
               elements: current.elements,
               tags: current.tags,
               status: current.status,
+              kind: current.kind,
               doubtNote: current.doubtNote,
             },
             by,

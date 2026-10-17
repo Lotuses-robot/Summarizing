@@ -127,7 +127,7 @@ describe("buildBoard（状态制五段，D-80）", () => {
     expect(board.failedRawInputs.map((r) => r.id)).toEqual([raw.id]);
   });
 
-  it("已完成全量归 done 段（带日期也不回已排期、不再判过期；archived 恒空占位）", () => {
+  it("已完成全量归 done 段（带日期也不回已排期、不再判过期）", () => {
     const db = makeDb(":memory:");
     const raw = seedRaw(db);
     createItem(db, raw, { name: "交表", dueDate: "2026-09-30T23:59:00" });
@@ -143,7 +143,7 @@ describe("buildBoard（状态制五段，D-80）", () => {
     const board = buildBoard(db);
     expect(board.done.map((r) => r.item.elements[0]?.text)).toEqual(["交表"]);
     expect(board.scheduled).toHaveLength(0);
-    expect(board.archived).toHaveLength(0);
+    expect(board.undated).toHaveLength(0);
     expect(board.done[0]?.overdue).toBe(false);
   });
 
@@ -315,43 +315,28 @@ describe("事项读写接口（真实 HTTP 入口）", () => {
     expect(miss.statusCode).toBe(404);
   });
 
-  it("双归档往返：连续 archive; archive; reopen → 回到 todo（preArchivedStatus 活锁回归，D-83 二轮）", async () => {
-    const t = await makeTestAccount({ llm: new FakeLlm("t") });
-    const raw = seedRaw(t.db);
-    createItem(t.db, raw, { name: "反复归档" });
-    const item = repo.deriveItems(t.db)[0];
-    if (!item) throw new Error("播种失败");
-
-    await t.inject({ method: "POST", url: `/api/items/${item.id}/archive` });
-    await t.inject({ method: "POST", url: `/api/items/${item.id}/archive` });
-    const reopened = await t.inject({ method: "POST", url: `/api/items/${item.id}/reopen` });
-    expect(reopened.json<{ status: string }>().status).toBe("todo");
-  });
-
-  it("撤回归档（D-83 二轮）：done 项归档后撤回归档 → 仍是 done（完成状态保留）", async () => {
+  it("reopen 把已完成事项恢复为待办（归档已随 007 取消，FR-018）", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(parseWallClock("2026-09-27T08:00:00"));
       const t = await makeTestAccount({ llm: new FakeLlm("t") });
       const raw = seedRaw(t.db);
-      createItem(t.db, raw, { name: "先完成后归档" });
+      createItem(t.db, raw, { name: "先完成后恢复" });
       const item = repo.deriveItems(t.db)[0];
       if (!item) throw new Error("事项未创建");
 
-      await t.inject({ method: "POST", url: `/api/items/${item.id}/complete` });
-      await t.inject({ method: "POST", url: `/api/items/${item.id}/archive` });
-      expect(repo.deriveItem(t.db, item.id)?.status).toBe("archived");
+      const completed = await t.inject({ method: "POST", url: `/api/items/${item.id}/complete` });
+      expect(completed.statusCode).toBe(200);
+      expect(repo.deriveItem(t.db, item.id)?.status).toBe("done");
 
       const reopened = await t.inject({ method: "POST", url: `/api/items/${item.id}/reopen` });
       expect(reopened.statusCode).toBe(200);
-      // 撤回归档只撤归档：回到完成状态，不强制回待办
-      expect(reopened.json<{ status: string }>().status).toBe("done");
+      expect(reopened.json<{ status: string }>().status).toBe("todo");
 
       const versions = repo.deriveHistory(t.db, item.id);
       expect(versions.map((v) => v.action)).toEqual([
         "create_item",
         "complete_item",
-        "archive_item",
         "reopen_item",
       ]);
     } finally {
@@ -359,27 +344,17 @@ describe("事项读写接口（真实 HTTP 入口）", () => {
     }
   });
 
-  it("archive（D-83 最小归档）：todo → archived 落归档段；reopen 从归档恢复", async () => {
+  it("连续 reopen 幂等只留痕：complete; reopen; reopen → 仍是 todo", async () => {
     const t = await makeTestAccount({ llm: new FakeLlm("t") });
     const raw = seedRaw(t.db);
-    createItem(t.db, raw, { name: "要归档的事项" });
+    createItem(t.db, raw, { name: "反复恢复" });
     const item = repo.deriveItems(t.db)[0];
-    if (!item) throw new Error("事项未创建");
+    if (!item) throw new Error("播种失败");
 
-    const archived = await t.inject({ method: "POST", url: `/api/items/${item.id}/archive` });
-    expect(archived.statusCode).toBe(200);
-    expect(archived.json<{ status: string }>().status).toBe("archived");
-    expect(archived.json<{ doubtNote: string | null }>().doubtNote).toBeNull();
-
-    const board = buildBoard(t.db);
-    expect(board.archived.map((r) => r.item.elements[0]?.text)).toEqual(["要归档的事项"]);
-    expect(board.scheduled).toHaveLength(0);
-
+    await t.inject({ method: "POST", url: `/api/items/${item.id}/complete` });
+    await t.inject({ method: "POST", url: `/api/items/${item.id}/reopen` });
     const reopened = await t.inject({ method: "POST", url: `/api/items/${item.id}/reopen` });
     expect(reopened.json<{ status: string }>().status).toBe("todo");
-
-    const versions = repo.deriveHistory(t.db, item.id);
-    expect(versions.map((v) => v.action)).toEqual(["create_item", "archive_item", "reopen_item"]);
   });
 
   it("不存在的事项 → 404", async () => {
