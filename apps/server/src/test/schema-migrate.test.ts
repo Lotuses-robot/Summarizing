@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { makeDb } from "../storage/db";
+import * as repo from "../storage/repo";
 import { SCHEMA_VERSION, readSchemaVersion } from "../storage/migrate";
 
 // schema 迁移三件套（批次 2）：版本号门控 + 迁移前自动备份 + 保留 N 份。
@@ -125,3 +126,95 @@ function makeLegacyDb(file: string): void {
   raw.exec("CREATE TABLE legacy (id TEXT)");
   raw.close();
 }
+
+describe("取消归档迁移（007 FR-018：archived → done）", () => {
+  /** 造一条 v1 形状的版本行（snapshot 里 status=archived）——绕过 schema，直插 JSON 列。 */
+  function seedArchivedVersion(file: string, itemId: string, at: string): void {
+    const sqlite = new Database(file);
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS item_versions (
+        id TEXT PRIMARY KEY, item_id TEXT NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL,
+        snapshot TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, revoked_by TEXT
+      );
+    `);
+    sqlite
+      .prepare(
+        "INSERT INTO item_versions (id, item_id, action, detail, snapshot, at, by, revoked_by) VALUES (?,?,?,?,?,?,?,NULL)",
+      )
+      .run(
+        `v-${itemId}`,
+        itemId,
+        "archive_item",
+        "用户点归档：旧事清出待办",
+        JSON.stringify({
+          elements: [{ label: "name", text: "旧事项", basis: [] }],
+          tags: [],
+          status: "archived",
+          doubtNote: null,
+        }),
+        at,
+        JSON.stringify({ actor: "用户", model: null }),
+      );
+    sqlite.close();
+  }
+
+  it("存量 archived 快照 → 迁移为 done（读路径对 archived 零容忍，不迁则全站 500）", () => {
+    const file = path.join(tmpDir(), "arch.db");
+    seedArchivedVersion(file, "i-arch", "2026-09-01T10:00:00");
+
+    // 开库即触发 v1→v2 迁移
+    const db = makeDb(file);
+    const items = repo.deriveItems(db);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.status).toBe("done"); // 归档并入完成态（用户：归档≈完成）
+    db.$client.close();
+  });
+
+  it("多版本链：末版 archived、中间 archived → 全改 done；当前视图 = done", () => {
+    const file = path.join(tmpDir(), "chain.db");
+    seedArchivedVersion(file, "i-chain", "2026-09-01T10:00:00");
+    {
+      const sqlite = new Database(file);
+      sqlite
+        .prepare(
+          "INSERT INTO item_versions (id, item_id, action, detail, snapshot, at, by, revoked_by) VALUES (?,?,?,?,?,?,?,NULL)",
+        )
+        .run(
+          "v-i-chain-2",
+          "i-chain",
+          "archive_item",
+          "再归档一次",
+          JSON.stringify({
+            elements: [{ label: "name", text: "旧事项", basis: [] }],
+            tags: [],
+            status: "archived",
+            doubtNote: null,
+          }),
+          "2026-09-02T10:00:00",
+          JSON.stringify({ actor: "用户", model: null }),
+        );
+      sqlite.close();
+    }
+
+    const db = makeDb(file);
+    const item = repo.deriveItem(db, "i-chain");
+    expect(item?.status).toBe("done");
+    // 版本链本身没被删（只改 status 值）——历史仍可查
+    expect(repo.deriveHistory(db, "i-chain")).toHaveLength(2);
+    db.$client.close();
+  });
+
+  it("幂等：迁移后再开库不动数据、不重复备份", () => {
+    const file = path.join(tmpDir(), "idem.db");
+    seedArchivedVersion(file, "i-idem", "2026-09-01T10:00:00");
+    makeDb(file).$client.close(); // 迁移 0 → 2（或 1 → 2）
+    makeDb(file).$client.close(); // 再开 = 持平
+    const db = makeDb(file);
+    expect(repo.deriveItems(db)[0]?.status).toBe("done");
+    db.$client.close();
+    // 持平运行不新增备份（首次迁移应只有 1 份 v0 备份）
+    const bdir = path.join(path.dirname(file), "backup");
+    const backups = readdirSync(bdir).filter((f) => f.startsWith("idem-v"));
+    expect(backups).toHaveLength(1);
+  });
+});

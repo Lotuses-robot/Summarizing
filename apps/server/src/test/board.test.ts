@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { itemName, type RawInput } from "@summarizing/shared";
 import { executeChanges } from "../executor/executor";
 import { buildBoard } from "../application/board";
+import { deriveNotices } from "../application/notice";
+import { deriveTrashed } from "../application/trash";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
@@ -29,7 +31,7 @@ function seedRaw(db: ReturnType<typeof makeDb>, content = "x"): RawInput {
 function createItem(
   db: ReturnType<typeof makeDb>,
   raw: RawInput,
-  args: { name: string; dueDate?: string; tags?: string[] },
+  args: { name: string; dueDate?: string; tags?: string[]; kind?: "task" | "notice" },
 ) {
   executeChanges(
     db,
@@ -37,6 +39,7 @@ function createItem(
     [
       {
         action: "create_item",
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
         elements: [
           { label: "name", text: args.name, quotes: [] },
           ...(args.dueDate === undefined
@@ -426,5 +429,202 @@ describe("失败批次重试（D-71）", () => {
     const t = await makeTestAccount({ llm: new FakeLlm("t") });
     const res = await t.inject({ method: "POST", url: "/api/raw/nope/retry" });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("通知不进看板（007 US1 / SC-002）", () => {
+  it("kind=notice 的信息不进看板任一段，只在通知页出现", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    createItem(db, raw, { name: "真事项", dueDate: "2026-09-28T10:00:00" });
+    // 通知：无 ddl、kind=notice——课改地点这类「不用做但要知道」
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "create_item",
+          kind: "notice",
+          elements: [{ label: "name", text: "数据结构课改到明理楼3楼", quotes: [] }],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+
+    const board = buildBoard(db);
+    expect(board.undated).toHaveLength(0);
+    expect(board.scheduled.map((r) => itemName(r.item.elements))).toEqual(["真事项"]);
+    expect(board.done).toHaveLength(0);
+
+    const notices = deriveNotices(db);
+    expect(notices.notices.map((r) => itemName(r.item.elements))).toEqual([
+      "数据结构课改到明理楼3楼",
+    ]);
+  });
+});
+
+describe("回收站（007 US3）", () => {
+  it("删除追加 trashed 版本 → 从看板消失、进回收站；恢复 → 回删前的值", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    createItem(db, raw, { name: "要删的事项" });
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("播种失败");
+
+    // 删除 = 追加版本，不是旁路删除（SC-003：无需新增表）
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除「要删的事项」",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+    expect(buildBoard(db).undated).toHaveLength(0);
+    expect(buildBoard(db).done).toHaveLength(0);
+
+    const rows = deriveTrashed(db).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.item.id).toBe(item.id);
+    // 版本链留痕：删除前是什么状态可查
+    expect(rows[0]?.item.status).toBe("trashed");
+    expect(rows[0]?.trashedAt).not.toBe("");
+    const history = repo.deriveHistory(db, item.id);
+    expect(history.map((v) => v.snapshot.status)).toEqual(["todo", "trashed"]);
+
+    // 复活：status 回到删前的值（preTrashStatus 走版本链）
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "restore_item",
+      detail: "从回收站恢复「要删的事项」",
+      snapshot: { ...item, status: repo.preTrashStatus(db, item.id) },
+      by: { actor: "用户", model: null },
+    });
+    expect(deriveTrashed(db).rows).toHaveLength(0);
+    expect(buildBoard(db).undated.map((r) => r.item.id)).toEqual([item.id]);
+  });
+
+  it("通知与事项共用回收站（同一 itemId 版本链）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    createItem(db, raw, { name: "要删的通知", kind: "notice" });
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("播种失败");
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除「要删的通知」",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+
+    const rows = deriveTrashed(db).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.item.kind).toBe("notice");
+  });
+
+  it("trashed 条目排除出 agent0 检索面（OQ-9）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const item = createItem(db, raw, { name: "删掉的事项" });
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除「删掉的事项」",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+
+    // search_items 覆盖 notice（OQ-9 前半）——但 trashed 一律排除
+    const notice = createItem(db, raw, { name: "留存的通知", kind: "notice" });
+    const hits = repo
+      .deriveItems(db)
+      .filter((i) => i.status !== "trashed")
+      .map((i) => i.id);
+    expect(hits).toEqual([notice.id]);
+  });
+});
+
+describe("通知与回收站接口（真实 HTTP 入口，007）", () => {
+  it("GET /api/notices 只回通知（不混事项）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "事项A" });
+    createItem(t.db, raw, { name: "通知B", kind: "notice" });
+
+    const res = await t.inject({ method: "GET", url: "/api/notices" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ notices: { item: { elements: { text: string }[] } }[] }>();
+    expect(body.notices.map((r) => r.item.elements[0]?.text)).toEqual(["通知B"]);
+  });
+
+  it("删除 → 回收站可见 → 恢复回删前状态；看板即时不留它", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "要删的事项" });
+    const item = repo.deriveItems(t.db)[0];
+    if (!item) throw new Error("播种失败");
+
+    const del = await t.inject({ method: "POST", url: `/api/items/${item.id}/trash` });
+    expect(del.statusCode).toBe(200);
+    expect(del.json<{ status: string }>().status).toBe("trashed");
+
+    const trash = await t.inject({ method: "GET", url: "/api/trash" });
+    const rows = trash.json<{ rows: { item: { id: string } }[] }>().rows;
+    expect(rows.map((r) => r.item.id)).toEqual([item.id]);
+
+    const restored = await t.inject({ method: "POST", url: `/api/items/${item.id}/restore` });
+    expect(restored.json<{ status: string }>().status).toBe("todo"); // 删前是 todo
+    const after = await t.inject({ method: "GET", url: "/api/trash" });
+    expect(after.json<{ rows: unknown[] }>().rows).toHaveLength(0);
+  });
+
+  it("一键清理只物理删 >15d 的（≤15d 保留；原文档案不动）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+
+    // 「20 天前删掉的」：整条版本链在 20 天前的时刻落笔（fake timers 钉住——改写历史 at 会打乱
+    // 版本链的 (at, rowid) 次序、令「末版 = 当前态」失真，所以旧条目必须一开始就落在旧时刻）
+    const { raw, old } = (() => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(parseWallClock("2026-09-27T12:00:00"));
+        const raw = seedRaw(t.db, "原始内容在这里");
+        const old = createItem(t.db, raw, { name: "二十天前删的" });
+        repo.appendItemVersion(t.db, {
+          itemId: old.id,
+          action: "trash_item",
+          detail: "删除「二十天前删的」",
+          snapshot: { ...old, status: "trashed" },
+          by: { actor: "用户", model: null },
+        });
+        return { raw, old };
+      } finally {
+        vi.useRealTimers();
+      }
+    })();
+
+    // 「今天删的」：现在落笔
+    const raw2 = seedRaw(t.db, "另一批原文");
+    const fresh = createItem(t.db, raw2, { name: "今天删的" });
+    repo.appendItemVersion(t.db, {
+      itemId: fresh.id,
+      action: "trash_item",
+      detail: "删除「今天删的」",
+      snapshot: { ...fresh, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+
+    const purge = await t.inject({ method: "POST", url: "/api/trash/purge" });
+    expect(purge.statusCode).toBe(200);
+    expect(purge.json<{ purged: number }>().purged).toBe(1);
+
+    const left = await t.inject({ method: "GET", url: "/api/trash" });
+    const rows = left.json<{ rows: { item: { id: string } }[] }>().rows;
+    expect(rows.map((r) => r.item.id)).toEqual([fresh.id]);
+    // 原文档案不随信息删除（FR-009：证据终端不破）
+    const rawStill = repo.getRawInput(t.db, raw.id);
+    expect(rawStill?.content).toBe("原始内容在这里");
+    expect(repo.deriveHistory(t.db, old.id)).toHaveLength(0); // 老条目的版本链已物理删
   });
 });

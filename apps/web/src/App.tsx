@@ -5,13 +5,18 @@ import {
   errText,
   type BoardView,
   type MeView,
+  type NoticeView,
+  type NoticeRow,
+  type TrashView,
   type UncertainInput,
 } from "@summarizing/shared";
 import { api, setOnUnauthorized } from "./api";
-import { ActivityBar } from "./components/ActivityBar";
+import { ActivityBar, type View } from "./components/ActivityBar";
 import { AuthShell } from "./components/AuthShell";
 import { FilterBar, type BoardFilter } from "./components/FilterBar";
 import { Board } from "./components/Board";
+import { NoticePanel } from "./components/NoticePanel";
+import { TrashPanel } from "./components/TrashPanel";
 import { UncertainReview } from "./components/UncertainReview";
 import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
@@ -44,8 +49,10 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authProbeError, setAuthProbeError] = useState<string | null>(null);
   const [board, setBoard] = useState<BoardView | null>(null);
+  const [notices, setNotices] = useState<NoticeView | null>(null);
+  const [trash, setTrash] = useState<TrashView | null>(null);
   const [uncertain, setUncertain] = useState<UncertainInput[]>([]);
-  const [view, setView] = useState<"board" | "uncertain" | "pipeline">("board"); // 主视图切换（D-89 + specs/005 流水）
+  const [view, setView] = useState<View>("board"); // 主视图切换（007：看板/通知/存疑库/流水/回收站）
   const [error, setError] = useState<string | null>(null);
   const [uncertainError, setUncertainError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -78,6 +85,8 @@ export default function App() {
     genRef.current += 1;
     setMe(null);
     setBoard(null);
+    setNotices(null);
+    setTrash(null);
     setUncertain([]);
     setSettingsOpen(false);
     setAccountOpen(false);
@@ -126,6 +135,36 @@ export default function App() {
       });
   }, []);
 
+  /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份。 */
+  const loadNotices = useCallback(() => {
+    const gen = genRef.current;
+    api
+      .notices()
+      .then((n) => {
+        if (genRef.current !== gen) return;
+        setNotices(n);
+        setError(null); // 恢复连线就撤横幅——错误态不滞留
+      })
+      .catch(() => {
+        if (genRef.current !== gen) return;
+        setError("后端服务未连接（apps/server 是否在跑？）");
+      });
+  }, []);
+
+  /** 拉回收站（007）：进页即拉（清理/恢复都即时刷新，不靠轮询兜）。 */
+  const loadTrash = useCallback(() => {
+    const gen = genRef.current;
+    api
+      .trashList()
+      .then((t) => {
+        if (genRef.current !== gen) return;
+        setTrash(t);
+      })
+      .catch(() => {
+        // 回收站取失败不挂全站横幅（它是旁路视图）——进页时若失败，列表空态 + 下次进页重拉
+      });
+  }, []);
+
   /** 拉存疑库 open 列表（D-89）：审核页数据 + 活动栏徽标计数共用同一份。
    *  失败置可见错误（不静默——否则审核页会拿旧数据/假空态说事，评审 Critical）。 */
   const loadUncertain = useCallback(() => {
@@ -154,14 +193,16 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     loadBoard();
+    loadNotices();
     loadUncertain();
-    // agent0 消化是异步的：看板定时刷新让结果自动浮出来；并拉存疑库（徽标计数）
+    // agent0 消化是异步的：看板定时刷新让结果自动浮出来；并拉通知（未读徽标）与存疑库（徽标计数）
     const timer = setInterval(() => {
       loadBoard();
+      loadNotices();
       if (viewRef.current !== "uncertain") loadUncertain();
     }, 10_000);
     return () => clearInterval(timer);
-  }, [authed, loadBoard, loadUncertain]);
+  }, [authed, loadBoard, loadNotices, loadUncertain]);
 
   // Esc 分层退出：审核页处于前台时 Esc → 回看板（05§六；设置/悬浮窗等层压在它之上）
   useEffect(() => {
@@ -219,14 +260,43 @@ export default function App() {
     ].sort();
   }, [board]);
 
-  /** @ 提及候选：全部事项（含已归档——提及历史事项合理）。 */
+  /** @ 提及候选：全部事项（三段都在——提及历史事项合理）。 */
   const chatItems = useMemo(() => {
     if (board === null) return [];
-    return [...board.undated, ...board.scheduled, ...board.done, ...board.archived].map((r) => ({
+    return [...board.undated, ...board.scheduled, ...board.done].map((r) => ({
       id: r.item.id,
       title: itemName(r.item.elements),
     }));
   }, [board]);
+
+  /** 通知未读数（活动栏徽标，OQ-10）：纯计数，有未读才显示。
+   *  形状防御：`notices` 字段缺席（异常载荷/接口降级）时按 0 计——徽标缺省不显示，
+   *  不让一处脏数据把整个界面打白（与详情页「派生失败降级」同一取向）。 */
+  const unreadNoticeCount = useMemo(() => {
+    const rows = notices?.notices;
+    return rows === undefined ? 0 : rows.filter((r) => !r.viewed).length;
+  }, [notices]);
+
+  /** 通知的标签全集（筛选栏用，与看板 allTags 同性质——只看通知自己的）。 */
+  const noticeTags = useMemo(() => {
+    const rows = notices?.notices ?? [];
+    return [...new Set(rows.flatMap((r) => r.item.tags))].sort();
+  }, [notices]);
+
+  /** 通知筛选谓词：与看板同一套语义（tag 全带 + 文本匹配标题/tags），不另造机制。 */
+  const noticeVisible = useMemo(() => {
+    /** 一行通知是否通过当前筛选（选中的 tag 全带 + 查询串命中标题或 tag）。 */
+    const fn = (r: NoticeRow): boolean => {
+      if (!filter.tags.every((t) => r.item.tags.includes(t))) return false;
+      const q = filter.query.trim();
+      if (q !== "") {
+        const hay = [itemName(r.item.elements), ...r.item.tags];
+        if (!hay.some((s) => s.includes(q))) return false;
+      }
+      return true;
+    };
+    return fn;
+  }, [filter]);
 
   // 认证闸门（hooks 全部就位之后的分支渲染）
   if (!authChecked) {
@@ -250,6 +320,7 @@ export default function App() {
       <ActivityBar
         view={view}
         uncertainCount={uncertain.length}
+        unreadNoticeCount={unreadNoticeCount}
         onHome={() => {
           if (view !== "board") {
             setView("board");
@@ -257,11 +328,16 @@ export default function App() {
           }
           mainRef.current?.scrollTo({ top: 0 });
         }}
+        onShowNotice={() => setView("notice")}
         onShowUncertain={() => {
           setView("uncertain");
           loadUncertain(); // 进页即拉一次（审核期间轮询已暂停——见上）
         }}
         onShowPipeline={() => setView("pipeline")}
+        onShowTrash={() => {
+          setView("trash");
+          loadTrash();
+        }}
         onOpenAccount={() => setAccountOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenAbout={() => {
@@ -275,10 +351,24 @@ export default function App() {
         {error !== null && <Banner text={error} />}
         {uncertainError !== null && <Banner text={uncertainError} />}
 
-        {view === "uncertain" ? (
+        {view === "notice" ? (
+          <>
+            {/* 通知页（007）：筛选栏与看板同款（tag + 文本），不另造机制 */}
+            <div className="flex items-center gap-2 px-4 pt-4">
+              <FilterBar filter={filter} allTags={noticeTags} onChange={setFilter} />
+            </div>
+            <NoticePanel
+              notices={notices?.notices ?? []}
+              filter={noticeVisible}
+              onRefresh={loadNotices}
+            />{" "}
+          </>
+        ) : view === "uncertain" ? (
           <UncertainReview items={uncertain} onRemoved={loadUncertain} />
         ) : view === "pipeline" ? (
           <PipelineView />
+        ) : view === "trash" ? (
+          <TrashPanel rows={trash?.rows ?? []} onRefresh={loadTrash} />
         ) : (
           <>
             {/* 顶部整栏筛选（token 堆左、搜索框占满）+ 对话开关 */}

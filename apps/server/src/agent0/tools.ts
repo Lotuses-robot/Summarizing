@@ -34,7 +34,8 @@ import { fetchImage, type FetchImageResult } from "./fetchImage";
 export const TOOL_DEFS: ToolDef[] = [
   {
     name: "search_items",
-    description: "按关键词检索已有事项（身份判断 / 打标签参考）",
+    description:
+      "按关键词检索已有事项与通知（身份判断 / 打标签 / 更新通知参考；结果带 kind 区分种类）",
     parametersJsonSchema: z.toJSONSchema(SearchItemsArgsSchema),
   },
   {

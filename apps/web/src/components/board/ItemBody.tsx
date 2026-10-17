@@ -21,8 +21,11 @@ const ACTION_LABELS: Record<string, string> = {
   resolve_doubt: "解除存疑",
   complete_item: "标完成",
   reopen_item: "恢复待办",
-  archive_item: "归档",
+  trash_item: "删除",
+  restore_item: "从回收站恢复",
   digest_note: "留痕",
+  // archive_item：007 前的归档动作——存量版本链里有，历史如实显示（无本条则回落原始 action 串）
+  archive_item: "归档",
 };
 import { api } from "../../api";
 import { cn } from "../../lib/cn";

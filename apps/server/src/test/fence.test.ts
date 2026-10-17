@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChangeList } from "@summarizing/shared";
+import { itemDueDate } from "@summarizing/shared";
+import { executeChanges } from "../executor/executor";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { runFence } from "../executor/fence";
@@ -118,6 +120,7 @@ describe("围栏：固定元素防误用（第 2 轮审查）", () => {
         elements: [{ label: "name", text: "A" }],
         tags: [],
         status: "todo",
+        kind: "task",
         doubtNote: null,
       },
       by: { actor: "t", model: null },
@@ -148,6 +151,7 @@ describe("围栏：多模态标签强制（D-104）", () => {
         elements: [{ label: "name", text: "A" }],
         tags: [],
         status: "todo",
+        kind: "task",
         doubtNote: null,
       },
       by: { actor: "t", model: null },
@@ -178,6 +182,7 @@ describe("围栏：多模态标签强制（D-104）", () => {
         elements: [{ label: "name", text: "A" }],
         tags: [],
         status: "todo",
+        kind: "task",
         doubtNote: null,
       },
       by: { actor: "t", model: null },
@@ -310,5 +315,173 @@ describe("围栏：引文逐字校验（第 6 轮审查）", () => {
     expect(accepted).toHaveLength(0); // create_item 任一元素引文不合法 → 整项拒
     expect(rejected).toHaveLength(1);
     expect(rejected[0]?.reason).toContain("引文不是原文逐字");
+  });
+});
+
+describe("围栏 007：kind 与 ddl 形状", () => {
+  it("create_item(kind=notice) 带 dueDate → 整条拒收（FR-003/OQ-2：通知无 ddl 是结构红线）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "create_item",
+          kind: "notice",
+          elements: [
+            { label: "name", text: "数据结构 老师说下周要交第三次作业", quotes: [] },
+            { label: "dueDate", text: "2026-09-24T22:00:00", note: null, quotes: [] },
+          ],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+    });
+    expect(r.accepted).toHaveLength(0);
+    expect(r.rejected).toHaveLength(1);
+    expect(r.rejected[0]?.reason).toMatch(/dueDate/);
+  });
+
+  it("create_item(kind=notice) 无 dueDate → 接受", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "create_item",
+          kind: "notice",
+          elements: [{ label: "name", text: "数据结构 老师说下周要交第三次作业", quotes: [] }],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+    });
+    expect(r.rejected).toHaveLength(0);
+    expect(r.accepted).toHaveLength(1);
+  });
+
+  it("update_item 把带 dueDate 的 task 切成 notice → 拒（元素只增改不删，ddl 删不掉）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    repo.appendItemVersion(db, {
+      itemId: "i1",
+      action: "create_item",
+      detail: "seed",
+      snapshot: {
+        elements: [
+          { label: "name", text: "数据结构 老师说下周要交第三次作业" },
+          { label: "dueDate", text: "2026-09-24T22:00:00", note: null },
+        ],
+        tags: [],
+        status: "todo",
+        kind: "task",
+        doubtNote: null,
+      },
+      by: { actor: "t", model: null },
+    });
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "update_item",
+          itemId: "i1",
+          kind: "notice",
+          elements: [],
+          tags: {},
+          resolveDoubt: false,
+        },
+      ],
+    });
+    expect(r.accepted).toHaveLength(0);
+    expect(r.rejected[0]?.reason).toMatch(/dueDate/);
+  });
+
+  it("update_item 把没有 ddl 元素的 task 切成 notice → 接受（FR-014：ddl 形状是唯一约束）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    // 日期未知的 task = 根本没有 dueDate 元素（不是「留空的元素」——那仍是「有 ddl」）
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "create_item",
+          elements: [{ label: "name", text: "数据结构 老师说下周要交第三次作业", quotes: [] }],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("播种失败");
+    expect(itemDueDate(item)).toBeNull();
+
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "update_item",
+          itemId: item.id,
+          kind: "notice",
+          elements: [],
+          tags: {},
+          resolveDoubt: false,
+        },
+      ],
+    });
+    expect(r.rejected).toHaveLength(0);
+    expect(r.accepted).toHaveLength(1);
+  });
+
+  it("complete_item 打给 notice → 拒（US2-2：通知不参与完成演化，按 kind 判）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    repo.appendItemVersion(db, {
+      itemId: "n1",
+      action: "create_item",
+      detail: "seed",
+      snapshot: {
+        elements: [{ label: "name", text: "数据结构 老师说下周要交第三次作业" }],
+        tags: [],
+        status: "todo",
+        kind: "notice",
+        doubtNote: null,
+      },
+      by: { actor: "t", model: null },
+    });
+    const r = runFence(db, raw, {
+      changes: [{ action: "complete_item", itemId: "n1" }],
+    });
+    expect(r.accepted).toHaveLength(0);
+    expect(r.rejected[0]?.reason).toMatch(/通知/);
+  });
+
+  it("写 trashed 条目 → 拒（OQ-12：回收站只读，要改先恢复）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    repo.appendItemVersion(db, {
+      itemId: "i1",
+      action: "create_item",
+      detail: "seed",
+      snapshot: {
+        elements: [{ label: "name", text: "数据结构 老师说下周要交第三次作业" }],
+        tags: [],
+        status: "trashed",
+        kind: "task",
+        doubtNote: null,
+      },
+      by: { actor: "t", model: null },
+    });
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "update_item",
+          itemId: "i1",
+          elements: [{ label: "地点", text: "明理楼3楼", quotes: [] }],
+          tags: {},
+          resolveDoubt: false,
+        },
+      ],
+    });
+    expect(r.accepted).toHaveLength(0);
+    expect(r.rejected[0]?.reason).toMatch(/回收站/);
   });
 });

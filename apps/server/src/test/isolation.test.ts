@@ -84,7 +84,7 @@ describe("双账户隔离（SC-001）", () => {
     const attempts = [
       { method: "GET" as const, url: `/api/items/${item.id}` },
       { method: "POST" as const, url: `/api/items/${item.id}/complete` },
-      { method: "POST" as const, url: `/api/items/${item.id}/archive` },
+      { method: "POST" as const, url: `/api/items/${item.id}/trash` },
       { method: "POST" as const, url: `/api/items/${item.id}/viewed` },
     ];
     for (const req of attempts) {

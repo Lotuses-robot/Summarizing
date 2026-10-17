@@ -46,7 +46,7 @@ export function registerItemRoutes(app: FastifyInstance): void {
     return next;
   });
 
-  // 恢复待办：已完成行 → 恢复为待办（归档已随 007 取消——FR-018）
+  // 恢复待办：已完成行 → 恢复为待办（与 complete 对称，重复操作只是多留痕迹）
   app.post("/api/items/:id/reopen", async (req, reply) => {
     const { id } = GetItemArgsSchema.parse(req.params);
     const item = repo.deriveItem(req.space.db, id);
@@ -56,6 +56,39 @@ export function registerItemRoutes(app: FastifyInstance): void {
       action: "reopen_item",
       detail: `恢复待办「${itemName(item.elements)}」`,
       snapshot: { ...item, status: "todo" },
+      by: { actor: "用户", model: null },
+    });
+    return repo.deriveItem(req.space.db, id);
+  });
+
+  // 删除（007 回收站）：追加 trashed 版本——进回收站、可恢复，不物理删（Replay 精神）。
+  // 一步到位、不弹确认（可复活，与完成同款）；重复删除幂等（已在回收站则不追加无意义版本）。
+  app.post("/api/items/:id/trash", async (req, reply) => {
+    const { id } = GetItemArgsSchema.parse(req.params);
+    const item = repo.deriveItem(req.space.db, id);
+    if (!item) return reply.code(404).send({ error: "事项不存在" });
+    if (item.status !== "trashed") {
+      repo.appendItemVersion(req.space.db, {
+        itemId: id,
+        action: "trash_item",
+        detail: `删除「${itemName(item.elements)}」`,
+        snapshot: { ...item, status: "trashed" },
+        by: { actor: "用户", model: null },
+      });
+    }
+    return repo.deriveItem(req.space.db, id);
+  });
+
+  // 从回收站恢复（007）：status 回到删前的值（版本链取，含 done/通知的 todo）
+  app.post("/api/items/:id/restore", async (req, reply) => {
+    const { id } = GetItemArgsSchema.parse(req.params);
+    const item = repo.deriveItem(req.space.db, id);
+    if (!item) return reply.code(404).send({ error: "事项不存在" });
+    repo.appendItemVersion(req.space.db, {
+      itemId: id,
+      action: "restore_item",
+      detail: `从回收站恢复「${itemName(item.elements)}」`,
+      snapshot: { ...item, status: repo.preTrashStatus(req.space.db, id) },
       by: { actor: "用户", model: null },
     });
     return repo.deriveItem(req.space.db, id);

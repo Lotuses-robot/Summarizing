@@ -149,7 +149,7 @@ export function deriveItems(db: DbOrTx): Item[] {
 }
 
 /** 最近一次进入「已完成」的时刻（done 段排序与完成淡出梯度用；null = 从未完成）。
- *  进入 = 该版本快照为 done 且前一版本非 done（归档→撤回归档回到 done 时以撤回时刻重计）。 */
+ *  进入 = 该版本快照为 done 且前一版本非 done（从回收站恢复回 done 时以恢复时刻重计）。 */
 export function completedAtOf(db: DbOrTx, itemId: string): string | null {
   const history = deriveHistory(db, itemId);
   for (let i = history.length - 1; i >= 1; i--) {
@@ -160,6 +160,32 @@ export function completedAtOf(db: DbOrTx, itemId: string): string | null {
     }
   }
   return null;
+}
+
+/** 进入「回收站」的时刻（trashedAt：版本链末条 status=trashed 的 at；null = 从未删除）。
+ *  同 completedAtOf 的形状——回收站排序与「一键清理 >15d」都以它为据（进入时刻，非创建时刻）。 */
+export function trashedAtOf(db: DbOrTx, itemId: string): string | null {
+  const history = deriveHistory(db, itemId);
+  for (let i = history.length - 1; i >= 1; i--) {
+    const cur = history[i];
+    if (cur && cur.snapshot.status === "trashed") {
+      return cur.at;
+    }
+  }
+  return null;
+}
+
+/** 删前的处置状态（回收站「恢复」回删前的值用）：自版本链最新向旧找第一个「非 trashed」的版本。
+ *  按状态而非 action 跳过——防 trashed 期间混入的其它状态版本顶链导致恢复失效。 */
+export function preTrashStatus(db: DbOrTx, itemId: string): Item["status"] {
+  const history = deriveHistory(db, itemId);
+  for (let i = history.length - 1; i >= 0; i--) {
+    const v = history[i];
+    if (v && v.snapshot.status !== "trashed") {
+      return v.snapshot.status;
+    }
+  }
+  return "todo";
 }
 
 /** 派生单个事项；不存在（无任何版本）返回 null。 */
@@ -654,4 +680,32 @@ export function getItemFull(db: DbOrTx, id: string) {
     }
   }
   return { item, evidence, fragments, versions, rawInputs };
+}
+
+/** 回收站保留天数（007，OQ-6）：固定 15 天，首版不做设置项。 */
+const PURGE_DAYS = 15;
+
+/** 一键清理回收站（007）：物理清除**进入 trashed 超过 PURGE_DAYS 天**的信息
+ *  （按 trashedAt——进入回收站的时刻，非创建时刻，用户 2026-10-16 定）。
+ *  删 item_versions / evidence / item_views 中挂该 itemId 的行；**raw_inputs / fragments /
+ *  uncertain_inputs 一律不碰**——原文档案是证据终端，永不随信息删除（FR-009）。
+ *  删除前 stderr 留痕「删了什么、原状态」（红线「不许静默」）。返回被清除的条数。
+ *
+ *  ⚠️ 用事务句柄 tx 落笔（调用方 runInTransaction 包住）——多表删除要么全成要么全不回。 */
+export function purgeTrashed(tx: DbOrTx): { purged: number } {
+  const cutoff = wallClockDaysAgo(PURGE_DAYS);
+  const stale: { itemId: string; trashedAt: string }[] = [];
+  for (const r of deriveItemsWithVersion(tx)) {
+    if (r.item.status !== "trashed") continue;
+    const at = trashedAtOf(tx, r.item.id);
+    if (at !== null && at < cutoff) stale.push({ itemId: r.item.id, trashedAt: at });
+  }
+
+  for (const { itemId, trashedAt } of stale) {
+    process.stderr.write(`[trash] 彻底清除：${itemId}（进入回收站 ${trashedAt}）\n`);
+    tx.delete(s.evidence).where(eq(s.evidence.itemId, itemId)).run();
+    tx.delete(s.itemViews).where(eq(s.itemViews.itemId, itemId)).run();
+    tx.delete(s.itemVersions).where(eq(s.itemVersions.itemId, itemId)).run();
+  }
+  return { purged: stale.length };
 }

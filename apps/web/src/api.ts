@@ -12,11 +12,13 @@ import type {
   Item,
   LoginRequest,
   MeView,
+  NoticeView,
   PipelineRun,
   PipelineRunDetail,
   RegisterRequest,
   RotateTokenResponse,
   SourceSummary,
+  TrashView,
   UncertainInput,
 } from "@summarizing/shared";
 
@@ -163,6 +165,9 @@ export const api = {
 
   board: (): Promise<BoardView> => req("/api/board").then((r) => to<BoardView>(r)),
 
+  /** 通知页（007）：kind=notice 的独立查看入口。 */
+  notices: (): Promise<NoticeView> => req("/api/notices").then((r) => to<NoticeView>(r)),
+
   item: (id: string): Promise<GetItemResult> =>
     req(`/api/items/${id}`).then((r) => to<GetItemResult>(r)),
 
@@ -173,9 +178,20 @@ export const api = {
   reopen: (id: string): Promise<Item> =>
     req(`/api/items/${id}/reopen`, post({})).then((r) => to<Item>(r)),
 
-  /** 归档（D-83 最小归档）：todo → archived，进看板归档段；恢复走 reopen。 */
-  archive: (id: string): Promise<Item> =>
-    req(`/api/items/${id}/archive`, post({})).then((r) => to<Item>(r)),
+  /** 删除（007 回收站）：追加 trashed 版本——进回收站、可恢复，不物理删。 */
+  trash: (id: string): Promise<Item> =>
+    req(`/api/items/${id}/trash`, post({})).then((r) => to<Item>(r)),
+
+  /** 从回收站恢复（007）：status 回到删前的值。 */
+  restore: (id: string): Promise<Item> =>
+    req(`/api/items/${id}/restore`, post({})).then((r) => to<Item>(r)),
+
+  /** 回收站列表（007）：trashed 信息（两类混合，按删时倒序）。 */
+  trashList: (): Promise<TrashView> => req("/api/trash").then((r) => to<TrashView>(r)),
+
+  /** 一键清理回收站（007）：物理清除 trashed 超过 15 天的信息；原文档案不动。 */
+  purgeTrash: (): Promise<{ purged: number }> =>
+    req("/api/trash/purge", post({})).then((r) => to<{ purged: number }>(r)),
 
   /** 标记事项已查看（「新」微标消除，点开即报；204 无响应体）。 */
   viewed: (id: string): Promise<void> =>

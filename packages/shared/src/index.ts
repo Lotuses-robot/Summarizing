@@ -106,7 +106,7 @@ export const ItemSchema = z
     id: z.string(),
     elements: z.array(ElementSchema),
     tags: z.array(z.string().min(1)), // 归类（独立字段，不挂证据）
-    status: z.enum(["todo", "done"]), // 处置状态（archived 已随 007 取消、迁为 done，FR-018；trashed 回收站第二刀加）
+    status: z.enum(["todo", "done", "trashed"]), // 处置状态（archived 已随 007 取消、迁为 done，FR-018；trashed = 回收站删除态，007 第二刀）
     kind: z.enum(["task", "notice"]).default("task"), // 分类轴（007）：task=事项 / notice=通知；存量快照无此字段→task
     doubtNote: z.string().nullable(), // 非 null = 存疑中（01§4.12；判据从严 D-59）
   })
@@ -127,7 +127,7 @@ export type Item = z.infer<typeof ItemSchema>;
 export const ItemSnapshotSchema = z.object({
   elements: z.array(ElementSchema),
   tags: z.array(z.string().min(1)),
-  status: z.enum(["todo", "done"]),
+  status: z.enum(["todo", "done", "trashed"]),
   kind: z.enum(["task", "notice"]).default("task"),
   doubtNote: z.string().nullable(),
 });
@@ -302,7 +302,7 @@ export const ItemVersionSchema = z.object({
   snapshot: z.object({
     elements: z.array(ElementSchema),
     tags: z.array(z.string()),
-    status: z.enum(["todo", "done"]), // 快照同 Item（archived 已随 007 取消）
+    status: z.enum(["todo", "done", "trashed"]), // 快照同 Item（trashed = 回收站删除态，两 kind 共有）
     kind: z.enum(["task", "notice"]).default("task"), // 分类轴（007）
     doubtNote: z.string().nullable(),
   }),
@@ -521,6 +521,37 @@ export const BoardViewSchema = z.object({
   failedRawInputs: z.array(RawInputSchema), // 「未处理」横幅
 });
 export type BoardView = z.infer<typeof BoardViewSchema>;
+
+// ───────────────────────── 通知页（007：kind=notice 的独立查看入口）─────────────────────────
+
+// 通知行：题面同 Item，倒序按 updatedAt（有更新即上浮）；viewed 复用 item_views（点开即消）。
+export const NoticeRowSchema = z.object({
+  item: ItemSchema,
+  updatedAt: z.string(),
+  viewed: z.boolean(),
+});
+export type NoticeRow = z.infer<typeof NoticeRowSchema>;
+
+// 通知页（独立入口，不进看板三段）：通知按最近更新倒序平铺。
+export const NoticeViewSchema = z.object({
+  notices: z.array(NoticeRowSchema),
+});
+export type NoticeView = z.infer<typeof NoticeViewSchema>;
+
+// ───────────────────────── 回收站（007：status=trashed 删除态，独立区域、非类型）─────────────────────────
+
+// 回收站行：两类信息混合，行标 kind；trashedAt = 进入 trashed 的时刻（版本链派生，同 completedAt）。
+export const TrashRowSchema = z.object({
+  item: ItemSchema,
+  trashedAt: z.string(),
+});
+export type TrashRow = z.infer<typeof TrashRowSchema>;
+
+// 回收站列表按进入 trashed 的时刻倒序（最新删的在上）。
+export const TrashViewSchema = z.object({
+  rows: z.array(TrashRowSchema),
+});
+export type TrashView = z.infer<typeof TrashViewSchema>;
 
 // ───────────────────────── 前台对话（01§4.14，D-78 多轮 buddy）─────────────────────────
 

@@ -6,7 +6,8 @@ export function makeRow(opts: {
   id: string;
   name: string;
   tags?: string[];
-  status?: "todo" | "done" | "archived";
+  status?: "todo" | "done" | "trashed";
+  kind?: "task" | "notice";
   doubtNote?: string | null;
   due?: string | null;
   dueNote?: string | null;
@@ -25,6 +26,7 @@ export function makeRow(opts: {
       elements,
       tags: opts.tags ?? [],
       status: opts.status ?? "todo",
+      kind: opts.kind ?? "task",
       doubtNote: opts.doubtNote ?? null,
     },
     overdue: opts.overdue ?? false,
@@ -41,7 +43,6 @@ export function view(partial: Partial<BoardView> = {}): BoardView {
     undated: [],
     scheduled: [],
     done: [],
-    archived: [],
     failedRawInputs: [],
     ...partial,
   };

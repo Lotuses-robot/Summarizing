@@ -125,6 +125,13 @@ const raws: RawSeed[] = [
     groupId: "",
     receivedAt: wallClockAgo(30 * 60_000),
   },
+  {
+    content: "【变更】数据结构课下周起改到明理楼3楼上课，原明理楼5楼不再使用。",
+    sourceLabel: "学习交流群",
+    sender: "学习委员",
+    groupId: "10001",
+    receivedAt: wallClockAgo(3 * HOUR),
+  },
 ];
 
 const rawIds: string[] = [];
@@ -410,7 +417,31 @@ ev(itemF, "元素:name", fragFrom(6, "本周六招新摊位值班"));
     .run(wallClockAgo(4 * DAY), done.id);
 }
 
-// ── 已读标记：「新」微标只留给 G（图书馆还书）──
+// N. 通知（kind=notice——不进看板，进独立「通知」页，007）
+{
+  const notice = repo.appendItemVersion(db, {
+    itemId: randomUUID(),
+    action: "create_item",
+    detail: "从数据结构课群提取：上课地点变更",
+    snapshot: {
+      elements: [
+        { label: "name", text: "数据结构课改到明理楼3楼", note: null },
+        { label: "地点", text: "明理楼 3 楼（原明理楼 5 楼）", note: null },
+      ],
+      tags: ["数据结构课"],
+      status: "todo",
+      kind: "notice",
+      doubtNote: null,
+    },
+    by: { actor: "agent0", model: "demo" },
+  });
+  ev(notice.itemId, "元素:name", fragFrom(7, "数据结构课改到明理楼3楼上了"));
+  client
+    .prepare("UPDATE item_versions SET at = ? WHERE id = ?")
+    .run(wallClockAgo(3 * HOUR), notice.id);
+}
+
+// ── 已读标记：「新」微标只留给 G（图书馆还书）与 N（通知）──
 for (const id of [itemA, itemC, itemI, itemD, itemH, itemE, itemF]) {
   repo.markItemViewed(db, id);
 }

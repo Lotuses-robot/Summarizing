@@ -30,6 +30,7 @@ function makeDetail(overrides: Partial<GetItemResult> = {}): GetItemResult {
       ],
       tags: ["英语课"],
       status: "todo",
+      kind: "task",
       doubtNote: null,
     },
     evidence: [
@@ -61,7 +62,7 @@ function makeDetail(overrides: Partial<GetItemResult> = {}): GetItemResult {
         itemId: "it1",
         action: "create_item",
         detail: "新建事项「英语作业」",
-        snapshot: { elements: [], tags: [], status: "todo", doubtNote: null },
+        snapshot: { elements: [], tags: [], status: "todo", kind: "task", doubtNote: null },
         at: "2026-09-26 10:00",
         by: { actor: "agent0", model: "test" },
         revokedBy: null,

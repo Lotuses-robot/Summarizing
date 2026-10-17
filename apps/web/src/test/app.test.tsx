@@ -44,6 +44,12 @@ function stubApp(opts: { uncertainFail?: boolean } = {}): {
       if (url.includes("/api/board")) {
         return Promise.resolve(jsonResponse(BOARD));
       }
+      if (url.includes("/api/notices")) {
+        return Promise.resolve(jsonResponse({ notices: [] }));
+      }
+      if (url.includes("/api/trash")) {
+        return Promise.resolve(jsonResponse({ rows: [] }));
+      }
       if (url.includes("/api/chat/history")) {
         return Promise.resolve(jsonResponse({ turns: [] }));
       }

@@ -171,9 +171,12 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
       <ActivityBar
         view="board"
         uncertainCount={3}
+        unreadNoticeCount={0}
         onHome={() => {}}
+        onShowNotice={() => {}}
         onShowUncertain={() => {}}
         onShowPipeline={() => {}}
+        onShowTrash={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={() => {}}
         onOpenAbout={() => {}}
@@ -184,9 +187,12 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
       <ActivityBar
         view="board"
         uncertainCount={0}
+        unreadNoticeCount={0}
         onHome={() => {}}
+        onShowNotice={() => {}}
         onShowUncertain={() => {}}
         onShowPipeline={() => {}}
+        onShowTrash={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={() => {}}
         onOpenAbout={() => {}}
@@ -205,9 +211,12 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
       <ActivityBar
         view="board"
         uncertainCount={0}
+        unreadNoticeCount={0}
         onHome={onHome}
+        onShowNotice={() => {}}
         onShowUncertain={onShowUncertain}
         onShowPipeline={onShowPipeline}
+        onShowTrash={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={onOpenSettings}
         onOpenAbout={onOpenAbout}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Archive, Check, ChevronDown, ChevronRight, Undo2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Trash2, Undo2 } from "lucide-react";
 import {
   dueDateElement,
   itemName,
@@ -18,9 +18,9 @@ import type { BoardFilter } from "./FilterBar";
 import { api } from "../api";
 import { ItemBody } from "./board/ItemBody";
 
-type RowAction = "complete" | "reopen" | "archive";
+type RowAction = "complete" | "reopen" | "trash";
 
-// 四段元数据唯一出处（D-80/D-83；D-89 存疑段退场）——段名/提示/空态只改这里，派生物（allRows/段定位/计数）全部由此推导
+// 三段元数据唯一出处（D-80；D-89 存疑段退场；007 取消归档后三段）——段名/提示/空态只改这里，派生物（allRows/段定位/计数）全部由此推导
 type SectionKey = Exclude<keyof BoardView, "failedRawInputs">;
 const SECTION_META: {
   key: SectionKey;
@@ -46,19 +46,13 @@ const SECTION_META: {
     hint: undefined,
     emptyText: "还没有完成过事项",
   },
-  {
-    key: "archived",
-    title: "已归档",
-    hint: undefined,
-    emptyText: "暂无已归档事项",
-  },
 ];
 
 const NEAR_MS = 24 * 60 * 60_000; // 临近 = 24h 内到期（05§二 四点标记）
 
 /** 看板单行（用户 2026-09-27 行布局 v3，借鉴 Todoist/Things 3）：标题 → 相对人话 ddl → tags
  *  同一条阅读线内联（不用视线右缘远跳）；ddl 颜色编码（过期红/临近 accent/远灰），悬停给绝对时间；
- *  右缘只留状态点与新微标。悬停显形快捷按钮（勾=完成/恢复、归档）。
+ *  右缘只留状态点与新微标。悬停显形快捷按钮（勾=完成/恢复、删除）。
  *  点击整行 = 展开/收起详情（单开互斥由看板保证）；键盘 ↑↓ 选中行有底色。 */
 function Row({
   row,
@@ -85,7 +79,7 @@ function Row({
   const dueElement = dueDateElement(item);
   const dueText = dueElement?.text ?? null;
   const dueNote = dueElement?.note ?? null;
-  // 「新」微标：待办且未被打开过（点开即消，用户 2026-09-27）；已完成/已归档不亮
+  // 「新」微标：待办且未被打开过（点开即消，用户 2026-09-27）；已完成不亮
   const isNew = item.status === "todo" && !row.viewed && !viewedLocally.has(item.id);
   // 临近/过期都在渲染期派生（01§4.15「派生不落库」）；只对待办追讨
   const dueTs = dueText === null ? Number.NaN : wallClockToEpoch(dueText); // 固定 +08:00 解析（D-97）
@@ -95,8 +89,8 @@ function Row({
     !Number.isNaN(dueTs) &&
     dueTs >= Date.now() &&
     dueTs - Date.now() <= NEAR_MS;
-  // 行内时间字的红标：只要 ddl 已过且未归档就标红（含已完成行——「逾期才完成」也是值得看见的信息）
-  const timeOverdue = !Number.isNaN(dueTs) && item.status !== "archived" && dueTs < Date.now();
+  // 行内时间字的红标：ddl 已过就标红（含已完成行——「逾期才完成」也是值得看见的信息）
+  const timeOverdue = !Number.isNaN(dueTs) && dueTs < Date.now();
   // 相对人话时间（Todoist 式）：非法日期退回短格式——不编造
   const dueRelative = dueText === null ? null : relativeDueText(dueText, new Date());
   // 越临近越强调（用户 2026-09-27 二轮：立方浓淡曲线，lib/urgency 唯一出处）——
@@ -189,18 +183,6 @@ function Row({
           </button>
         ))}
         <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
-          {item.status !== "archived" && (
-            <button
-              className="row-act"
-              title="归档"
-              onClick={(e) => {
-                e.stopPropagation();
-                onQuickAction(item.id, "archive");
-              }}
-            >
-              <Archive size={13} />
-            </button>
-          )}
           {item.status === "todo" && (
             <button
               className="row-act"
@@ -216,7 +198,7 @@ function Row({
           {item.status !== "todo" && (
             <button
               className="row-act"
-              title={item.status === "archived" ? "撤回归档" : "恢复待办"}
+              title="恢复待办"
               onClick={(e) => {
                 e.stopPropagation();
                 onQuickAction(item.id, "reopen");
@@ -225,6 +207,16 @@ function Row({
               <Undo2 size={13} />
             </button>
           )}
+          <button
+            className="row-act"
+            title="删除（进回收站，可恢复）"
+            onClick={(e) => {
+              e.stopPropagation();
+              onQuickAction(item.id, "trash");
+            }}
+          >
+            <Trash2 size={13} />
+          </button>
         </span>
       </div>
       {expanded && (
@@ -346,7 +338,6 @@ export function Board({
     undated: loadSectionFold("undated"),
     scheduled: loadSectionFold("scheduled"),
     done: loadSectionFold("done"),
-    archived: loadSectionFold("archived"),
   }));
   const handledToken = useRef(0);
 
@@ -468,7 +459,7 @@ export function Board({
         ? api.complete(id)
         : action === "reopen"
           ? api.reopen(id)
-          : api.archive(id);
+          : api.trash(id);
     void p
       .then(() => {
         setExpandedId(null);

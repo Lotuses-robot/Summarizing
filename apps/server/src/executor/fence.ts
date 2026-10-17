@@ -6,6 +6,7 @@ import {
   MULTIMODAL_IMAGE_TAG,
   type ChangeItem,
   type ChangeList,
+  type Item,
   type RawInput,
 } from "@summarizing/shared";
 import type { Db } from "../storage/db";
@@ -43,6 +44,25 @@ export function parseChangeList(text: string): ChangeList | null {
   return parseModelJson(text, ChangeListSchema);
 }
 
+/** 分类轴的 ddl 形状约束（007 FR-003/FR-014）：通知（notice）必无 dueDate。
+ *  `nextElements` = 改动应用后的元素集（update_item 时 = 当前元素被 upsert 覆盖后的结果）；
+ *  `patchElements` = 本次变更带的元素（create 时即全部元素；update 时是被改的那几个 label）。
+ *  判据落在**结果集**上——元素只增改不删，故 task 已带 dueDate 时转 notice 无从删掉它 → 拒。 */
+function checkKindDdl(
+  kind: Item["kind"],
+  patchElements: { label: string }[],
+  currentElements: { label: string }[] | null,
+): string | null {
+  if (kind !== "notice") return null; // task 必须有 ddl（可留空）——由创建时的 name/dueDate 约束承载，无额外形状要求
+  const hasDue =
+    patchElements.some((e) => e.label === "dueDate") ||
+    (currentElements?.some((e) => e.label === "dueDate") ?? false);
+  if (hasDue) {
+    return "通知（kind=notice）不得含 dueDate 元素——通知无 ddl 是结构红线（整条拒收）";
+  }
+  return null;
+}
+
 /** 单项行为校验：ID 存在性 / 元素格式（ElementSchema）/ 语义名恰好一个 / 引文逐字；通过返回 null。 */
 function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
   switch (item.action) {
@@ -57,12 +77,19 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
         const quoteErr = checkQuotes(el, raw.content);
         if (quoteErr !== null) return quoteErr;
       }
+      const kindErr = checkKindDdl(item.kind ?? "task", item.elements, null);
+      if (kindErr !== null) return kindErr;
       return checkMultimodalTag(item.elements, item.tags);
     }
     case "update_item": {
       const current = repo.deriveItem(db, item.itemId);
       if (!current) {
         return `itemId 不存在: ${item.itemId}`;
+      }
+      // 回收站条目只读（007 OQ-12）：trashed 视为不可写——要改先恢复
+      // （防 digest 竞态把已删条目悄悄改活/改内容）
+      if (current.status === "trashed") {
+        return `itemId 在回收站（trashed）：${item.itemId}——不可写，要改先从回收站恢复`;
       }
       // elements 不得动固定元素 name（改语义名走 create_item；防双 name 投毒）
       if (item.elements.some((e) => e.label === "name")) {
@@ -74,23 +101,44 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
         const quoteErr = checkQuotes(el, raw.content);
         if (quoteErr !== null) return quoteErr;
       }
+      // 分类轴切换的 ddl 形状（007 FR-014）：按「改动应用后的元素集」判——
+      // 元素只增改不删，故 task 已带 dueDate 时转 notice 无法满足「通知无 ddl」→ 整条拒。
+      const kindErr = checkKindDdl(item.kind ?? current.kind, item.elements, current.elements);
+      if (kindErr !== null) return kindErr;
       // 多模态强制按「改动应用后的标签集」判（读图内容并进已有事项时，改动 map 里带上「多模态/图片」即可）
       return checkMultimodalTag(item.elements, applyTagChanges(current.tags, item.tags));
     }
     case "resolve_doubt":
     case "complete_item": {
-      if (!repo.itemExists(db, item.itemId)) {
+      const target = repo.deriveItem(db, item.itemId);
+      if (!target) {
         return `itemId 不存在: ${item.itemId}`;
+      }
+      // 回收站条目只读（007 OQ-12）：trashed 视为不可写——要改先恢复
+      if (target.status === "trashed") {
+        return `itemId 在回收站（trashed）：${item.itemId}——不可写，要改先从回收站恢复`;
+      }
+      // 通知不参与完成演化（007 US2-2）：按 kind 判，不靠 status 白名单（通知 status 恒 todo）
+      if (item.action === "complete_item" && target.kind === "notice") {
+        return "通知（kind=notice）不参与完成演化——不得 complete_item";
       }
       return null;
     }
     case "record_note": {
-      const exists =
-        item.targetType === "raw_input"
-          ? repo.getRawInput(db, item.targetId)
-          : repo.itemExists(db, item.targetId);
-      if (!exists) {
+      const target =
+        item.targetType === "raw_input" ? undefined : repo.deriveItem(db, item.targetId);
+      if (item.targetType === "raw_input") {
+        if (!repo.getRawInput(db, item.targetId)) {
+          return `targetId 不存在: ${item.targetId}`;
+        }
+        return null;
+      }
+      if (!target) {
         return `targetId 不存在: ${item.targetId}`;
+      }
+      // 回收站条目只读（007 OQ-12）
+      if (target.status === "trashed") {
+        return `targetId 在回收站（trashed）：${item.targetId}——不可写，要改先从回收站恢复`;
       }
       return null;
     }
@@ -112,8 +160,7 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
 }
 
 /** resolve_uncertain 的形状规则（与目标存在性无关的部分）：merged 必须给去向。
- *  digest 围栏与清扫围栏共用——规则一处定义，两侧不得漂移。 */
-export function resolveUncertainWellFormed(item: {
+ *  digest 围栏与清扫围栏共用——规则一处定义，两侧不得漂移。 */ export function resolveUncertainWellFormed(item: {
   outcome: "merged" | "discarded";
   resolvedRef?: string;
 }): boolean {

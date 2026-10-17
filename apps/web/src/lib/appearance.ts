@@ -10,7 +10,7 @@ const FONT_KEY = "summarizing.font";
 const DENSITY_KEY = "summarizing.density";
 
 // 段默认折叠：已完成/已归档（D-80）；其余段默认展开
-const DEFAULT_FOLDED: readonly string[] = ["done", "archived"];
+const DEFAULT_FOLDED: readonly string[] = ["done"];
 
 export type ThemeMode = "light" | "dark" | "system";
 export type Palette = "teal" | "blue" | "green" | "purple" | "orange" | "rose";
@@ -62,7 +62,7 @@ export function saveChatOpen(open: boolean): void {
   write(CHAT_OPEN_KEY, open ? "1" : "0");
 }
 
-/** 读段折叠记忆（无记忆用默认：已完成/已归档折叠，D-80）。 */
+/** 读段折叠记忆（无记忆用默认：已完成折叠，D-80）。 */
 export function loadSectionFold(section: string): boolean {
   const v = read(FOLD_KEY_PREFIX + section);
   if (v !== null) return v === "1";

@@ -10,9 +10,11 @@ import { retryRawInput } from "./agent0/digest";
 import { ingestBatch } from "./application/ingest";
 import { handleChat } from "./application/chat";
 import { buildBoard } from "./application/board";
+import { deriveNotices } from "./application/notice";
 import { makeSessionAuth } from "./auth/session";
 import { registerAuthPublicRoutes, registerAuthSessionRoutes } from "./routes/auth";
 import { registerItemRoutes } from "./routes/items";
+import { registerTrashRoutes } from "./routes/trash";
 import { registerPipelineRoutes } from "./routes/pipeline";
 import { registerSourceRoutes } from "./routes/sources";
 import { registerSettingsRoutes } from "./routes/settings";
@@ -139,6 +141,9 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
 
     scope.get("/api/board", async (req) => buildBoard(req.space.db));
 
+    // 通知页（007）：kind=notice 的独立查看入口——不进看板三段
+    scope.get("/api/notices", async (req) => deriveNotices(req.space.db));
+
     // 对话历史回填（L16）：持久化的轮次，前端启动时拉回——解「刷新/换设备对话即失」。
     scope.get("/api/chat/history", async (req) => {
       const { limit } = ChatHistoryQuerySchema.parse(req.query);
@@ -182,6 +187,7 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
     registerSettingsRoutes(scope);
     registerSourceRoutes(scope);
     registerUncertainRoutes(scope);
+    registerTrashRoutes(scope);
   });
 
   return app;

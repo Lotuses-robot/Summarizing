@@ -91,12 +91,12 @@ describe("Board（四段看板，D-89）", () => {
     expect(screen.getByText("数学作业")).toBeInTheDocument();
   });
 
-  it("四段渲染：已归档段默认折叠、点段头展开；带 doubtNote 的行按日期正常渲染（D-89）", () => {
+  it("三段渲染：已完成段默认折叠、点段头展开；带 doubtNote 的行按日期正常渲染（007 取消归档后三段）", () => {
     render(
       <Board
         board={view({
           undated: [makeRow({ id: "u1", name: "带存疑字段的行", doubtNote: "来源用词『听说』" })],
-          archived: [makeRow({ id: "a1", name: "已了结的事", status: "archived" })],
+          done: [makeRow({ id: "a1", name: "已了结的事", status: "done" })],
         })}
         onRefresh={() => {}}
         focus={null}
@@ -107,9 +107,9 @@ describe("Board（四段看板，D-89）", () => {
     // 存疑字段不再影响渲染：行照常出现；「存疑」段头不存在（只有存疑库审核页有它）
     expect(screen.getByText("带存疑字段的行")).toBeInTheDocument();
     expect(screen.queryByText("存疑")).not.toBeInTheDocument();
-    // 已归档默认折叠 → 点开可见
+    // 已完成默认折叠 → 点开可见
     expect(screen.queryByText("已了结的事")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("已归档"));
+    fireEvent.click(screen.getByText("已完成"));
     expect(screen.getByText("已了结的事")).toBeInTheDocument();
   });
 

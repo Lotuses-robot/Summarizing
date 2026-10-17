@@ -10,8 +10,9 @@ import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import { parseWallClock } from "../shared/time";
 
-// 看板装配（01§4.3 状态制四段；D-80 段序 = 确定程度递增 → D-89 四段化）。
+// 看板装配（01§4.3 状态制三段；D-80 段序 = 确定程度递增 → D-89 四段化 → 007 取消归档后三段）。
 // 过期在这里派生（渲染时算，不落库，01§4.15）。
+// 通知（kind=notice）不进看板——它走独立入口（application/notice.ts，007）。
 
 /** 用已建好的事项列表派生看板行（避免每事件全表重扫——Efficiency 审查项）。 */
 function toRow(
@@ -34,11 +35,12 @@ function toRow(
   };
 }
 
-/** 装配看板四段（01§4.3 / D-89；D-83 归档启用）：done/archived 各归其段；
- *  todo 再按 有无日期 两分（日期未知 / 已排期，已排期只按 ddl 升序）。 */
+/** 装配看板三段（01§4.3 / D-89 / 007 取消归档）：done 归其段；
+ *  todo 再按 有无日期 两分（日期未知 / 已排期，已排期只按 ddl 升序）。
+ *  通知（kind=notice）不进看板任一段——分类轴（kind）与演化轴（status）正交，007。 */
 export function buildBoard(db: Db): BoardView {
   const now = new Date();
-  const rows = repo.deriveItemsWithVersion(db);
+  const rows = repo.deriveItemsWithVersion(db).filter((r) => r.item.kind === "task");
   const viewedIds = repo.listViewedItemIds(db);
   // 已完成按完成时刻倒序（最新在上，用户 2026-09-27）——配合完成淡出梯度自上而下读
   const done = rows
@@ -49,10 +51,6 @@ export function buildBoard(db: Db): BoardView {
         (b.completedAt ?? "").localeCompare(a.completedAt ?? "") ||
         b.updatedAt.localeCompare(a.updatedAt),
     );
-  const archived = rows
-    .filter((r) => r.item.status === "archived")
-    .map((r) => toRow(r, now, null, viewedIds.has(r.item.id)))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.item.id.localeCompare(a.item.id));
   const todo = rows.filter((r) => r.item.status === "todo");
   // D-89：存疑段退场——拿不准的信息进存疑信息库（不挂事项），故 todo 行只需按「有无日期」两分。
   const undated = todo.filter((r) => itemDueDate(r.item) === null);
@@ -72,7 +70,6 @@ export function buildBoard(db: Db): BoardView {
     undated: undated.map((r) => toRow(r, now, null, viewedIds.has(r.item.id))),
     scheduled: scheduled.map((r) => toRow(r, now, null, viewedIds.has(r.item.id))),
     done,
-    archived, // D-83：最小归档启用，段接收 archived 项（viewed 如实——归档行也可能未被打开过）
     failedRawInputs: repo.listRawInputsByState(db, "failed"),
   });
 }
