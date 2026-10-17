@@ -7,9 +7,12 @@ import * as repo from "../storage/repo";
 // 按「最近更新」倒序（有更新即上浮，用户 2026-10-16 定）；行带 viewed（复用 item_views，
 // 通知的「已读」与事项同一张表——点开即消）。
 
-/** 装配通知列表：全部 kind=notice 的信息，按 updatedAt 倒序，附已读状态。 */
+/** 装配通知列表：全部活跃通知（kind=notice 且非 trashed），按 updatedAt 倒序，附已读状态。
+ *  trashed（回收站）的通知不在这——删除即离开通知页，只在回收站可见（D-106）。 */
 export function deriveNotices(db: Db): NoticeView {
-  const rows = repo.deriveItemsWithVersion(db).filter((r) => r.item.kind === "notice");
+  const rows = repo
+    .deriveItemsWithVersion(db)
+    .filter((r) => r.item.kind === "notice" && r.item.status !== "trashed");
   const viewedIds = repo.listViewedItemIds(db);
   return NoticeViewSchema.parse({
     notices: rows

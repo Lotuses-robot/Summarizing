@@ -628,3 +628,46 @@ describe("通知与回收站接口（真实 HTTP 入口，007）", () => {
     expect(repo.deriveHistory(t.db, old.id)).toHaveLength(0); // 老条目的版本链已物理删
   });
 });
+
+describe("删除后从原视图消失（007：trashed 不进通知页/看板）", () => {
+  it("删掉的通知：通知页没有它、回收站有它（两处不并存）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    createItem(db, raw, { name: "临时的通知", kind: "notice" });
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("播种失败");
+    expect(deriveNotices(db).notices).toHaveLength(1);
+
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除「临时的通知」",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+
+    expect(deriveNotices(db).notices).toHaveLength(0); // 通知页不再有它
+    expect(deriveTrashed(db).rows).toHaveLength(1); // 只在回收站可见
+    expect(buildBoard(db).done).toHaveLength(0); // 看板更没有它
+  });
+
+  it("删掉的事项：看板三段都没有它（trashed 天然排除）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    createItem(db, raw, { name: "临时的事项", dueDate: "2026-10-30T10:00:00" });
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("播种失败");
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除「临时的事项」",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+    const board = buildBoard(db);
+    expect(board.undated).toHaveLength(0);
+    expect(board.scheduled).toHaveLength(0);
+    expect(board.done).toHaveLength(0);
+    expect(deriveTrashed(db).rows).toHaveLength(1);
+  });
+});
