@@ -47,7 +47,7 @@ export function NoticePanel({
   }
 
   return (
-    <ul className="flex flex-col gap-1 px-4 py-3">
+    <ul className="flex flex-col gap-2 px-4 py-3">
       {visible.map((r) => {
         const { item } = r;
         const isNew = !r.viewed && !viewedLocally.has(item.id);
@@ -56,9 +56,10 @@ export function NoticePanel({
             key={item.id}
             id={`row-${item.id}`}
             className={cn(
-              // 常态 = 浅色细框（不勾注意力）；选中 = 加深背景（与看板同色系、不用描边抢视线）
-              "group relative cursor-pointer overflow-hidden rounded-md border border-line/60 py-2 pl-5 pr-3 hover:bg-canvas",
-              expandedId === item.id && "border-line bg-canvas",
+              // 默认 = 卡片底（surface：亮色近白、暗色浅灰），点开压深到 canvas（亮色转灰、暗色转深黑）
+              // ——「抬起→按下」的触感，两套主题各自成立；常态细框、悬停略提
+              "group relative cursor-pointer overflow-hidden rounded-md border border-line bg-surface py-2 pl-5 pr-3 hover:bg-canvas",
+              expandedId === item.id && "bg-canvas",
             )}
             onClick={() => toggle(item.id)}
           >

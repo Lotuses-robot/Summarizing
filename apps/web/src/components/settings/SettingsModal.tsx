@@ -494,7 +494,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             {rulesFailed ? (
               <Row label={<span className="text-danger">读不到当前规则（后端在跑吗？）</span>} />
             ) : (
-              <div className="px-0.5">
+              /* stacked Row：左上是标题+副标题、下方全宽大文本框——与其他设置项同一套
+                 px-4/py-2.5 内距与 border 节奏；不再自己套 div 造成「文字贴框线」。 */
+              <Row
+                stacked
+                label="不收哪些内容"
+                description="用大白话写，一行一条也行。失焦即生效——下一条新消息就按这个判。只拒你点名的，没提到的一律照常判断；被拒的内容仍会在流水里留痕。"
+              >
                 <textarea
                   className="textarea min-h-40"
                   value={rules}
@@ -507,15 +513,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   }}
                   onBlur={saveRules}
                 />
-                <div className="mt-2 flex items-start justify-between gap-3">
-                  <p className="text-xs leading-relaxed text-ink-muted">
-                    失焦即生效——下一条新消息就按这个判。
-                    <br />
-                    只拒你点名的，没提到的一律照常判断；被它拒收的内容仍会在流水里留痕，不会无声消失。
-                  </p>
-                  <StatusSlot statuses={statuses} />
-                </div>
-              </div>
+                <StatusSlot statuses={statuses} />
+              </Row>
             )}
           </Card>
 
