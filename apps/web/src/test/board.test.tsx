@@ -7,7 +7,7 @@ import { doneFadeStrength } from "../lib/urgency";
 import { makeRow, view } from "./helpers/board-fixtures";
 import "@testing-library/jest-dom/vitest";
 
-describe("Board（四段看板，D-89）", () => {
+describe("Board（三段看板，007）", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(wallClockToEpoch("2026-09-26T12:00:00"));
@@ -26,7 +26,7 @@ describe("Board（四段看板，D-89）", () => {
     cleanup();
   });
 
-  it("四段渲染：行进对应段；已完成默认折叠、点段头展开", () => {
+  it("三段渲染：行进对应段；已完成默认折叠、点段头展开", () => {
     render(
       <Board
         board={view({

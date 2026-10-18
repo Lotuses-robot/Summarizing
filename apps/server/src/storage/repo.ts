@@ -131,6 +131,11 @@ export function appendItemVersion(
     revokedBy: null, // 预留未用（撤回功能暂缓，D-79）
   };
   db.insert(s.itemVersions).values(row).run();
+  // 通知「更新后重新标未读」（OQ-11）：任何新版本都把该条的已读标记清掉——
+  // 内容变了就值得重看一眼。挂在唯一写路径上，前端/agent0 两条写入口自动一致。
+  if (args.snapshot.kind === "notice") {
+    db.delete(s.itemViews).where(eq(s.itemViews.itemId, args.itemId)).run();
+  }
   return ItemVersionSchema.parse({ ...row, snapshot: args.snapshot, by: args.by });
 }
 
@@ -455,7 +460,7 @@ export function getOrCreateFragment(db: DbOrTx, content: string, rawInputId: str
 }
 
 /** 按 ID 读片段；不存在返回 null。 */
-function getFragment(db: DbOrTx, id: string): Fragment | null {
+export function getFragment(db: DbOrTx, id: string): Fragment | null {
   const row = db.select().from(s.fragments).where(eq(s.fragments.id, id)).get();
   return row ? FragmentSchema.parse(row) : null;
 }
@@ -710,23 +715,32 @@ const PURGE_DAYS = 15;
  *  （按 trashedAt——进入回收站的时刻，非创建时刻，用户 2026-10-16 定）。
  *  删 item_versions / evidence / item_views 中挂该 itemId 的行；**raw_inputs / fragments /
  *  uncertain_inputs 一律不碰**——原文档案是证据终端，永不随信息删除（FR-009）。
- *  删除前 stderr 留痕「删了什么、原状态」（红线「不许静默」）。返回被清除的条数。
- *
- *  ⚠️ 用事务句柄 tx 落笔（调用方 runInTransaction 包住）——多表删除要么全成要么全不回。 */
-export function purgeTrashed(tx: DbOrTx): { purged: number } {
+ *  ⚠️ 留痕不在这里写：调用方在**事务提交成功后**才 stderr 输出（事务可能回滚，
+ *  回滚时若已写「已彻底清除」就是假留痕——红线要求留痕必须属实）。
+ *  返回 purged 计数 + 被清除条目清单（调用方据此留痕）。 */
+export function purgeTrashed(tx: DbOrTx): {
+  purged: number;
+  items: { itemId: string; trashedAt: string; title: string; preStatus: string }[];
+} {
   const cutoff = wallClockDaysAgo(PURGE_DAYS);
-  const stale: { itemId: string; trashedAt: string }[] = [];
+  const stale: { itemId: string; trashedAt: string; title: string; preStatus: string }[] = [];
   for (const r of deriveItemsWithVersion(tx)) {
     if (r.item.status !== "trashed") continue;
     const at = trashedAtOf(tx, r.item.id);
-    if (at !== null && at < cutoff) stale.push({ itemId: r.item.id, trashedAt: at });
+    if (at === null || at >= cutoff) continue;
+    // 留痕要能回答「删了什么、原来是完成还是待办」（FR-009）——在删除前把它取出来
+    stale.push({
+      itemId: r.item.id,
+      trashedAt: at,
+      title: r.item.elements.find((e) => e.label === "name")?.text ?? "（无名）",
+      preStatus: preTrashStatus(tx, r.item.id),
+    });
   }
 
-  for (const { itemId, trashedAt } of stale) {
-    process.stderr.write(`[trash] 彻底清除：${itemId}（进入回收站 ${trashedAt}）\n`);
+  for (const { itemId } of stale) {
     tx.delete(s.evidence).where(eq(s.evidence.itemId, itemId)).run();
     tx.delete(s.itemViews).where(eq(s.itemViews.itemId, itemId)).run();
     tx.delete(s.itemVersions).where(eq(s.itemVersions.itemId, itemId)).run();
   }
-  return { purged: stale.length };
+  return { purged: stale.length, items: stale };
 }

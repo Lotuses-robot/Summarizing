@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { itemName, type RawInput } from "@summarizing/shared";
 import { executeChanges } from "../executor/executor";
+import { makeAgentTools } from "../agent0/tools";
 import { buildBoard } from "../application/board";
 import { deriveNotices } from "../application/notice";
 import { deriveTrashed } from "../application/trash";
@@ -58,7 +59,7 @@ function createItem(
 }
 
 describe("buildBoard（状态制五段，D-80）", () => {
-  it("四段互斥：日期未知、已排期按 ddl 升序（时间钉死防墙钟漂移）；doubtNote 不再影响分段（D-89）", () => {
+  it("三段互斥：日期未知、已排期按 ddl 升序（时间钉死防墙钟漂移）；doubtNote 不再影响分段（D-89）", () => {
     vi.useFakeTimers();
     vi.setSystemTime(parseWallClock("2026-09-26T12:00:00"));
     try {
@@ -524,7 +525,7 @@ describe("回收站（007 US3）", () => {
     expect(rows[0]?.item.kind).toBe("notice");
   });
 
-  it("trashed 条目排除出 agent0 检索面（OQ-9）", () => {
+  it("trashed 条目排除出 agent0 检索面（OQ-9）——走生产路径 makeAgentTools", async () => {
     const db = makeDb(":memory:");
     const raw = seedRaw(db);
     const item = createItem(db, raw, { name: "删掉的事项" });
@@ -535,14 +536,17 @@ describe("回收站（007 US3）", () => {
       snapshot: { ...item, status: "trashed" },
       by: { actor: "用户", model: null },
     });
-
-    // search_items 覆盖 notice（OQ-9 前半）——但 trashed 一律排除
+    // 通知也建一条：search_items 覆盖 notice（OQ-9 前半）
     const notice = createItem(db, raw, { name: "留存的通知", kind: "notice" });
-    const hits = repo
-      .deriveItems(db)
-      .filter((i) => i.status !== "trashed")
-      .map((i) => i.id);
-    expect(hits).toEqual([notice.id]);
+
+    const tools = makeAgentTools(db);
+    // 关键词同时命中两者（都含"的"）——生产实现必须只回通知
+    const hits = await tools.searchItems({ query: "的" });
+    expect(hits.items.map((i) => i.id)).toEqual([notice.id]);
+    // get_item 对 trashed 一律拒绝（不把已删内容喂给模型）
+    await expect(tools.getItem({ id: item.id })).rejects.toThrow(/回收站/);
+    // 对照：未删的通知照常可读
+    await expect(tools.getItem({ id: notice.id })).resolves.toBeTruthy();
   });
 });
 
@@ -709,5 +713,97 @@ describe("流水摘要区分事项/通知（D-106 修订：通知不说「日期
     expect(detail).toContain("新建通知「课改到明理楼3楼」");
     expect(detail).not.toContain("日期未知");
     expect(detail).not.toContain("ddl");
+  });
+});
+
+describe("状态不变量守卫（007：路由层与版本链唯一写路径）", () => {
+  it("complete/reopen/confirm 都拒绝 trashed 条目（409，要改先恢复）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "已删事项" });
+    const item = repo.deriveItems(t.db)[0];
+    if (!item) throw new Error("播种失败");
+    await t.inject({ method: "POST", url: `/api/items/${item.id}/trash` });
+
+    for (const path of ["complete", "reopen", "confirm"]) {
+      const res = await t.inject({ method: "POST", url: `/api/items/${item.id}/${path}` });
+      expect(res.statusCode, path).toBe(409);
+      expect(repo.deriveItem(t.db, item.id)?.status).toBe("trashed"); // 一条都没改活
+    }
+  });
+
+  it("complete/reopen 拒绝通知（409：通知不参与完成演化）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "一条通知", kind: "notice" });
+    const item = repo.deriveItems(t.db)[0];
+    if (!item) throw new Error("播种失败");
+    for (const path of ["complete", "reopen"]) {
+      const res = await t.inject({ method: "POST", url: `/api/items/${item.id}/${path}` });
+      expect(res.statusCode, path).toBe(409);
+    }
+    expect(repo.deriveItem(t.db, item.id)?.status).toBe("todo");
+  });
+
+  it("restore 对不在回收站的条目是 no-op（不追加无意义版本）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "正常事项" });
+    const item = repo.deriveItems(t.db)[0];
+    if (!item) throw new Error("播种失败");
+    const before = repo.deriveHistory(t.db, item.id).length;
+    const res = await t.inject({ method: "POST", url: `/api/items/${item.id}/restore` });
+    expect(res.statusCode).toBe(200);
+    expect(repo.deriveHistory(t.db, item.id)).toHaveLength(before);
+  });
+
+  it("通知收到新版本 → 已读标记被清掉（OQ-11：更新后重新标未读）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const notice = createItem(db, raw, { name: "会变的通知", kind: "notice" });
+    repo.markItemViewed(db, notice.id);
+    expect(repo.listViewedItemIds(db).has(notice.id)).toBe(true);
+    // 模拟 agent0 更新它（任何新版本）
+    repo.appendItemVersion(db, {
+      itemId: notice.id,
+      action: "update_item",
+      detail: "更新通知",
+      snapshot: { ...notice, tags: ["课程"] },
+      by: { actor: "agent0", model: "test" },
+    });
+    expect(repo.listViewedItemIds(db).has(notice.id)).toBe(false);
+  });
+
+  it("已完成事项切成通知 → status 归一为 todo（通知恒 todo，不造 done 通知）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const task = createItem(db, raw, { name: "已完成的事" });
+    // 先标完成（无 dueDate 元素 → 可切 notice）
+    repo.appendItemVersion(db, {
+      itemId: task.id,
+      action: "complete_item",
+      detail: "标完成",
+      snapshot: { ...task, status: "done" },
+      by: { actor: "用户", model: null },
+    });
+    // agent0 切成通知
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "update_item",
+          itemId: task.id,
+          kind: "notice",
+          elements: [],
+          tags: {},
+          resolveDoubt: false,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+    const after = repo.deriveItem(db, task.id);
+    expect(after?.kind).toBe("notice");
+    expect(after?.status).toBe("todo");
   });
 });

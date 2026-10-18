@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { createReadStream, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import { makeOpenAiLlm, makeUnconfiguredLlm, type TaggedLlm } from "../shared/llm";
@@ -54,6 +55,9 @@ function mergeAiConfig(form: AiSettings, stored: AiSettings | null): AiSettings 
   };
 }
 
+/** PUT /api/settings/rejection-rules 的请求体形状（zod 校验，不用 as 担保）。 */
+const RejectionRulesBodySchema = z.object({ rules: RejectionRulesSchema });
+
 /** 注册 settings 路由（GET/PUT/DELETE ai、POST ai/test、GET/PUT rejection-rules、GET backup）。 */
 export function registerSettingsRoutes(app: FastifyInstance): void {
   app.get("/api/settings/ai", async (req) => view(req.space.db));
@@ -64,9 +68,8 @@ export function registerSettingsRoutes(app: FastifyInstance): void {
   });
 
   app.put("/api/settings/rejection-rules", async (req, reply) => {
-    const parsed = RejectionRulesSchema.safeParse(
-      (req.body as { rules?: unknown } | undefined)?.rules,
-    );
+    // 形状校验走 zod（不用 `as` 向编译器担保——项目类型红线）；body 形状单一出处
+    const parsed = RejectionRulesBodySchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({
         error: "请求体不合法",
@@ -75,8 +78,8 @@ export function registerSettingsRoutes(app: FastifyInstance): void {
     }
     // 空串 = 清空规则：存空串而不是删行（读路径对「行缺失」与「空串」同一视之，删行也行——
     // 但存空串让「用户设过又清了」与「从没设过」在库里可分辨，便于排查）
-    repo.setAppSetting(req.space.db, repo.REJECTION_RULES_KEY, JSON.stringify(parsed.data));
-    return RejectionRulesViewSchema.parse({ rules: parsed.data });
+    repo.setAppSetting(req.space.db, repo.REJECTION_RULES_KEY, JSON.stringify(parsed.data.rules));
+    return RejectionRulesViewSchema.parse({ rules: parsed.data.rules });
   });
 
   // 保存即热切换（05§五）：先建新客户端成功才换+落库，失败保旧——切换是原子的

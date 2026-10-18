@@ -88,17 +88,21 @@ function applyChanges(
         const elements = upsertElements(current.elements, item.elements);
         // 标签改动 map（旧→新：增/删/改，D-105）——单一出处 shared applyTagChanges
         const tags = applyTagChanges(current.tags, item.tags);
+        const kind = item.kind ?? current.kind; // 分类轴（007）：缺席=沿用，显式=切换（ddl 形状已由围栏校验）
+        // 通知恒 todo（D-106 甲）：task→notice 切换时若有 done 态，归一为 todo——不因状态拒转
+        //（用户定的"唯一约束=ddl 形状"），但切换后的状态必须满足目标 kind 的不变量
+        const status = kind === "notice" ? "todo" : current.status;
         repo.appendItemVersion(tx, {
           itemId: current.id,
           action: "update_item",
-          detail: `更新事项「${itemName(elements)}」：${item.elements
+          detail: `更新${kind === "notice" ? "通知" : "事项"}「${itemName(elements)}」：${item.elements
             .map((e) => e.label)
             .join("、")}`,
           snapshot: {
             elements,
             tags,
-            status: current.status,
-            kind: item.kind ?? current.kind, // 分类轴（007）：缺席=沿用，显式=切换（ddl 形状已由围栏校验）
+            status,
+            kind,
             doubtNote: item.resolveDoubt ? null : current.doubtNote,
           },
           by,

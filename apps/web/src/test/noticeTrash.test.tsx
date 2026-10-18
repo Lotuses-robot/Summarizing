@@ -22,6 +22,7 @@ function notice(overrides: Partial<NoticeRow> = {}): NoticeRow {
     },
     updatedAt: "2026-10-17 10:00",
     viewed: false,
+    sourceLabel: null,
     ...overrides,
   };
 }
@@ -42,7 +43,19 @@ function trashRow(overrides: Partial<TrashRow> = {}): TrashRow {
   };
 }
 
-/** 全部通过的筛选谓词（筛选语义另由 App 层的 noticeVisible 测试覆盖）。 */
+/** 一份合法的条目（`api.trash/restore` 的返回类型 Item——不用 as 绕类型）。 */
+function itemFixture(id: string, status: "todo" | "trashed", kind: "task" | "notice" = "task") {
+  return {
+    id,
+    elements: [{ label: "name", text: "条目" }],
+    tags: [],
+    status,
+    kind,
+    doubtNote: null,
+  };
+}
+
+/** 全部通过的筛选谓词——筛选语义本身由 filter.test.ts 覆盖（单一出处 matchesFilter）。 */
 const ALL = (_r: NoticeRow) => true;
 
 describe("NoticePanel（007 通知页）", () => {
@@ -74,7 +87,7 @@ describe("NoticePanel（007 通知页）", () => {
   });
 
   it("行右缘删除 → 调 api.trash（一步进回收站）", async () => {
-    const spy = vi.spyOn(api, "trash").mockResolvedValue({} as never);
+    const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
     fireEvent.click(screen.getByTitle("删除（进回收站，可恢复）"));
     await waitFor(() => expect(spy).toHaveBeenCalledWith("n1"));
@@ -128,7 +141,7 @@ describe("TrashPanel（007 回收站）", () => {
   });
 
   it("恢复按钮 → 调 api.restore", async () => {
-    const spy = vi.spyOn(api, "restore").mockResolvedValue({} as never);
+    const spy = vi.spyOn(api, "restore").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<TrashPanel rows={[trashRow()]} onRefresh={() => {}} />);
     fireEvent.click(screen.getByTitle("从回收站恢复（回到删前的状态）"));
     await waitFor(() => expect(spy).toHaveBeenCalledWith("i1"));
@@ -138,5 +151,24 @@ describe("TrashPanel（007 回收站）", () => {
   it("空态一句话（禁愧疚/鸡血措辞）", () => {
     render(<TrashPanel rows={[]} onRefresh={() => {}} />);
     expect(screen.getByText(/回收站是空的/)).toBeInTheDocument();
+  });
+});
+
+describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
+  it("有来源时显示徽标；无来源（null）不显示也不编造", () => {
+    const { unmount } = render(
+      <NoticePanel
+        notices={[notice({ sourceLabel: "数据结构课群" })]}
+        filter={ALL}
+        onRefresh={() => {}}
+      />,
+    );
+    expect(screen.getByText("数据结构课群")).toBeInTheDocument();
+    unmount();
+    render(
+      <NoticePanel notices={[notice({ sourceLabel: null })]} filter={ALL} onRefresh={() => {}} />,
+    );
+    expect(screen.queryByText("数据结构课群")).not.toBeInTheDocument();
+    expect(screen.queryByText("未知来源")).not.toBeInTheDocument(); // 不编造
   });
 });

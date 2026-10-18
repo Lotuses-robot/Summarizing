@@ -44,16 +44,18 @@ export function parseChangeList(text: string): ChangeList | null {
   return parseModelJson(text, ChangeListSchema);
 }
 
-/** 分类轴的 ddl 形状约束（007 FR-003/FR-014）：通知（notice）必无 dueDate。
- *  `nextElements` = 改动应用后的元素集（update_item 时 = 当前元素被 upsert 覆盖后的结果）；
- *  `patchElements` = 本次变更带的元素（create 时即全部元素；update 时是被改的那几个 label）。
- *  判据落在**结果集**上——元素只增改不删，故 task 已带 dueDate 时转 notice 无从删掉它 → 拒。 */
+/** 分类轴的 ddl 形状约束（007 FR-003/FR-014）：通知（notice）必无 dueDate 元素。
+ *  `patchElements` = 本次变更带的元素（create 时即全部元素；update 时是被改的那几个 label）；
+ *  `currentElements` = 该条当前已有元素（create 时为 null——没有"既有"可言）。
+ *  判据落在**改动应用后的元素集**上——元素只增改不删，故 task 已带 dueDate 时转 notice 无从删掉它 → 拒。 */
 function checkKindDdl(
   kind: Item["kind"],
   patchElements: { label: string }[],
   currentElements: { label: string }[] | null,
 ): string | null {
-  if (kind !== "notice") return null; // task 必须有 ddl（可留空）——由创建时的 name/dueDate 约束承载，无额外形状要求
+  // task 侧无额外形状要求：dueDate 元素可缺席（= 日期未知）。"可留空"在结构上就是「没有这个元素」
+  //（schema 里 dueDate 元素的 text 只能是墙钟串或 null，不会出现"空字符串元素"）。
+  if (kind !== "notice") return null;
   const hasDue =
     patchElements.some((e) => e.label === "dueDate") ||
     (currentElements?.some((e) => e.label === "dueDate") ?? false);
@@ -160,7 +162,8 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
 }
 
 /** resolve_uncertain 的形状规则（与目标存在性无关的部分）：merged 必须给去向。
- *  digest 围栏与清扫围栏共用——规则一处定义，两侧不得漂移。 */ export function resolveUncertainWellFormed(item: {
+ *  digest 围栏与清扫围栏共用——规则一处定义，两侧不得漂移。 */
+export function resolveUncertainWellFormed(item: {
   outcome: "merged" | "discarded";
   resolvedRef?: string;
 }): boolean {

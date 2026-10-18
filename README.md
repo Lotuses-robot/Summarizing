@@ -27,7 +27,7 @@
   <a href="#"><img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind v4" /></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-每账户一库-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-413%20passing-brightgreen?style=flat-square" alt="tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-432%20passing-brightgreen?style=flat-square" alt="tests" /></a>
 </p>
 
 ## 它解决什么
@@ -73,7 +73,7 @@ npm run dev                # 打开 http://localhost:5173 登录 → 设置 → 
 装完之后，常用检查：
 
 ```bash
-npm test              # vitest（413 个用例）
+npm test              # vitest（432 个用例）
 npm run check         # 类型 + 代码规范 + 测试
 npm run check:dead    # 死代码检查
 npm run build -w @summarizing/web

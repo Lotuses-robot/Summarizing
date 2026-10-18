@@ -500,7 +500,7 @@ export type SearchUncertainResult = z.infer<typeof SearchUncertainResultSchema>;
 export const FetchImageArgsSchema = z.object({ url: z.string().min(1) });
 export type FetchImageArgs = z.infer<typeof FetchImageArgsSchema>;
 
-// ───────────────────────── 看板（01§4.3 状态制四段；D-89）─────────────────────────
+// ───────────────────────── 看板（01§4.3 状态制三段；D-89 四段 → 007 三段）─────────────────────────
 
 export const ItemRowSchema = z.object({
   item: ItemSchema,
@@ -525,10 +525,12 @@ export type BoardView = z.infer<typeof BoardViewSchema>;
 // ───────────────────────── 通知页（007：kind=notice 的独立查看入口）─────────────────────────
 
 // 通知行：题面同 Item，倒序按 updatedAt（有更新即上浮）；viewed 复用 item_views（点开即消）。
+// sourceLabel = 来源显示名（取最近一条证据所属批次；无证据时 null——不编造来源，FR-004 来源徽标）。
 export const NoticeRowSchema = z.object({
   item: ItemSchema,
   updatedAt: z.string(),
   viewed: z.boolean(),
+  sourceLabel: z.string().nullable(),
 });
 export type NoticeRow = z.infer<typeof NoticeRowSchema>;
 

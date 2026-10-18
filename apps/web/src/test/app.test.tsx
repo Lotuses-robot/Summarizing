@@ -72,7 +72,7 @@ describe("App 接线（D-89：主视图切换 / Esc 分层 / 审核页错误面�
   it("点活动栏 ⚠ → 审核页；Esc → 回看板", async () => {
     stubApp();
     render(<App />);
-    // 看板先出来（四段锚点之一）
+    // 看板先出来（三段锚点之一）
     expect(await screen.findByText("日期未知")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("存疑库审核（空）"));

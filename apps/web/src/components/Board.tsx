@@ -14,7 +14,7 @@ import { loadSectionFold, saveSectionFold } from "../lib/appearance";
 import { pushEscLayer } from "../lib/escLayer";
 import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urgency";
 import { fmtShortTime } from "../lib/time";
-import type { BoardFilter } from "./FilterBar";
+import { matchesFilter, type BoardFilter } from "./FilterBar";
 import { api } from "../api";
 import { ItemBody } from "./board/ItemBody";
 
@@ -315,7 +315,7 @@ function Section({
   );
 }
 
-/** 看板四段（01§4.3 / D-89）+ 行内展开（单开互斥）+ 深链定位；筛选状态在 App 顶栏（FilterBar），
+/** 看板三段（01§4.3；D-89 四段 → 007 三段）+ 行内展开（单开互斥）+ 深链定位；筛选状态在 App 顶栏（FilterBar），
  *  这里只按 filter prop 过滤。 */
 export function Board({
   board,
@@ -342,18 +342,8 @@ export function Board({
   const handledToken = useRef(0);
 
   /** 筛选谓词：选中的标签 token 全部必须携带（AND 收窄）；查询串对标题与 tags 做包含匹配（D-80）。 */
-  const visible = useCallback(
-    (r: ItemRow): boolean => {
-      if (!filter.tags.every((t) => r.item.tags.includes(t))) return false;
-      const q = filter.query.trim();
-      if (q !== "") {
-        const hay = [itemName(r.item.elements), ...r.item.tags];
-        if (!hay.some((s) => s.includes(q))) return false;
-      }
-      return true;
-    },
-    [filter],
-  );
+  /** 筛选谓词：语义单一出处 = FilterBar.matchesFilter（与通知页共用，防两套真相）。 */
+  const visible = useCallback((r: ItemRow): boolean => matchesFilter(r.item, filter), [filter]);
 
   const allRows = useMemo(() => SECTION_META.flatMap((m) => board[m.key]), [board]);
 

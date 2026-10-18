@@ -88,12 +88,14 @@ export function makeAgentTools(db: Db): AgentTools {
   return {
     async searchItems({ query }) {
       const q = query.trim();
-      // 标签或语义名命中都算（打标签参考 + 身份判断）
+      // 标签或语义名命中都算（打标签参考 + 身份判断）；**trashed 一律排除**（D-106 ⑧ / OQ-9）：
+      // 已删除的条目不该被检索到——否则 agent0 会尝试更新它、围栏每轮拒收空转
       const items = repo
         .deriveItems(db)
         .filter(
           (item) =>
-            item.tags.some((t) => t.includes(q)) || item.elements.some((e) => e.text.includes(q)),
+            item.status !== "trashed" &&
+            (item.tags.some((t) => t.includes(q)) || item.elements.some((e) => e.text.includes(q))),
         );
       return { items };
     },
@@ -104,6 +106,10 @@ export function makeAgentTools(db: Db): AgentTools {
     async getItem({ id }) {
       const full = repo.getItemFull(db, id);
       if (!full) throw new Error(`item not found: ${id}`);
+      // trashed 一律排除出检索面（D-106 ⑧ / OQ-9）：不把已删内容喂给模型
+      if (full.item.status === "trashed") {
+        throw new Error(`item 在回收站（已删除）：${id}——不可读取，需先在回收站恢复`);
+      }
       return full;
     },
     async searchRecentRaws({ daysBack, sameSourceOnly }, ctx) {

@@ -4,7 +4,7 @@ import { itemName, type NoticeRow } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { ItemBody } from "./board/ItemBody";
-import { fmtFullTime } from "../lib/time";
+import { fmtFullTime, fmtShortTime } from "../lib/time";
 
 /** 通知页（007）：kind=notice 的独立查看入口——不用翻群就知道发生了什么。
  *  行 = 语义名 + 最近更新时间 + tags + 未读微标；点开 = 展开详情（复用 ItemBody：
@@ -22,6 +22,8 @@ export function NoticePanel({
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [viewedLocally, setViewedLocally] = useState<ReadonlySet<string>>(new Set());
+  /** 删除失败必须可见（红线「不许静默」）：失败时行还在，不给提示等于"点了没反应"。 */
+  const [actionError, setActionError] = useState<string | null>(null);
   const visible = notices.filter(filter);
 
   /** 点开：单开互斥 + 首次展开即报已读（「新」微标点开即消，与看板同一节奏）。 */
@@ -47,57 +49,80 @@ export function NoticePanel({
   }
 
   return (
-    <ul className="flex flex-col gap-2 px-4 py-3">
-      {visible.map((r) => {
-        const { item } = r;
-        const isNew = !r.viewed && !viewedLocally.has(item.id);
-        return (
-          <li
-            key={item.id}
-            id={`row-${item.id}`}
-            className={cn(
-              // 默认 = 卡片底（surface：亮色近白、暗色浅灰），点开压深到 canvas（亮色转灰、暗色转深黑）
-              // ——「抬起→按下」的触感，两套主题各自成立；常态细框、悬停略提
-              "group relative cursor-pointer overflow-hidden rounded-md border border-line bg-surface py-2 pl-5 pr-3 hover:bg-canvas",
-              expandedId === item.id && "bg-canvas",
-            )}
-            onClick={() => toggle(item.id)}
-          >
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <span className="min-w-0 truncate">{itemName(item.elements)}</span>
-              {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}
-              {item.tags.map((t) => (
-                <span key={t} className="chip shrink-0 text-ink-muted">
-                  {t}
+    <>
+      {actionError !== null && (
+        <p className="mx-4 mt-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+          {actionError}
+        </p>
+      )}
+      <ul className="flex flex-col gap-2 px-4 py-3">
+        {visible.map((r) => {
+          const { item } = r;
+          const isNew = !r.viewed && !viewedLocally.has(item.id);
+          return (
+            <li
+              key={item.id}
+              id={`row-${item.id}`}
+              className={cn(
+                // 默认 = 卡片底（surface：亮色近白、暗色浅灰），点开压深到 canvas（亮色转灰、暗色转深黑）
+                // ——「抬起→按下」的触感，两套主题各自成立；常态细框、悬停略提
+                "group relative cursor-pointer overflow-hidden rounded-md border border-line bg-surface py-2 pl-5 pr-3 hover:bg-canvas",
+                expandedId === item.id && "bg-canvas",
+              )}
+              onClick={() => toggle(item.id)}
+            >
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <span className="min-w-0 truncate">{itemName(item.elements)}</span>
+                {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}
+                {/* 来源徽标（FR-004 / US1-2）：一眼看出是哪个群/谁说的；无证据时不显示（不编造来源） */}
+                {r.sourceLabel !== null && (
+                  <span className="chip shrink-0 text-ink-muted">{r.sourceLabel}</span>
+                )}
+                {item.tags.map((t) => (
+                  <span key={t} className="chip shrink-0 text-ink-muted">
+                    {t}
+                  </span>
+                ))}
+                <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
+                  {/* 列表行统一短格式（D-95 ③；完整时刻进 tooltip——与回收站同款） */}
+                  <span title={`更新于 ${fmtFullTime(r.updatedAt)}`}>
+                    {fmtShortTime(r.updatedAt)}
+                  </span>
+                  <button
+                    className="row-act"
+                    title="删除（进回收站，可恢复）"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void api
+                        .trash(item.id)
+                        .then(() => {
+                          setActionError(null);
+                          onRefresh();
+                        })
+                        .catch(() => {
+                          setActionError("删除失败——这条还在，请稍后重试");
+                          onRefresh();
+                        });
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </span>
-              ))}
-              <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
-                <span title={`更新于 ${fmtFullTime(r.updatedAt)}`}>{fmtFullTime(r.updatedAt)}</span>
-                <button
-                  className="row-act"
-                  title="删除（进回收站，可恢复）"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void api.trash(item.id).then(onRefresh).catch(onRefresh);
-                  }}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </span>
-            </div>
-            {expandedId === item.id && (
-              <div
-                className="mt-2 max-h-[70vh] overflow-y-auto rounded-md border border-line bg-surface"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="bg-canvas/40">
-                  <ItemBody id={item.id} />
-                </div>
               </div>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+              {expandedId === item.id && (
+                <div
+                  className="mt-2 max-h-[70vh] overflow-y-auto rounded-md border border-line bg-surface"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="bg-canvas/40">
+                    <ItemBody id={item.id} />
+                  </div>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }

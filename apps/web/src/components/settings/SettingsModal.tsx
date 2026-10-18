@@ -114,10 +114,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearance);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
-  /** 用户拒收规则（D-107）：自由文本；rulesDirty 记录「与盘上值不同」——失焦即存只在脏时发。 */
+  /** 用户拒收规则（D-107）：自由文本。脏标/在飞/待补发/编辑代次都走 ref（同步，
+   *  防 blur 与关闭 flush 在同一 tick 重复发送；慢响应也不覆盖新输入）。 */
   const [rules, setRules] = useState("");
-  const [rulesDirty, setRulesDirty] = useState(false);
   const [rulesFailed, setRulesFailed] = useState(false);
+  const rulesDirtyRef = useRef(false);
+  const rulesSavingRef = useRef(false);
+  const rulesPendingRef = useRef(false);
+  const rulesGenRef = useRef(0);
+  const rulesRef = useRef("");
   const [busy, setBusy] = useState<"none" | "test" | "clear">("none");
   const [readFailed, setReadFailed] = useState(false);
   const { statuses, flash, sticky } = useStatus();
@@ -199,11 +204,15 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       .aiSettings()
       .then(applyAiView)
       .catch(() => setReadFailed(true));
+    const loadGen = rulesGenRef.current; // 打开时的编辑代次
     api
       .rejectionRules()
       .then((v) => {
+        // 慢响应保护：等待期间用户已输入/已保存（代次变了）→ 不拿旧值覆盖新输入
+        if (rulesGenRef.current !== loadGen) return;
         setRules(v.rules);
-        setRulesDirty(false);
+        rulesRef.current = v.rules;
+        rulesDirtyRef.current = false;
         setRulesFailed(false);
       })
       .catch(() => setRulesFailed(true));
@@ -219,24 +228,38 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     setForm({ baseUrl: v.baseUrl, model: v.model, apiKey: "" });
   };
 
-  /** 拒收规则失焦即存（与 AI 区同一交互总则）：只在脏时发，失败常驻红字（不静默）。
-   *  保存成功即清脏标——**下一条进站消息**就用上新规则（提示词每批重新组装，无需重启）。 */
+  /** 拒收规则失焦即存（与 AI 区同一交互总则）：
+   *  - **脏标与在飞标走 ref**（同步）——blur 与「关闭前 flush」同一 tick 连续调用时不会重复发 PUT；
+   *  - **在飞期间的新编辑记 pending**，落地后补发（不静默吞）；
+   *  - **慢响应不回填**：只有期间没有新编辑（gen 未变）才 setRules，防旧值覆盖新输入；
+   *  - 保存失败只走 StatusSlot 红字（**绝不置 rulesFailed**——那是"读不到"标志，会整块藏掉编辑器）。 */
   const saveRules = useCallback(() => {
-    if (!rulesDirty) return;
-    setRulesDirty(false);
+    if (!rulesDirtyRef.current) return;
+    if (rulesSavingRef.current) {
+      rulesPendingRef.current = true;
+      return;
+    }
+    rulesDirtyRef.current = false;
+    rulesSavingRef.current = true;
+    const gen = rulesGenRef.current;
     api
-      .saveRejectionRules(rules)
+      .saveRejectionRules(rulesRef.current)
       .then((v) => {
-        setRules(v.rules);
-        setRulesFailed(false);
+        if (rulesGenRef.current === gen) setRules(v.rules);
         flash("rules", "已保存");
       })
       .catch((err: unknown) => {
-        setRulesDirty(true); // 存失败则恢复脏标——下次失焦重试，不吞
-        setRulesFailed(true);
+        rulesDirtyRef.current = true; // 存失败恢复脏标——下次失焦重试，不吞
         flash("rules", `保存失败：${errText(err)}`);
+      })
+      .finally(() => {
+        rulesSavingRef.current = false;
+        if (rulesPendingRef.current) {
+          rulesPendingRef.current = false;
+          saveRulesRef.current();
+        }
       });
-  }, [rulesDirty, rules, flash]);
+  }, [flash]);
   const saveRulesRef = useRef(saveRules);
   useEffect(() => {
     saveRulesRef.current = saveRules;
@@ -509,7 +532,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   }
                   onChange={(e) => {
                     setRules(e.target.value);
-                    setRulesDirty(true);
+                    rulesRef.current = e.target.value;
+                    rulesDirtyRef.current = true;
+                    rulesGenRef.current += 1; // 代次 +1：在飞的旧响应不得回填覆盖它
                   }}
                   onBlur={saveRules}
                 />

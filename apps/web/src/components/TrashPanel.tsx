@@ -14,14 +14,22 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [purging, setPurging] = useState(false);
+  /** 清理/恢复的结果与失败必须可见（红线「不许静默」）：否则「0 条可清」与「失败」无法分辨。 */
+  const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
-  /** 执行一键清理：服务端只删 >15d 的；失败不换本地态（刷新让列表如实呈现）。 */
+  /** 执行一键清理：服务端只删 >15d 的；结果如实回报（清了几条 / 失败原因）。 */
   const purge = () => {
     setPurging(true);
     void api
       .purgeTrash()
+      .then(({ purged }) => {
+        setFeedback({
+          tone: "ok",
+          text: purged > 0 ? `已彻底清除 ${purged} 条（超过 15 天）` : "没有超过 15 天的条目可清理",
+        });
+      })
       .catch(() => {
-        // 失败不换本地态——刷新让列表如实呈现（服务端没删的就是没删）
+        setFeedback({ tone: "error", text: "清理失败——没有删除任何内容，请稍后重试" });
       })
       .finally(() => {
         setPurging(false);
@@ -64,6 +72,18 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
           </button>
         )}
       </div>
+      {feedback !== null && (
+        <p
+          className={cn(
+            "mb-3 rounded-md border px-3 py-2 text-sm",
+            feedback.tone === "error"
+              ? "border-danger/40 bg-danger-soft text-danger"
+              : "border-line bg-canvas text-ink-muted",
+          )}
+        >
+          {feedback.text}
+        </p>
+      )}
       <ul className="flex flex-col gap-2">
         {rows.map((r) => {
           const { item } = r;
@@ -96,7 +116,19 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
                     title="从回收站恢复（回到删前的状态）"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void api.restore(item.id).then(onRefresh).catch(onRefresh);
+                      void api
+                        .restore(item.id)
+                        .then(() => {
+                          setFeedback(null);
+                          onRefresh();
+                        })
+                        .catch(() => {
+                          setFeedback({
+                            tone: "error",
+                            text: "恢复失败——这条仍在回收站，请稍后重试",
+                          });
+                          onRefresh();
+                        });
                     }}
                   >
                     <RotateCcw size={13} />

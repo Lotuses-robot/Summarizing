@@ -252,3 +252,69 @@ describe("设置弹层：收取规则（D-107）", () => {
     expect(puts[0]?.rules).toBe("esc 前存下");
   });
 });
+
+describe("设置弹层：收取规则的保存管道（D-107 评审修复）", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("blur 后立即 Esc：只发一次 PUT（脏标走 ref，同步防重复）", async () => {
+    const { puts } = stubRules();
+    render(<SettingsModal open onClose={() => {}} />);
+    const box = await screen.findByPlaceholderText(/拼多多砍一刀/);
+    fireEvent.change(box, { target: { value: "只应存一次" } });
+    fireEvent.blur(box); // 触发保存（同步清脏标）
+    handleEsc(); // 关闭 flush 再调一次——应被脏标挡住
+    await waitFor(() => expect(puts.length).toBeGreaterThan(0));
+    expect(puts).toHaveLength(1);
+  });
+
+  it("保存失败不藏掉编辑器（失败≠读不到），且仍可重试", async () => {
+    // 首次 PUT 失败
+    let fail = true;
+    const puts: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = fetchUrl(input);
+        const method = init?.method ?? "GET";
+        if (url.includes("/api/settings/ai")) {
+          return Promise.resolve(
+            jsonResponse({ baseUrl: "", model: "", apiKeyMasked: null, overridden: false }),
+          );
+        }
+        if (url.includes("/api/settings/rejection-rules")) {
+          if (method === "PUT") {
+            const parsed: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+            const rules =
+              typeof parsed === "object" && parsed !== null && "rules" in parsed
+                ? String(parsed.rules)
+                : "";
+            puts.push(rules);
+            if (fail) return Promise.reject(new Error("后端挂了"));
+            return Promise.resolve(jsonResponse({ rules }));
+          }
+          return Promise.resolve(jsonResponse({ rules: "" }));
+        }
+        if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<SettingsModal open onClose={() => {}} />);
+    const box = await screen.findByPlaceholderText(/拼多多砍一刀/);
+    fireEvent.change(box, { target: { value: "会失败一次" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(screen.getAllByText(/保存失败/).length).toBeGreaterThan(0));
+    // 编辑器还在（没有被"读不到"的整块替换），可以继续改并重试
+    expect(screen.getByPlaceholderText(/拼多多砍一刀/)).toBeInTheDocument();
+    fail = false;
+    fireEvent.change(box, { target: { value: "重试成功" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(puts).toHaveLength(2));
+    expect(puts[1]).toBe("重试成功");
+  });
+});

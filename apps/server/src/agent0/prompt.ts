@@ -3,6 +3,7 @@
 const CHANGE_FORMAT_DOC = `变更清单的确切格式（字段名必须逐字一致，禁止发明新字段）：
 {"changes":[
   {"action":"create_item",
+   "kind":"task 或 notice（事项=task；通知=notice，且不得含 dueDate 元素）",
    "elements":[
      {"label":"name","text":"事项语义名","note":null,"quotes":["原文片段"]},
      {"label":"dueDate","text":"2026-10-01T23:59:59 或 省略此元素","note":"推断依据 或 省略","quotes":["日期相关的原文片段"]},
@@ -13,6 +14,7 @@ const CHANGE_FORMAT_DOC = `变更清单的确切格式（字段名必须逐字�
    "doubtNote":null},
   {"action":"update_item",
    "itemId":"已有事项ID",
+   "kind":"可选：切换为 notice 或 task（不切换就省略此字段）",
    "elements":[{"label":"dueDate","text":"2026-10-15T23:59:59","note":null,"quotes":["原文片段"]}],
    "tags":{"":"要新增的标签","要删的旧标签":"","要改的旧标签":"改成的新标签"},
    "resolveDoubt":false},

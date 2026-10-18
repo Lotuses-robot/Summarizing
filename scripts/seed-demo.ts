@@ -435,10 +435,43 @@ ev(itemF, "元素:name", fragFrom(6, "本周六招新摊位值班"));
     },
     by: { actor: "agent0", model: "demo" },
   });
-  ev(notice.itemId, "元素:name", fragFrom(7, "数据结构课改到明理楼3楼上了"));
+  ev(notice.itemId, "元素:name", fragFrom(7, "数据结构课下周起改到明理楼3楼上课"));
   client
     .prepare("UPDATE item_versions SET at = ? WHERE id = ?")
     .run(wallClockAgo(3 * HOUR), notice.id);
+}
+
+// O. 回收站演示（007）：一条已被删的事项——进「回收站」页，可恢复
+{
+  const trashed = repo.appendItemVersion(db, {
+    itemId: randomUUID(),
+    action: "create_item",
+    detail: "从班级群提取：已过期的旧值班安排",
+    snapshot: {
+      elements: [{ label: "name", text: "上学期旧值班表（已过期）", note: null }],
+      tags: [],
+      status: "todo",
+      kind: "task",
+      doubtNote: null,
+    },
+    by: { actor: "agent0", model: "demo" },
+  });
+  repo.appendItemVersion(db, {
+    itemId: trashed.itemId,
+    action: "trash_item",
+    detail: "删除「上学期旧值班表（已过期）」",
+    snapshot: {
+      elements: [{ label: "name", text: "上学期旧值班表（已过期）", note: null }],
+      tags: [],
+      status: "trashed",
+      kind: "task",
+      doubtNote: null,
+    },
+    by: { actor: "用户", model: null },
+  });
+  client
+    .prepare("UPDATE item_versions SET at = ? WHERE item_id = ? AND action = 'trash_item'")
+    .run(wallClockAgo(2 * DAY), trashed.itemId);
 }
 
 // ── 已读标记：「新」微标只留给 G（图书馆还书）与 N（通知）──
@@ -526,6 +559,6 @@ repo.setAppSetting(
 
 db.$client.close();
 console.log(
-  `演示数据已写入账户 ${account.username}（密码 ${DEMO_PASSWORD}）：8 事项 / 8 批次 / 2 存疑 / 4 轮对话 / nc 设置 + 虚构 AI 配置`,
+  `演示数据已写入账户 ${account.username}（密码 ${DEMO_PASSWORD}）：8 事项 / 1 通知 / 1 回收站条目 / 9 批次 / 2 存疑 / 4 轮对话 / nc 设置 + 虚构 AI 配置`,
 );
 console.log("登录：npm run dev 后打开 http://localhost:5173（或发布包 start.cmd）");

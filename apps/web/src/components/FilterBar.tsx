@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { itemName, type Item } from "@summarizing/shared";
 import { cn } from "../lib/cn";
 import { pushEscLayer } from "../lib/escLayer";
 
@@ -6,6 +7,16 @@ import { pushEscLayer } from "../lib/escLayer";
 export interface BoardFilter {
   query: string; // 标题/tags 包含匹配
   tags: string[]; // 标签 token，AND 收窄
+}
+
+/** 筛选谓词**单一出处**（看板三段与通知页共用）：选中的 tag 全部必须携带（AND 收窄）；
+ *  查询串对语义名与 tags 做包含匹配。改筛选语义只改这里——两处各抄一份会静默漂移。 */
+export function matchesFilter(item: Item, filter: BoardFilter): boolean {
+  if (!filter.tags.every((t) => item.tags.includes(t))) return false;
+  const q = filter.query.trim();
+  if (q === "") return true;
+  const hay = [itemName(item.elements), ...item.tags];
+  return hay.some((s) => s.includes(q));
 }
 
 /** 顶部筛选栏（用户 2026-09-27 定）：整栏搜索框；输 `#` 唤起标签下拉（继续输自动匹配、

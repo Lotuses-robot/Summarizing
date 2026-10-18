@@ -13,7 +13,7 @@ import {
 import { api, setOnUnauthorized } from "./api";
 import { ActivityBar, type View } from "./components/ActivityBar";
 import { AuthShell } from "./components/AuthShell";
-import { FilterBar, type BoardFilter } from "./components/FilterBar";
+import { FilterBar, matchesFilter, type BoardFilter } from "./components/FilterBar";
 import { Board } from "./components/Board";
 import { NoticePanel } from "./components/NoticePanel";
 import { TrashPanel } from "./components/TrashPanel";
@@ -87,6 +87,7 @@ export default function App() {
     setBoard(null);
     setNotices(null);
     setTrash(null);
+    setTrashError(null);
     setUncertain([]);
     setSettingsOpen(false);
     setAccountOpen(false);
@@ -151,7 +152,9 @@ export default function App() {
       });
   }, []);
 
-  /** 拉回收站（007）：进页即拉（清理/恢复都即时刷新，不靠轮询兜）。 */
+  /** 拉回收站（007）：进页即拉（清理/恢复都即时刷新，不靠轮询兜）。
+   *  失败**必须可见**（红线「不许静默」）——否则空列表会被当成「回收站是空的」（假空态）。 */
+  const [trashError, setTrashError] = useState<string | null>(null);
   const loadTrash = useCallback(() => {
     const gen = genRef.current;
     api
@@ -159,9 +162,11 @@ export default function App() {
       .then((t) => {
         if (genRef.current !== gen) return;
         setTrash(t);
+        setTrashError(null);
       })
       .catch(() => {
-        // 回收站取失败不挂全站横幅（它是旁路视图）——进页时若失败，列表空态 + 下次进页重拉
+        if (genRef.current !== gen) return;
+        setTrashError("回收站拉取失败——列表可能不是最新的");
       });
   }, []);
 
@@ -274,8 +279,8 @@ export default function App() {
    *  形状防御：`notices` 字段缺席（异常载荷/接口降级）时按 0 计——徽标缺省不显示，
    *  不让一处脏数据把整个界面打白（与详情页「派生失败降级」同一取向）。 */
   const unreadNoticeCount = useMemo(() => {
-    const rows = notices?.notices;
-    return rows === undefined ? 0 : rows.filter((r) => !r.viewed).length;
+    const rows = notices?.notices ?? [];
+    return rows.filter((r) => !r.viewed).length;
   }, [notices]);
 
   /** 通知的标签全集（筛选栏用，与看板 allTags 同性质——只看通知自己的）。 */
@@ -284,20 +289,11 @@ export default function App() {
     return [...new Set(rows.flatMap((r) => r.item.tags))].sort();
   }, [notices]);
 
-  /** 通知筛选谓词：与看板同一套语义（tag 全带 + 文本匹配标题/tags），不另造机制。 */
-  const noticeVisible = useMemo(() => {
-    /** 一行通知是否通过当前筛选（选中的 tag 全带 + 查询串命中标题或 tag）。 */
-    const fn = (r: NoticeRow): boolean => {
-      if (!filter.tags.every((t) => r.item.tags.includes(t))) return false;
-      const q = filter.query.trim();
-      if (q !== "") {
-        const hay = [itemName(r.item.elements), ...r.item.tags];
-        if (!hay.some((s) => s.includes(q))) return false;
-      }
-      return true;
-    };
-    return fn;
-  }, [filter]);
+  /** 通知筛选谓词：语义单一出处 = FilterBar.matchesFilter（与看板共用，防两套真相）。 */
+  const noticeVisible = useCallback(
+    (r: NoticeRow): boolean => matchesFilter(r.item, filter),
+    [filter],
+  );
 
   // 认证闸门（hooks 全部就位之后的分支渲染）
   if (!authChecked) {
@@ -351,6 +347,7 @@ export default function App() {
         {/* 全视图横幅（D-89 评审 C1：审核页也必须有错误面——不许拿旧数据/假空态说事） */}
         {error !== null && <Banner text={error} />}
         {uncertainError !== null && <Banner text={uncertainError} />}
+        {trashError !== null && <Banner text={trashError} />}
 
         {view === "notice" ? (
           <>
