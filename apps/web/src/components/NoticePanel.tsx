@@ -39,22 +39,39 @@ export function NoticePanel({
     if (next !== null && viewedLocally.get(r.item.id) !== r.updatedAt) {
       setViewedLocally((cur) => new Map(cur).set(r.item.id, r.updatedAt));
       void api.viewed(r.item.id).catch(() => {
-        // 报已读失败不阻塞阅读——下一轮轮询会带服务端状态回来（微标最坏多亮一轮）
+        // 上报失败：**撤掉本地已读**——否则本地去重会抑制重试，未读徽标永久卡住；
+        // 撤掉后再次展开即重报（阅读本身不受影响）
+        setViewedLocally((cur) => {
+          const copy = new Map(cur);
+          copy.delete(r.item.id);
+          return copy;
+        });
       });
     }
   };
 
-  /** 深链（05§三）：展开目标行并滚到位；token 防同一深链被轮询重放。
-   *  行的 DOM id 与看板同款（row-<id>），布局稳定后滚动。 */
+  /** 深链（05§三）：展开目标行 + **点开即报已读**（与手动点开同一语义，FR-016）并滚到位；
+   *  token 防同一深链被轮询重放。行的 DOM id 与看板同款（row-<id>）。 */
   const handledToken = useRef(0);
   useEffect(() => {
     if (focus === null || focus.token === handledToken.current) return;
     handledToken.current = focus.token;
     setExpandedId(focus.id);
+    const row = notices.find((r) => r.item.id === focus.id);
+    if (row && viewedLocally.get(row.item.id) !== row.updatedAt) {
+      setViewedLocally((cur) => new Map(cur).set(row.item.id, row.updatedAt));
+      void api.viewed(row.item.id).catch(() => {
+        setViewedLocally((cur) => {
+          const copy = new Map(cur);
+          copy.delete(row.item.id);
+          return copy;
+        });
+      });
+    }
     window.setTimeout(() => {
       document.getElementById(`row-${focus.id}`)?.scrollIntoView({ block: "center" });
     }, 60);
-  }, [focus]);
+  }, [focus, notices, viewedLocally]);
 
   /** 错误条在空态之上渲染：删除失败常伴随列表变空，不能被「还没有通知」吞掉。 */
   const errorBanner =

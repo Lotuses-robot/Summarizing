@@ -27,7 +27,7 @@
   <a href="#"><img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind v4" /></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-每账户一库-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-437%20passing-brightgreen?style=flat-square" alt="tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-440%20passing-brightgreen?style=flat-square" alt="tests" /></a>
 </p>
 
 ## 它解决什么
@@ -73,7 +73,7 @@ npm run dev                # 打开 http://localhost:5173 登录 → 设置 → 
 装完之后，常用检查：
 
 ```bash
-npm test              # vitest（437 个用例）
+npm test              # vitest（440 个用例）
 npm run check         # 类型 + 代码规范 + 测试
 npm run check:dead    # 死代码检查
 npm run build -w @summarizing/web
@@ -112,7 +112,9 @@ npm run build -w @summarizing/web
 flowchart LR
     A["信源：群机器人 Webhook / 前台对话 / 粘贴"] --> R[("raw_inputs<br/>原文档案 · 永不丢失")]
     R --> G["agent0 消化裁决<br/>LLM 推理 + 行为围栏"]
-    G --> B["事项看板<br/>已排期 / 日期未知 / 已完成 / 已归档"]
+    G --> B["事项看板<br/>已排期 / 日期未知 / 已完成"]
+    G --> N["通知<br/>独立入口 · 不进看板"]
+    G --> T["回收站<br/>删除可恢复"]
     G --> U["存疑信息库<br/>等你决定"]
     G --> V[("item_versions<br/>全量快照链 · 可回看可撤回")]
     B <--> C["前台对话<br/>多轮工具循环"]

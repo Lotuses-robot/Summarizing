@@ -85,12 +85,29 @@ describe("双账户隔离（SC-001）", () => {
       { method: "GET" as const, url: `/api/items/${item.id}` },
       { method: "POST" as const, url: `/api/items/${item.id}/complete` },
       { method: "POST" as const, url: `/api/items/${item.id}/trash` },
+      { method: "POST" as const, url: `/api/items/${item.id}/restore` },
       { method: "POST" as const, url: `/api/items/${item.id}/viewed` },
     ];
     for (const req of attempts) {
       const res = await b.inject(req);
       expect(res.statusCode).toBe(404);
     }
+
+    // 列表面：B 的通知/回收站里不可能出现 A 的条目
+    const bTrash = await b.inject({ method: "GET", url: "/api/trash" });
+    expect(bTrash.json<{ rows: { item: { id: string } }[] }>().rows).toEqual([]);
+    const bNotices = await b.inject({ method: "GET", url: "/api/notices" });
+    expect(bNotices.json<{ notices: { item: { id: string } }[] }>().notices).toEqual([]);
+
+    // A 删掉它 → B 的一键清理不得碰到 A 的回收站
+    await a.inject({ method: "POST", url: `/api/items/${item.id}/trash` });
+    const bPurge = await b.inject({ method: "POST", url: "/api/trash/purge" });
+    expect(bPurge.statusCode).toBe(200);
+    expect(bPurge.json<{ purged: number }>().purged).toBe(0);
+    const aTrash = await a.inject({ method: "GET", url: "/api/trash" });
+    expect(aTrash.json<{ rows: { item: { id: string } }[] }>().rows.map((r) => r.item.id)).toEqual([
+      item.id,
+    ]);
 
     // 对照：A 自己打得通
     const own = await a.inject({ method: "GET", url: `/api/items/${item.id}` });
@@ -101,6 +118,13 @@ describe("双账户隔离（SC-001）", () => {
     const realm = await makeTestRealm();
     const probes = [
       { method: "GET" as const, url: "/api/board" },
+      { method: "GET" as const, url: "/api/notices" },
+      { method: "GET" as const, url: "/api/trash" },
+      { method: "POST" as const, url: "/api/trash/purge" },
+      { method: "GET" as const, url: "/api/settings/rejection-rules" },
+      { method: "PUT" as const, url: "/api/settings/rejection-rules", payload: { rules: "x" } },
+      { method: "POST" as const, url: "/api/items/x/trash" },
+      { method: "POST" as const, url: "/api/items/x/restore" },
       { method: "GET" as const, url: "/api/chat/history" },
       { method: "POST" as const, url: "/api/chat", payload: { message: "hi", history: [] } },
       { method: "GET" as const, url: "/api/sources" },

@@ -186,3 +186,19 @@ describe("NoticePanel：更新后重新标未读（OQ-11 前端半侧）", () =>
     expect(screen.getByText("新")).toBeInTheDocument();
   });
 });
+
+describe("NoticePanel：深链打开也报已读（FR-016）", () => {
+  it("focus 指向某条 → 展开并调 api.viewed", async () => {
+    const spy = vi.spyOn(api, "viewed").mockResolvedValue(undefined);
+    render(
+      <NoticePanel
+        notices={[notice()]}
+        filter={ALL}
+        onRefresh={() => {}}
+        focus={{ id: "n1", token: 1 }}
+      />,
+    );
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("n1"));
+    spy.mockRestore();
+  });
+});

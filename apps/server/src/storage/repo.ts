@@ -496,12 +496,17 @@ export function addEvidence(
 
 /** 列出某事项的全部证据来源（整链展开，不分主副不排序）。 */
 export function listEvidenceByItem(db: DbOrTx, itemId: string): EvidenceSource[] {
-  return db
-    .select()
-    .from(s.evidence)
-    .where(eq(s.evidence.itemId, itemId))
-    .all()
-    .map((r) => EvidenceSourceSchema.parse(r));
+  return (
+    db
+      .select()
+      .from(s.evidence)
+      .where(eq(s.evidence.itemId, itemId))
+      // 显式按落笔顺序（capturedAt；同刻按 rowid 破平）——「最近一条证据」等调用方依赖确定顺序，
+      // 无 ORDER BY 时读到的是 SQLite 的偶然返回序（评审：来源徽标可能显示旧批次）
+      .orderBy(asc(s.evidence.capturedAt), asc(sql`rowid`))
+      .all()
+      .map((r) => EvidenceSourceSchema.parse(r))
+  );
 }
 
 /** 标记事项已被用户打开过（幂等；「新」微标消除，用户 2026-09-27）。 */

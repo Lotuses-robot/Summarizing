@@ -14,8 +14,12 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [purging, setPurging] = useState(false);
+  /** 恢复在飞的行 id——与清理互斥（两者共用一个 feedback 槽，交错会互相覆盖提示）。 */
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   /** 清理/恢复的结果与失败必须可见（红线「不许静默」）：否则「0 条可清」与「失败」无法分辨。 */
   const [feedback, setFeedback] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  /** 清理与恢复互斥：一个在飞时另一个不可点（防提示互相覆盖）。 */
+  const busy = purging || restoringId !== null;
 
   /** 执行一键清理：服务端只删 >15d 的；结果如实回报（清了几条 / 失败原因）。 */
   const purge = () => {
@@ -70,7 +74,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
             "btn ml-auto shrink-0",
             confirming && "border-danger/60 bg-danger-soft text-danger",
           )}
-          disabled={purging}
+          disabled={busy}
           onClick={() => {
             if (!confirming) {
               setConfirming(true);
@@ -129,8 +133,11 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
                   <button
                     className="row-act"
                     title="从回收站恢复（回到删前的状态）"
+                    disabled={busy}
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (busy) return; // 清理/另一条恢复在飞——互斥，防提示互相覆盖
+                      setRestoringId(item.id);
                       void api
                         .restore(item.id)
                         .then(() => {
@@ -138,12 +145,14 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
                           onRefresh();
                         })
                         .catch(() => {
+                          // 404 常见于「刚被一键清理」——不要断言它还在（事实可能相反）
                           setFeedback({
                             tone: "error",
-                            text: "恢复失败——这条仍在回收站，请稍后重试",
+                            text: "恢复失败——这条可能已被清理，请刷新后重试",
                           });
                           onRefresh();
-                        });
+                        })
+                        .finally(() => setRestoringId(null));
                     }}
                   >
                     <RotateCcw size={13} />

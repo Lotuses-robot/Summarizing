@@ -98,12 +98,18 @@ function applyChanges(
         // 通知恒 todo（D-106 甲）：task→notice 切换时若有 done 态，归一为 todo——不因状态拒转
         //（用户定的"唯一约束=ddl 形状"），但切换后的状态必须满足目标 kind 的不变量
         const status = kind === "notice" ? "todo" : current.status;
+        // 版本史留痕说清「这次改了什么」——只为元素时不带空冒号；标签/分类/解疑各自成词
+        const changed: string[] = [];
+        if (item.elements.length > 0) changed.push(item.elements.map((e) => e.label).join("、"));
+        if (Object.keys(item.tags).length > 0) changed.push("标签");
+        if (item.kind !== undefined && item.kind !== current.kind) changed.push("分类");
+        if (item.resolveDoubt) changed.push("解除存疑");
         repo.appendItemVersion(tx, {
           itemId: current.id,
           action: "update_item",
-          detail: `更新${kind === "notice" ? "通知" : "事项"}「${itemName(elements)}」：${item.elements
-            .map((e) => e.label)
-            .join("、")}`,
+          detail: `更新${kind === "notice" ? "通知" : "事项"}「${itemName(elements)}」${
+            changed.length > 0 ? `：${changed.join("、")}` : ""
+          }`,
           snapshot: {
             elements,
             tags,
@@ -121,6 +127,8 @@ function applyChanges(
       case "resolve_doubt": {
         const current = repo.deriveItem(tx, item.itemId);
         if (!current) throw new Error(`item not found: ${item.itemId}`);
+        // 回收站条目只读（OQ-12）：写路径双保险（围栏是第一道；修正轮 await 窗口内可能被删）
+        if (current.status === "trashed") throw new Error(`回收站条目不可写：${item.itemId}`);
         repo.appendItemVersion(tx, {
           itemId: current.id,
           action: "resolve_doubt",
@@ -173,6 +181,18 @@ function applyChanges(
               by,
             });
             details.push(`留痕（目标缺失）：${item.note}`);
+            break;
+          }
+          if (current.status === "trashed") {
+            // 与「目标缺失」同款降级：回收站条目只读（OQ-12），不为一条已删目标回滚整批；
+            // 若硬写版本会把 trashedAt 重置为现在、令清理时钟错位
+            repo.appendPipelineEvent(tx, {
+              rawInputId: raw.id,
+              action: "digest_note",
+              detail: `${item.note}（目标事项 ${item.targetId} 在回收站，降级为批次留痕）`,
+              by,
+            });
+            details.push(`留痕（目标在回收站）：${item.note}`);
             break;
           }
           repo.appendItemVersion(tx, {

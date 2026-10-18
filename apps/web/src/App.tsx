@@ -80,6 +80,13 @@ export default function App() {
   /** 会话代次（评审修复）：登出/换号即 ++——在飞响应据此作废（A 的迟到数据不许落到 B 的界面）。 */
   const genRef = useRef(0);
 
+  /** 每类拉取的请求序号：**晚到的旧响应不覆盖新状态**（同会话内乱序防护——genRef 只防换号）。
+   *  轮询每 10s 一轮，网络抖动时旧请求可能后返回；异步动作（删除/恢复）后的即时刷新同理。 */
+  const boardSeq = useRef(0);
+  const noticesSeq = useRef(0);
+  const uncertainSeq = useRef(0);
+  const trashSeq = useRef(0);
+
   /** 统一「回到未登录」（单点拦截回调 + 登出共用）：清会话与数据态——并发 401 幂等。 */
   const handleUnauthenticated = useCallback(() => {
     genRef.current += 1;
@@ -121,38 +128,39 @@ export default function App() {
     };
   }, [handleUnauthenticated]);
 
-  /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。会话代次守卫：旧会话在飞响应丢弃。 */
+  /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。会话代次 + 请求序号守卫：旧响应丢弃。 */
   const loadBoard = useCallback(() => {
     const gen = genRef.current;
+    const seq = ++boardSeq.current;
     api
       .board()
       .then((b) => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== boardSeq.current) return;
         setBoard(b);
         setError(null); // 恢复连线就撤横幅——错误态不滞留
       })
       .catch(() => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== boardSeq.current) return;
         setError("后端服务未连接（apps/server 是否在跑？）");
       });
   }, []);
 
-  /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份。 */
   /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份。
    *  失败用**独立**错误态（别与看板共享 error——看板每 10s 成功轮询会把它清掉，
    *  通知页就会拿假空态说事）。 */
   const [noticesError, setNoticesError] = useState<string | null>(null);
   const loadNotices = useCallback(() => {
     const gen = genRef.current;
+    const seq = ++noticesSeq.current;
     api
       .notices()
       .then((n) => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== noticesSeq.current) return;
         setNotices(n);
         setNoticesError(null);
       })
       .catch(() => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== noticesSeq.current) return;
         setNoticesError("通知拉取失败——列表可能不是最新的");
       });
   }, []);
@@ -162,15 +170,16 @@ export default function App() {
   const [trashError, setTrashError] = useState<string | null>(null);
   const loadTrash = useCallback(() => {
     const gen = genRef.current;
+    const seq = ++trashSeq.current;
     api
       .trashList()
       .then((t) => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== trashSeq.current) return;
         setTrash(t);
         setTrashError(null);
       })
       .catch(() => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== trashSeq.current) return;
         setTrashError("回收站拉取失败——列表可能不是最新的");
       });
   }, []);
@@ -179,15 +188,16 @@ export default function App() {
    *  失败置可见错误（不静默——否则审核页会拿旧数据/假空态说事，评审 Critical）。 */
   const loadUncertain = useCallback(() => {
     const gen = genRef.current;
+    const seq = ++uncertainSeq.current;
     api
       .uncertain("open")
       .then((list) => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== uncertainSeq.current) return;
         setUncertain(list);
         setUncertainError(null);
       })
       .catch(() => {
-        if (genRef.current !== gen) return;
+        if (genRef.current !== gen || seq !== uncertainSeq.current) return;
         setUncertainError("存疑库拉取失败——列表与计数可能已过期");
       });
   }, []);

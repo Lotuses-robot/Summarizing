@@ -621,6 +621,26 @@ describe("通知与回收站接口（真实 HTTP 入口，007）", () => {
       by: { actor: "用户", model: null },
     });
 
+    // 证据片段 + 存疑条目：FR-009 三项「MUST NOT 被物理删除」里除 raw_inputs 外的两项
+    const frag = repo.getOrCreateFragment(t.db, "原始内容在这里", raw.id);
+    repo.addEvidence(t.db, {
+      itemId: old.id,
+      subject: "元素:name",
+      fragmentId: frag.id,
+      by: "test",
+    });
+    repo.insertUncertainInput(t.db, {
+      content: "与该条目相关的存疑原文",
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      eventTime: null,
+      receivedAt: "2026-09-27T12:00:00",
+      originRawInputId: raw.id,
+      needsHuman: 50,
+      reason: "测试",
+      createdAt: "2026-09-27T12:00:00",
+    });
+
     const purge = await t.inject({ method: "POST", url: "/api/trash/purge" });
     expect(purge.statusCode).toBe(200);
     expect(purge.json<{ purged: number }>().purged).toBe(1);
@@ -631,6 +651,9 @@ describe("通知与回收站接口（真实 HTTP 入口，007）", () => {
     // 原文档案不随信息删除（FR-009：证据终端不破）
     const rawStill = repo.getRawInput(t.db, raw.id);
     expect(rawStill?.content).toBe("原始内容在这里");
+    // fragments / uncertain_inputs 同样 MUST NOT 被删（FR-009 三项全覆盖，防测试只证三分之一）
+    expect(repo.getFragment(t.db, frag.id)).not.toBeNull();
+    expect(repo.listUncertainByStatus(t.db, "open")).toHaveLength(1);
     expect(repo.deriveHistory(t.db, old.id)).toHaveLength(0); // 老条目的版本链已物理删
   });
 });
@@ -828,5 +851,50 @@ describe("trashedAtOf 边界（评审：时间戳乱序）", () => {
       .prepare("UPDATE item_versions SET at = ? WHERE item_id = ? AND action = 'trash_item'")
       .run("2000-01-01T00:00:00", item.id);
     expect(repo.trashedAtOf(db, item.id)).toBe("2000-01-01T00:00:00");
+  });
+});
+
+describe("写路径双保险（评审：修正轮窗口内被删的条目）", () => {
+  it("resolve_doubt 打 trashed → 抛错（整批回滚，批次可见失败）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const item = createItem(db, raw, { name: "被删的存疑" });
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+    expect(() =>
+      executeChanges(db, raw, [{ action: "resolve_doubt", itemId: item.id, note: "解除" }], {
+        actor: "agent0",
+        model: "test",
+      }),
+    ).toThrow(/回收站/);
+    // 不得留下任何新版本（事务回滚）
+    expect(repo.deriveItem(db, item.id)?.doubtNote).toBe(item.doubtNote);
+  });
+
+  it("record_note 打 trashed → 降级为批次留痕（不炸整批、不改 trashedAt）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const item = createItem(db, raw, { name: "被删的事项" });
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+    const before = repo.deriveHistory(db, item.id).length;
+    const { details } = executeChanges(
+      db,
+      raw,
+      [{ action: "record_note", targetType: "item", targetId: item.id, note: "备注" }],
+      { actor: "agent0", model: "test" },
+    );
+    expect(details.join("")).toContain("回收站");
+    expect(repo.deriveHistory(db, item.id).length).toBe(before); // 没写新版本（trashedAt 不被重置）
   });
 });

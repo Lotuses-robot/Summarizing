@@ -135,6 +135,29 @@ export async function digestRawInput(
       }
     }
 
+    // 修正轮里有 await（LLM 调用，秒级窗口）——期间用户可能已把首轮通过的某条删进回收站。
+    // 执行前按**当前**状态复检一遍围栏：漂移项降为拒收并留痕，而不是让执行器抛错把整批回滚
+    // （与「一条坏 target 不拖垮整批」的既有取向一致：record_note 降级、resolve_uncertain 幂等跳过）。
+    if (rejected.length > 0) {
+      const recheck = runFence(db, raw, { changes: accepted });
+      if (recheck.rejected.length > 0) {
+        accepted.splice(0, accepted.length, ...recheck.accepted);
+        for (const r of recheck.rejected) {
+          rejected.push(r);
+          appendPipelineEventBestEffort(
+            db,
+            raw.id,
+            {
+              action: "fence_reject",
+              detail: `执行前复检拒收：${r.reason}`,
+              payload: r.item,
+            },
+            by,
+          );
+        }
+      }
+    }
+
     const { details } = executeChanges(db, raw, accepted, by);
 
     // 谓词与计数同源（details.length）——执行器会静默跳过空 elements 的项，
