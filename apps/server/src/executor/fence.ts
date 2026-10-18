@@ -23,20 +23,83 @@ export interface FenceResult {
   rejected: { item: ChangeItem; reason: string }[];
 }
 
+/** 批内投影状态：同一批里对同一条的多次改动，后续项必须按**前面已接受项应用后**的状态校验。
+ *  （只按批前 DB 快照校验会被绕过：先 update kind=notice、再 update 加 dueDate → 通知带 ddl。） */
+interface ProjectedState {
+  kind: Item["kind"];
+  hasDueDate: boolean;
+  status: Item["status"];
+}
+
+/** 取某条的批内投影（没有则从 DB 派生一份**并记入 map**）；不存在返回 null。 */
+function projectedOf(
+  db: Db,
+  id: string,
+  projected: Map<string, ProjectedState>,
+): ProjectedState | null {
+  const p = projected.get(id);
+  if (p !== undefined) return p;
+  const current = repo.deriveItem(db, id);
+  if (!current) return null;
+  const state: ProjectedState = {
+    kind: current.kind,
+    hasDueDate: current.elements.some((e) => e.label === "dueDate"),
+    status: current.status,
+  };
+  // 记入 map：后续 applyProjection 在同一对象上折叠已接受项的效果
+  projected.set(id, state);
+  return state;
+}
+
 /** 围栏主入口：逐项校验变更清单，产出「接受/拒收」两组（拒收带原因，01§4.10④）。 */
 export function runFence(db: Db, raw: RawInput, list: ChangeList): FenceResult {
   const accepted: ChangeItem[] = [];
   const rejected: FenceResult["rejected"] = [];
+  // 批内投影：与执行器同序应用，保证「同批多次改动」看到彼此的效果
+  const projected = new Map<string, ProjectedState>();
 
   for (const item of list.changes) {
-    const reason = checkItem(db, raw, item);
+    const reason = checkItem(db, raw, item, projected);
     if (reason === null) {
       accepted.push(item);
+      applyProjection(item, projected);
     } else {
       rejected.push({ item, reason });
     }
   }
   return { accepted, rejected };
+}
+
+/** 把一条已接受的变更折叠进投影（与执行器的落笔语义保持一致）。 */
+function applyProjection(item: ChangeItem, projected: Map<string, ProjectedState>): void {
+  switch (item.action) {
+    case "update_item": {
+      const p = projected.get(item.itemId);
+      if (!p) return;
+      const kind = item.kind ?? p.kind;
+      projected.set(item.itemId, {
+        kind,
+        hasDueDate: p.hasDueDate || item.elements.some((e) => e.label === "dueDate"),
+        // 与执行器一致：转 notice 时状态归一为 todo
+        status: kind === "notice" ? "todo" : p.status,
+      });
+      return;
+    }
+    case "complete_item": {
+      const p = projected.get(item.itemId);
+      if (p) projected.set(item.itemId, { ...p, status: "done" });
+      return;
+    }
+    // 其余动作不改 kind/元素/status，无需折叠进投影：
+    // create_item 由执行器生成新 id（同批后续项无从引用）；resolve_doubt/record_note 只改留存字段；
+    // park_uncertain/resolve_uncertain 不碰事项版本链。
+    case "create_item":
+    case "resolve_doubt":
+    case "record_note":
+    case "park_uncertain":
+    case "resolve_uncertain":
+      return;
+  }
 }
 
 /** 模型输出文本 → ChangeList；不合规返回 null（由调用方决定重试）。容错解析与 chat 共用 parseModelJson。 */
@@ -51,22 +114,26 @@ export function parseChangeList(text: string): ChangeList | null {
 function checkKindDdl(
   kind: Item["kind"],
   patchElements: { label: string }[],
-  currentElements: { label: string }[] | null,
+  existingHasDueDate: boolean,
 ): string | null {
   // task 侧无额外形状要求：dueDate 元素可缺席（= 日期未知）。"可留空"在结构上就是「没有这个元素」
   //（schema 里 dueDate 元素的 text 只能是墙钟串或 null，不会出现"空字符串元素"）。
   if (kind !== "notice") return null;
-  const hasDue =
-    patchElements.some((e) => e.label === "dueDate") ||
-    (currentElements?.some((e) => e.label === "dueDate") ?? false);
+  const hasDue = patchElements.some((e) => e.label === "dueDate") || existingHasDueDate;
   if (hasDue) {
     return "通知（kind=notice）不得含 dueDate 元素——通知无 ddl 是结构红线（整条拒收）";
   }
   return null;
 }
 
-/** 单项行为校验：ID 存在性 / 元素格式（ElementSchema）/ 语义名恰好一个 / 引文逐字；通过返回 null。 */
-function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
+/** 单项行为校验：ID 存在性 / 元素格式（ElementSchema）/ 语义名恰好一个 / 引文逐字；通过返回 null。
+ *  `projected` = 批内投影（同批前面已接受项的效果），后续项按它校验而非只看 DB。 */
+function checkItem(
+  db: Db,
+  raw: RawInput,
+  item: ChangeItem,
+  projected: Map<string, ProjectedState>,
+): string | null {
   switch (item.action) {
     case "create_item": {
       const names = item.elements.filter((e) => e.label === "name");
@@ -79,18 +146,20 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
         const quoteErr = checkQuotes(el, raw.content);
         if (quoteErr !== null) return quoteErr;
       }
-      const kindErr = checkKindDdl(item.kind ?? "task", item.elements, null);
+      const kindErr = checkKindDdl(item.kind ?? "task", item.elements, false);
       if (kindErr !== null) return kindErr;
       return checkMultimodalTag(item.elements, item.tags);
     }
     case "update_item": {
       const current = repo.deriveItem(db, item.itemId);
-      if (!current) {
+      const state = projectedOf(db, item.itemId, projected);
+      if (!current || !state) {
         return `itemId 不存在: ${item.itemId}`;
       }
       // 回收站条目只读（007 OQ-12）：trashed 视为不可写——要改先恢复
-      // （防 digest 竞态把已删条目悄悄改活/改内容）
-      if (current.status === "trashed") {
+      // （防 digest 竞态把已删条目悄悄改活/改内容）；按批内投影判（同批前面可把它删了？不会——
+      // 变更词表没有删除动作，这里用投影只为状态/种类一致性）
+      if (state.status === "trashed") {
         return `itemId 在回收站（trashed）：${item.itemId}——不可写，要改先从回收站恢复`;
       }
       // elements 不得动固定元素 name（改语义名走 create_item；防双 name 投毒）
@@ -105,7 +174,8 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
       }
       // 分类轴切换的 ddl 形状（007 FR-014）：按「改动应用后的元素集」判——
       // 元素只增改不删，故 task 已带 dueDate 时转 notice 无法满足「通知无 ddl」→ 整条拒。
-      const kindErr = checkKindDdl(item.kind ?? current.kind, item.elements, current.elements);
+      // ⚠️ 按**批内投影**判：同批先切 notice、再加 dueDate 的第二条必须被拒（否则绕过红线）。
+      const kindErr = checkKindDdl(item.kind ?? state.kind, item.elements, state.hasDueDate);
       if (kindErr !== null) return kindErr;
       // 多模态强制按「改动应用后的标签集」判（读图内容并进已有事项时，改动 map 里带上「多模态/图片」即可）
       return checkMultimodalTag(item.elements, applyTagChanges(current.tags, item.tags));
@@ -113,15 +183,17 @@ function checkItem(db: Db, raw: RawInput, item: ChangeItem): string | null {
     case "resolve_doubt":
     case "complete_item": {
       const target = repo.deriveItem(db, item.itemId);
-      if (!target) {
+      const state = projectedOf(db, item.itemId, projected);
+      if (!target || !state) {
         return `itemId 不存在: ${item.itemId}`;
       }
       // 回收站条目只读（007 OQ-12）：trashed 视为不可写——要改先恢复
-      if (target.status === "trashed") {
+      if (state.status === "trashed") {
         return `itemId 在回收站（trashed）：${item.itemId}——不可写，要改先从回收站恢复`;
       }
-      // 通知不参与完成演化（007 US2-2）：按 kind 判，不靠 status 白名单（通知 status 恒 todo）
-      if (item.action === "complete_item" && target.kind === "notice") {
+      // 通知不参与完成演化（007 US2-2）：按 kind 判，不靠 status 白名单（通知 status 恒 todo）；
+      // 按批内投影判——同批先切成 notice、再 complete 的形态必须被拒。
+      if (item.action === "complete_item" && state.kind === "notice") {
         return "通知（kind=notice）不参与完成演化——不得 complete_item";
       }
       return null;

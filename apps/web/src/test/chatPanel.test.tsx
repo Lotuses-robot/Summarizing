@@ -69,7 +69,7 @@ describe("ChatPanel（对话面板，05§四）", () => {
     expect(await screen.findByText("有 1 件：英语作业。")).toBeInTheDocument();
     expect(screen.getByText("查了看板")).toBeInTheDocument();
     expect(screen.getByText("看了「英语作业」")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("在看板中定位这条事项"));
+    fireEvent.click(screen.getByTitle("定位这条信息"));
     expect(onFocus).toHaveBeenCalledWith("it1");
     // 首条消息无历史（空数组），当前消息在 body
   });

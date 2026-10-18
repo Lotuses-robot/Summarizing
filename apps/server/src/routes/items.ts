@@ -105,11 +105,16 @@ export function registerItemRoutes(app: FastifyInstance): void {
     const item = repo.deriveItem(req.space.db, id);
     if (!item) return reply.code(404).send({ error: "事项不存在" });
     if (item.status !== "trashed") return item; // 已在正常态：原样返回，不落版本
+    const restoring = repo.preTrashStatus(req.space.db, id);
+    if (restoring === null) {
+      // 删前状态不可考（整条链全 trashed/异常）——不编造 todo，如实拒
+      return reply.code(409).send({ error: "删前状态不可考，无法恢复（数据异常）" });
+    }
     repo.appendItemVersion(req.space.db, {
       itemId: id,
       action: "restore_item",
       detail: `从回收站恢复「${itemName(item.elements)}」`,
-      snapshot: { ...item, status: repo.preTrashStatus(req.space.db, id) },
+      snapshot: { ...item, status: restoring },
       by: { actor: "用户", model: null },
     });
     return repo.deriveItem(req.space.db, id);

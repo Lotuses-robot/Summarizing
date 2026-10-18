@@ -244,3 +244,23 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     expect(mark).not.toBeInTheDocument();
   });
 });
+
+describe("通知展开体不显示 [ddl]（D-106：通知无 ddl）", () => {
+  it("kind=notice → 基本信息里没有 [ddl] 行（不说「未知」）", async () => {
+    const detail = makeDetail({
+      item: {
+        id: "n1",
+        elements: [{ label: "name", text: "课改到明理楼3楼" }],
+        tags: [],
+        status: "todo",
+        kind: "notice",
+        doubtNote: null,
+      },
+    });
+    stubFetch(detail);
+    render(<ItemBody id="n1" />);
+    await waitFor(() => expect(screen.getByText("基本信息")).toBeInTheDocument());
+    expect(screen.queryByText("[ddl]")).not.toBeInTheDocument();
+    expect(screen.queryByText("未知")).not.toBeInTheDocument();
+  });
+});

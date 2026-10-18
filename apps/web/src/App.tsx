@@ -86,6 +86,7 @@ export default function App() {
     setMe(null);
     setBoard(null);
     setNotices(null);
+    setNoticesError(null);
     setTrash(null);
     setTrashError(null);
     setUncertain([]);
@@ -137,6 +138,10 @@ export default function App() {
   }, []);
 
   /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份。 */
+  /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份。
+   *  失败用**独立**错误态（别与看板共享 error——看板每 10s 成功轮询会把它清掉，
+   *  通知页就会拿假空态说事）。 */
+  const [noticesError, setNoticesError] = useState<string | null>(null);
   const loadNotices = useCallback(() => {
     const gen = genRef.current;
     api
@@ -144,11 +149,11 @@ export default function App() {
       .then((n) => {
         if (genRef.current !== gen) return;
         setNotices(n);
-        setError(null); // 恢复连线就撤横幅——错误态不滞留
+        setNoticesError(null);
       })
       .catch(() => {
         if (genRef.current !== gen) return;
-        setError("后端服务未连接（apps/server 是否在跑？）");
+        setNoticesError("通知拉取失败——列表可能不是最新的");
       });
   }, []);
 
@@ -243,8 +248,11 @@ export default function App() {
   };
 
   /** 事项 chips 深链（05§三）：切回看板 + 清筛选 + 收起面板（记忆同步）+ 交看板定位展开。 */
+  /** 事项 chips 深链（05§三）：按 id 所在视图切过去 + 清筛选 + 收起面板 + 交出定位。
+   *  通知不在看板——命中通知时切到通知页（否则 chips 点了会"什么也没发生"）。 */
   const requestFocus = (id: string) => {
-    setView("board");
+    const inNotices = notices?.notices.some((r) => r.item.id === id) ?? false;
+    setView(inNotices ? "notice" : "board");
     setFilter({ query: "", tags: [] });
     setChat(false);
     setFocus({ id, token: Date.now() });
@@ -346,6 +354,7 @@ export default function App() {
       <div ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
         {/* 全视图横幅（D-89 评审 C1：审核页也必须有错误面——不许拿旧数据/假空态说事） */}
         {error !== null && <Banner text={error} />}
+        {noticesError !== null && <Banner text={noticesError} />}
         {uncertainError !== null && <Banner text={uncertainError} />}
         {trashError !== null && <Banner text={trashError} />}
 
@@ -359,6 +368,7 @@ export default function App() {
               notices={notices?.notices ?? []}
               filter={noticeVisible}
               onRefresh={loadNotices}
+              focus={focus}
             />{" "}
           </>
         ) : view === "uncertain" ? (

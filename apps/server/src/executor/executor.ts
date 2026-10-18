@@ -75,6 +75,8 @@ function applyChanges(
       case "update_item": {
         const current = repo.deriveItem(tx, item.itemId);
         if (!current) throw new Error(`item not found: ${item.itemId}`); // 围栏已验，双保险
+        // 回收站条目只读（OQ-12）：要改先恢复（写路径双保险，围栏是第一道）
+        if (current.status === "trashed") throw new Error(`回收站条目不可写：${item.itemId}`);
         // 空 elements、无标签改动、不切换 kind、也不解除存疑 → 无任何变化，不落无意义版本（版本链只增，噪声要控）
         if (
           item.elements.length === 0 &&
@@ -89,6 +91,10 @@ function applyChanges(
         // 标签改动 map（旧→新：增/删/改，D-105）——单一出处 shared applyTagChanges
         const tags = applyTagChanges(current.tags, item.tags);
         const kind = item.kind ?? current.kind; // 分类轴（007）：缺席=沿用，显式=切换（ddl 形状已由围栏校验）
+        // 写路径双保险（围栏是第一道）：通知不得含 dueDate——直接调用执行器/未来新写入口也拦得住
+        if (kind === "notice" && elements.some((e) => e.label === "dueDate")) {
+          throw new Error(`通知不得含 dueDate 元素：${current.id}`); // 事务回滚，批次可见失败
+        }
         // 通知恒 todo（D-106 甲）：task→notice 切换时若有 done 态，归一为 todo——不因状态拒转
         //（用户定的"唯一约束=ddl 形状"），但切换后的状态必须满足目标 kind 的不变量
         const status = kind === "notice" ? "todo" : current.status;
@@ -134,6 +140,10 @@ function applyChanges(
       case "complete_item": {
         const current = repo.deriveItem(tx, item.itemId);
         if (!current) throw new Error(`item not found: ${item.itemId}`);
+        // 写路径双保险（围栏是第一道）：通知不参与完成演化
+        if (current.kind === "notice") throw new Error(`通知不参与完成演化：${item.itemId}`);
+        // 回收站条目只读（OQ-12）：要改先恢复
+        if (current.status === "trashed") throw new Error(`回收站条目不可写：${item.itemId}`);
         repo.appendItemVersion(tx, {
           itemId: current.id,
           action: "complete_item",

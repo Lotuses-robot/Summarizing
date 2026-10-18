@@ -107,34 +107,40 @@ export function ItemBody({ id }: { id: string }) {
     <div className="fit-text text-sm">
       <div className="p-3">
         <h3 className="text-sm font-semibold">基本信息</h3>
-        <p className="mt-2">
-          <b className="text-ink-muted">[ddl]</b>{" "}
-          {dueText !== null ? (
-            <>
-              {fmtFullTime(dueText)}
-              {dueRelative !== null && (
-                <span className="ml-1.5 text-xs text-ink-muted">（{dueRelative}）</span>
-              )}
-              {/* 「推断」= 行内后缀开关（与「· 证据(n)」同款，用户 2026-09-30 走查定）：
+        {/* 通知无 ddl（结构上就没有 dueDate）——不渲染 [ddl] 行（同 executor 摘要口径：
+            对通知说「未知/日期未知」是噪声，D-106） */}
+        {item.kind === "task" && (
+          <>
+            <p className="mt-2">
+              <b className="text-ink-muted">[ddl]</b>{" "}
+              {dueText !== null ? (
+                <>
+                  {fmtFullTime(dueText)}
+                  {dueRelative !== null && (
+                    <span className="ml-1.5 text-xs text-ink-muted">（{dueRelative}）</span>
+                  )}
+                  {/* 「推断」= 行内后缀开关（与「· 证据(n)」同款，用户 2026-09-30 走查定）：
                   点开/收起说明文字（样式同引文块）。哨兵键带 @ 前缀——不与自由元素 label 撞键 */}
-              {dueNote !== null && (
-                <button
-                  className="cursor-pointer text-xs text-accent hover:underline"
-                  onClick={() => toggleQuotes(DDL_NOTE_KEY)}
-                >
-                  {" "}
-                  · 推断
-                </button>
+                  {dueNote !== null && (
+                    <button
+                      className="cursor-pointer text-xs text-accent hover:underline"
+                      onClick={() => toggleQuotes(DDL_NOTE_KEY)}
+                    >
+                      {" "}
+                      · 推断
+                    </button>
+                  )}
+                </>
+              ) : (
+                <span className="text-ink-muted">未知</span>
               )}
-            </>
-          ) : (
-            <span className="text-ink-muted">未知</span>
-          )}
-        </p>
-        {dueNote !== null && openQuotes.includes(DDL_NOTE_KEY) && (
-          <blockquote className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted">
-            {dueNote}
-          </blockquote>
+            </p>
+            {dueNote !== null && openQuotes.includes(DDL_NOTE_KEY) && (
+              <blockquote className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted">
+                {dueNote}
+              </blockquote>
+            )}
+          </>
         )}
         {summaryElement !== undefined && (
           <div className="mt-2">

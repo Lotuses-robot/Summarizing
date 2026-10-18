@@ -334,6 +334,8 @@ export function Board({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [viewedLocally, setViewedLocally] = useState<ReadonlySet<string>>(new Set());
+  /** 行内快捷动作失败必须可见（红线「不许静默」）。 */
+  const [actionError, setActionError] = useState<string | null>(null);
   const [folded, setFolded] = useState<Record<SectionKey, boolean>>(() => ({
     undated: loadSectionFold("undated"),
     scheduled: loadSectionFold("scheduled"),
@@ -452,10 +454,19 @@ export function Board({
           : api.trash(id);
     void p
       .then(() => {
+        setActionError(null);
         setExpandedId(null);
         onRefresh();
       })
-      .catch(() => onRefresh());
+      .catch(() => {
+        // 失败必须可见（红线「不许静默」）：否则用户分不清「没点中」与「删失败了」
+        setActionError(
+          action === "trash"
+            ? "删除失败——这条还在，请稍后重试"
+            : "操作失败——状态没有改变，请稍后重试",
+        );
+        onRefresh();
+      });
   };
 
   /** 深链（05§三）：展开所在段 → 展开行 → 布局稳定后滚到行并短促高亮（清筛选由 App 统一做）。
@@ -499,6 +510,11 @@ export function Board({
 
   return (
     <main className="space-y-4 p-4">
+      {actionError !== null && (
+        <p className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+          {actionError}
+        </p>
+      )}
       {sections.map((s) => (
         <Section
           key={s.key}

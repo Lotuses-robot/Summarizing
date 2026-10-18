@@ -172,3 +172,17 @@ describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
     expect(screen.queryByText("未知来源")).not.toBeInTheDocument(); // 不编造
   });
 });
+
+describe("NoticePanel：更新后重新标未读（OQ-11 前端半侧）", () => {
+  it("同一次更新内点开过 → 不再亮「新」；updatedAt 变了 → 重新亮", () => {
+    const r1 = notice({ updatedAt: "2026-10-17 10:00" });
+    const { rerender } = render(<NoticePanel notices={[r1]} filter={ALL} onRefresh={() => {}} />);
+    fireEvent.click(screen.getByText("数据结构课改到明理楼3楼"));
+    // 同一次更新：本地已读生效，微标消失（服务端 viewed 仍 false 也不亮）
+    expect(screen.queryByText("新")).not.toBeInTheDocument();
+    // 模拟 agent0 更新（updatedAt 变）→ 应重新亮「新」
+    const r2 = notice({ updatedAt: "2026-10-18 09:00" });
+    rerender(<NoticePanel notices={[r2]} filter={ALL} onRefresh={() => {}} />);
+    expect(screen.getByText("新")).toBeInTheDocument();
+  });
+});

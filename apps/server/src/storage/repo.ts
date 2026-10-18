@@ -188,22 +188,26 @@ export function completedAtOf(db: DbOrTx, itemId: string): string | null {
   return null;
 }
 
-/** 进入「回收站」的时刻（trashedAt：版本链末条 status=trashed 的 at；null = 从未删除）。
- *  同 completedAtOf 的形状——回收站排序与「一键清理 >15d」都以它为据（进入时刻，非创建时刻）。 */
+/** 进入「回收站」的时刻（trashedAt：版本链**从新到旧找最后一条 status=trashed** 的 at；
+ *  null = 从未删除）。同 completedAtOf 的形状——回收站排序与「一键清理 >15d」都以它为据。
+ *  ⚠️ 循环到 index 0（completedAtOf 需要前一条，故从 1 起；这里没有"前一条"语义）——
+ *  时间戳乱序（时钟回拨/回填历史）时 trashed 版本可能排在首位，漏查会让该条静默丢出回收站。 */
 export function trashedAtOf(db: DbOrTx, itemId: string): string | null {
   const history = deriveHistory(db, itemId);
-  for (let i = history.length - 1; i >= 1; i--) {
-    const cur = history[i];
-    if (cur && cur.snapshot.status === "trashed") {
-      return cur.at;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const v = history[i];
+    if (v && v.snapshot.status === "trashed") {
+      return v.at;
     }
   }
   return null;
 }
 
 /** 删前的处置状态（回收站「恢复」回删前的值用）：自版本链最新向旧找第一个「非 trashed」的版本。
- *  按状态而非 action 跳过——防 trashed 期间混入的其它状态版本顶链导致恢复失效。 */
-export function preTrashStatus(db: DbOrTx, itemId: string): Item["status"] {
+ *  按状态而非 action 跳过——防 trashed 期间混入的其它状态版本顶链导致恢复失效。
+ *  **整条链全为 trashed / 为空 → null**（不编造恢复状态——「结构容错≠语义兜底」，
+ *  调用方据此报「删前状态不可考」而不是静默还原成 todo）。 */
+export function preTrashStatus(db: DbOrTx, itemId: string): Item["status"] | null {
   const history = deriveHistory(db, itemId);
   for (let i = history.length - 1; i >= 0; i--) {
     const v = history[i];
@@ -211,7 +215,7 @@ export function preTrashStatus(db: DbOrTx, itemId: string): Item["status"] {
       return v.snapshot.status;
     }
   }
-  return "todo";
+  return null;
 }
 
 /** 派生单个事项；不存在（无任何版本）返回 null。 */
@@ -733,7 +737,7 @@ export function purgeTrashed(tx: DbOrTx): {
       itemId: r.item.id,
       trashedAt: at,
       title: r.item.elements.find((e) => e.label === "name")?.text ?? "（无名）",
-      preStatus: preTrashStatus(tx, r.item.id),
+      preStatus: preTrashStatus(tx, r.item.id) ?? "未知", // 不可考时如实记"未知"，不编造
     });
   }
 

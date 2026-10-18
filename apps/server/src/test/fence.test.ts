@@ -485,3 +485,72 @@ describe("围栏 007：kind 与 ddl 形状", () => {
     expect(r.rejected[0]?.reason).toMatch(/回收站/);
   });
 });
+
+describe("围栏 007：批内投影（同批多次改动按序校验）", () => {
+  /** 造一条无 ddl 的 task（可切 notice）。 */
+  function seedTask(db: ReturnType<typeof makeDb>): string {
+    repo.appendItemVersion(db, {
+      itemId: "x1",
+      action: "create_item",
+      detail: "seed",
+      snapshot: {
+        elements: [{ label: "name", text: "数据结构 老师说下周要交第三次作业" }],
+        tags: [],
+        status: "todo",
+        kind: "task",
+        doubtNote: null,
+      },
+      by: { actor: "t", model: null },
+    });
+    return "x1";
+  }
+
+  it("同批先切 notice、再加 dueDate → 第二条被拒（批前快照会放行，投影必须拦住）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const id = seedTask(db);
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "update_item",
+          itemId: id,
+          kind: "notice",
+          elements: [],
+          tags: {},
+          resolveDoubt: false,
+        },
+        {
+          action: "update_item",
+          itemId: id,
+          elements: [{ label: "dueDate", text: "2026-09-24T22:00:00", note: null, quotes: [] }],
+          tags: {},
+          resolveDoubt: false,
+        },
+      ],
+    });
+    expect(r.accepted).toHaveLength(1); // 第一条（切 notice）过
+    expect(r.rejected).toHaveLength(1);
+    expect(r.rejected[0]?.reason).toMatch(/dueDate/);
+  });
+
+  it("同批先切 notice、再 complete → complete 被拒（通知不参与完成演化）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const id = seedTask(db);
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "update_item",
+          itemId: id,
+          kind: "notice",
+          elements: [],
+          tags: {},
+          resolveDoubt: false,
+        },
+        { action: "complete_item", itemId: id },
+      ],
+    });
+    expect(r.accepted).toHaveLength(1);
+    expect(r.rejected[0]?.reason).toMatch(/通知/);
+  });
+});

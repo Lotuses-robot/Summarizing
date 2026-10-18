@@ -58,7 +58,7 @@ function createItem(
   return found;
 }
 
-describe("buildBoard（状态制五段，D-80）", () => {
+describe("buildBoard（状态制三段；D-80 五段 → 007 三段）", () => {
   it("三段互斥：日期未知、已排期按 ddl 升序（时间钉死防墙钟漂移）；doubtNote 不再影响分段（D-89）", () => {
     vi.useFakeTimers();
     vi.setSystemTime(parseWallClock("2026-09-26T12:00:00"));
@@ -495,11 +495,13 @@ describe("回收站（007 US3）", () => {
     expect(history.map((v) => v.snapshot.status)).toEqual(["todo", "trashed"]);
 
     // 复活：status 回到删前的值（preTrashStatus 走版本链）
+    const restoring = repo.preTrashStatus(db, item.id);
+    expect(restoring).not.toBeNull(); // 这条链有 todo 版本，应可考
     repo.appendItemVersion(db, {
       itemId: item.id,
       action: "restore_item",
       detail: "从回收站恢复「要删的事项」",
-      snapshot: { ...item, status: repo.preTrashStatus(db, item.id) },
+      snapshot: { ...item, status: restoring ?? "todo" },
       by: { actor: "用户", model: null },
     });
     expect(deriveTrashed(db).rows).toHaveLength(0);
@@ -805,5 +807,26 @@ describe("状态不变量守卫（007：路由层与版本链唯一写路径）"
     const after = repo.deriveItem(db, task.id);
     expect(after?.kind).toBe("notice");
     expect(after?.status).toBe("todo");
+  });
+});
+
+describe("trashedAtOf 边界（评审：时间戳乱序）", () => {
+  it("trash 版本排在链首（时间戳回拨/回填）→ 仍能取到 trashedAt，不静默丢出回收站", () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const item = createItem(db, raw, { name: "乱序条目" });
+    // 先写 trash，再把它回填到很早的 at（模拟时钟回拨）
+    repo.appendItemVersion(db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+    // 直接改库把 trash 行挪到最早
+    db.$client
+      .prepare("UPDATE item_versions SET at = ? WHERE item_id = ? AND action = 'trash_item'")
+      .run("2000-01-01T00:00:00", item.id);
+    expect(repo.trashedAtOf(db, item.id)).toBe("2000-01-01T00:00:00");
   });
 });

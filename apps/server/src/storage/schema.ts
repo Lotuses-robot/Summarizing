@@ -57,7 +57,7 @@ export const rawInputs = sqliteTable("raw_inputs", {
 });
 
 // 事项已读标记（用户 2026-09-27：「新」微标点开即消）：item 级一面标记，不进版本链/编辑列表。
-// 归档行的撤回归档靠版本链，这张表只服务「新」微标。
+// 行的恢复靠版本链，这张表只服务「新」微标与通知已读。
 export const itemViews = sqliteTable("item_views", {
   itemId: text("item_id").primaryKey(),
   viewedAt: text("viewed_at").notNull(), // 只写不读：留痕定位（何时打开），查询只走 itemId

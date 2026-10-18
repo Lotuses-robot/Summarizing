@@ -469,9 +469,12 @@ ev(itemF, "元素:name", fragFrom(6, "本周六招新摊位值班"));
     },
     by: { actor: "用户", model: null },
   });
+  // ⚠️ 只回填 **create** 的 at（让版本史看起来是几天前建的、刚刚删的）；
+  // **绝不回填 trash 的 at**——那会让 (at,rowid) 的「末位 = 当前态」倒过来
+  // （deriveItem 会看到 todo、deriveItemsWithVersion 看到 trashed，两套真相）。
   client
-    .prepare("UPDATE item_versions SET at = ? WHERE item_id = ? AND action = 'trash_item'")
-    .run(wallClockAgo(2 * DAY), trashed.itemId);
+    .prepare("UPDATE item_versions SET at = ? WHERE item_id = ? AND action = 'create_item'")
+    .run(wallClockAgo(5 * DAY), trashed.itemId);
 }
 
 // ── 已读标记：「新」微标只留给 G（图书馆还书）与 N（通知）──

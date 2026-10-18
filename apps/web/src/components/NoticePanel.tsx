@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { itemName, type NoticeRow } from "@summarizing/shared";
 import { api } from "../api";
@@ -14,51 +14,76 @@ export function NoticePanel({
   notices,
   filter,
   onRefresh,
+  focus = null,
 }: {
   notices: NoticeRow[];
   /** 与看板同款筛选谓词（tag + 文本——FilterBar 复用，不另造机制）。 */
   filter: (r: NoticeRow) => boolean;
   onRefresh: () => void;
+  /** 对话 chips 深链（05§三）：展开并滚到该条；token 防轮询重放。 */
+  focus?: { id: string; token: number } | null;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [viewedLocally, setViewedLocally] = useState<ReadonlySet<string>>(new Set());
+  /** 本地已读：id → **标记时的 updatedAt**。只在同一次更新内抑制「新」与重复上报——
+   *  内容被 agent0 更新后 updatedAt 变了，应重新亮「新」并允许再次报已读（OQ-11）。 */
+  const [viewedLocally, setViewedLocally] = useState<ReadonlyMap<string, string>>(new Map());
   /** 删除失败必须可见（红线「不许静默」）：失败时行还在，不给提示等于"点了没反应"。 */
   const [actionError, setActionError] = useState<string | null>(null);
   const visible = notices.filter(filter);
 
-  /** 点开：单开互斥 + 首次展开即报已读（「新」微标点开即消，与看板同一节奏）。 */
-  const toggle = (id: string) => {
-    const next = expandedId === id ? null : id;
+  /** 点开：单开互斥 + 首次展开即报已读（「新」微标点开即消，与看板同一节奏）。
+   *  以 updatedAt 判定"本地已读"——内容更新后要重新报（OQ-11）。 */
+  const toggle = (r: NoticeRow) => {
+    const next = expandedId === r.item.id ? null : r.item.id;
     setExpandedId(next);
-    if (next !== null && !viewedLocally.has(id)) {
-      setViewedLocally((cur) => new Set(cur).add(id));
-      void api.viewed(id).catch(() => {
+    if (next !== null && viewedLocally.get(r.item.id) !== r.updatedAt) {
+      setViewedLocally((cur) => new Map(cur).set(r.item.id, r.updatedAt));
+      void api.viewed(r.item.id).catch(() => {
         // 报已读失败不阻塞阅读——下一轮轮询会带服务端状态回来（微标最坏多亮一轮）
       });
     }
   };
 
+  /** 深链（05§三）：展开目标行并滚到位；token 防同一深链被轮询重放。
+   *  行的 DOM id 与看板同款（row-<id>），布局稳定后滚动。 */
+  const handledToken = useRef(0);
+  useEffect(() => {
+    if (focus === null || focus.token === handledToken.current) return;
+    handledToken.current = focus.token;
+    setExpandedId(focus.id);
+    window.setTimeout(() => {
+      document.getElementById(`row-${focus.id}`)?.scrollIntoView({ block: "center" });
+    }, 60);
+  }, [focus]);
+
+  /** 错误条在空态之上渲染：删除失败常伴随列表变空，不能被「还没有通知」吞掉。 */
+  const errorBanner =
+    actionError === null ? null : (
+      <p className="mx-4 mt-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+        {actionError}
+      </p>
+    );
+
   if (visible.length === 0) {
     return (
-      <p className="px-4 py-8 text-sm text-ink-muted">
-        {notices.length === 0
-          ? "还没有通知——群里发来的、不用你去做但值得知道的事会落到这"
-          : "没有匹配的通知"}
-      </p>
+      <>
+        {errorBanner}
+        <p className="px-4 py-8 text-sm text-ink-muted">
+          {notices.length === 0
+            ? "还没有通知——群里发来的、不用你去做但值得知道的事会落到这"
+            : "没有匹配的通知"}
+        </p>
+      </>
     );
   }
 
   return (
     <>
-      {actionError !== null && (
-        <p className="mx-4 mt-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
-          {actionError}
-        </p>
-      )}
+      {errorBanner}
       <ul className="flex flex-col gap-2 px-4 py-3">
         {visible.map((r) => {
           const { item } = r;
-          const isNew = !r.viewed && !viewedLocally.has(item.id);
+          const isNew = !r.viewed && viewedLocally.get(item.id) !== r.updatedAt;
           return (
             <li
               key={item.id}
@@ -69,7 +94,7 @@ export function NoticePanel({
                 "group relative cursor-pointer overflow-hidden rounded-md border border-line bg-surface py-2 pl-5 pr-3 hover:bg-canvas",
                 expandedId === item.id && "bg-canvas",
               )}
-              onClick={() => toggle(item.id)}
+              onClick={() => toggle(r)}
             >
               <div className="flex items-center gap-2 text-sm font-medium">
                 <span className="min-w-0 truncate">{itemName(item.elements)}</span>

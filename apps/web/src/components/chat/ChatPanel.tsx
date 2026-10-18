@@ -252,7 +252,7 @@ export function ChatPanel({
                   <button
                     key={r.id}
                     className="chip chip-link cursor-pointer"
-                    title="在看板中定位这条事项"
+                    title="定位这条信息"
                     onClick={() => onRequestFocus(r.id)}
                   >
                     <Locate size={11} /> {r.title}

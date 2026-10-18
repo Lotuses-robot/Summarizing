@@ -40,7 +40,22 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
 
   if (rows.length === 0) {
     return (
-      <p className="px-4 py-8 text-sm text-ink-muted">回收站是空的——删掉的信息会先落到这，可恢复</p>
+      <div className="px-4 py-8">
+        {/* 清理结果可能在列表清空的同时产生（全清光/全失败）——先于空态渲染，不能被吞 */}
+        {feedback !== null && (
+          <p
+            className={cn(
+              "mb-3 rounded-md border px-3 py-2 text-sm",
+              feedback.tone === "error"
+                ? "border-danger/40 bg-danger-soft text-danger"
+                : "border-line bg-canvas text-ink-muted",
+            )}
+          >
+            {feedback.text}
+          </p>
+        )}
+        <p className="text-sm text-ink-muted">回收站是空的——删掉的信息会先落到这，可恢复</p>
+      </div>
     );
   }
 

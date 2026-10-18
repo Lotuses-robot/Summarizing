@@ -118,6 +118,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
    *  防 blur 与关闭 flush 在同一 tick 重复发送；慢响应也不覆盖新输入）。 */
   const [rules, setRules] = useState("");
   const [rulesFailed, setRulesFailed] = useState(false);
+  /** 保存失败（常驻显示，跨关闭保持）——关闭时触发的那次保存失败后弹层已关、
+   *  flash 会自灭；重开时本条仍在提醒，输入也不会被服务端旧值覆盖。 */
+  const [rulesSaveFailed, setRulesSaveFailed] = useState(false);
   const rulesDirtyRef = useRef(false);
   const rulesSavingRef = useRef(false);
   const rulesPendingRef = useRef(false);
@@ -208,8 +211,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     api
       .rejectionRules()
       .then((v) => {
-        // 慢响应保护：等待期间用户已输入/已保存（代次变了）→ 不拿旧值覆盖新输入
-        if (rulesGenRef.current !== loadGen) return;
+        // 慢响应保护：等待期间用户已输入/已保存（代次变了）→ 不拿旧值覆盖新输入。
+        // 另有未保存成功的内容（rulesDirtyRef，如关闭时保存失败）→ 同样不覆盖，保住用户输入。
+        if (rulesGenRef.current !== loadGen || rulesDirtyRef.current) return;
         setRules(v.rules);
         rulesRef.current = v.rules;
         rulesDirtyRef.current = false;
@@ -246,10 +250,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       .saveRejectionRules(rulesRef.current)
       .then((v) => {
         if (rulesGenRef.current === gen) setRules(v.rules);
+        setRulesSaveFailed(false);
         flash("rules", "已保存");
       })
       .catch((err: unknown) => {
         rulesDirtyRef.current = true; // 存失败恢复脏标——下次失焦重试，不吞
+        setRulesSaveFailed(true); // 常驻：关闭后才失败也不丢提示（重开可见）
         flash("rules", `保存失败：${errText(err)}`);
       })
       .finally(() => {
@@ -539,6 +545,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   onBlur={saveRules}
                 />
                 <StatusSlot statuses={statuses} />
+                {rulesSaveFailed && (
+                  <p className="mt-1 text-xs text-danger">
+                    上次保存没有成功——你写的内容还在，修改后失焦即可重试。
+                  </p>
+                )}
               </Row>
             )}
           </Card>

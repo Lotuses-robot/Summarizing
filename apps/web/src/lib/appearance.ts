@@ -9,7 +9,7 @@ const PALETTE_KEY = "summarizing.palette";
 const FONT_KEY = "summarizing.font";
 const DENSITY_KEY = "summarizing.density";
 
-// 段默认折叠：已完成/已归档（D-80）；其余段默认展开
+// 段默认折叠：已完成（D-80；007 取消归档后只剩它）；其余段默认展开
 const DEFAULT_FOLDED: readonly string[] = ["done"];
 
 export type ThemeMode = "light" | "dark" | "system";
