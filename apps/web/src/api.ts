@@ -16,6 +16,7 @@ import type {
   PipelineRun,
   PipelineRunDetail,
   RegisterRequest,
+  RejectionRulesView,
   RotateTokenResponse,
   SourceSummary,
   TrashView,
@@ -223,6 +224,14 @@ export const api = {
   /** 清除本账户 AI 配置（回「未配置」）。 */
   clearAiSettings: (): Promise<AiSettingsView> =>
     req("/api/settings/ai", { method: "DELETE" }).then((r) => to<AiSettingsView>(r)),
+
+  /** 读用户拒收规则（D-107）：用户自由文本，原样注入 agent0 提示词作硬闸。 */
+  rejectionRules: (): Promise<RejectionRulesView> =>
+    req("/api/settings/rejection-rules").then((r) => to<RejectionRulesView>(r)),
+
+  /** 存用户拒收规则（整段覆盖；空串 = 清空）。 */
+  saveRejectionRules: (rules: string): Promise<RejectionRulesView> =>
+    req("/api/settings/rejection-rules", put({ rules })).then((r) => to<RejectionRulesView>(r)),
 
   /** 测试连接：表单值实测一次最小请求，不动当前客户端。 */
   testAiSettings: (s: AiSettings): Promise<AiTestResult> =>

@@ -16,7 +16,7 @@ import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient, ToolCall } from "../shared/llm";
 import { describeRejections, parseChangeList, runFence } from "../executor/fence";
-import { DIGEST_SYSTEM_PROMPT } from "./prompt";
+import { buildDigestPrompt } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
 import { executeChanges } from "../executor/executor";
 
@@ -83,7 +83,7 @@ export async function digestRawInput(
       // 拒收项报错回给 agent0，可修正清单再提交一次（01§4.10④）。
       // 修正轮本身失败（如网关抖动）不得拖垮已通过围栏的项——降级为「放弃拒收项并留痕」。
       // 修复调用失败本身也记 stderr（九轮评审：网关故障 ≠ 模型不修复，须可分辨）。
-      const repaired = await requestRepair(llm, rejected).catch((err) => {
+      const repaired = await requestRepair(llm, db, rejected).catch((err) => {
         bestEffortLog(`[digest] 修复轮调用失败（raw=${raw.id}）：${errText(err)}`);
         return null;
       });
@@ -463,7 +463,11 @@ async function chatWithImageFallback(
   modelTag: string,
   messages: ChatMsg[],
 ): Promise<{ content: string | null; toolCalls: ToolCall[]; degraded: boolean }> {
-  const args = { system: DIGEST_SYSTEM_PROMPT, messages, tools: TOOL_DEFS };
+  const args = {
+    system: buildDigestPrompt(repo.readRejectionRules(db)),
+    messages,
+    tools: TOOL_DEFS,
+  };
   if (!hasImage(messages)) return { ...(await llm.chat(args)), degraded: false };
   try {
     return { ...(await llm.chat(args)), degraded: false };
@@ -489,10 +493,11 @@ async function chatWithImageFallback(
 /** 围栏拒收后给模型一次修正机会（01§4.10④）：只回喂被拒项与原因。 */
 async function requestRepair(
   llm: LlmClient,
+  db: Db,
   rejected: { item: ChangeList["changes"][number]; reason: string }[],
 ): Promise<ChangeList | null> {
   const res = await llm.chat({
-    system: DIGEST_SYSTEM_PROMPT,
+    system: buildDigestPrompt(repo.readRejectionRules(db)),
     tools: [],
     messages: [
       {

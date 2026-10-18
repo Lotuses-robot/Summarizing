@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
+import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
 import * as repo from "../storage/repo";
 
 // 设置面板服务端（05§五 / D-81；006 起经 makeTestAccount 打真实入口）：GET/PUT/DELETE ai + 备份。
@@ -90,5 +90,80 @@ describe("设置面板服务端（05§五 / D-81）", () => {
     expect(res.headers["content-type"]).toBe("application/octet-stream");
     expect(res.headers["content-disposition"]).toContain("summarizing.db");
     expect(res.body.slice(0, 15)).toBe("SQLite format 3"); // SQLite 文件头
+  });
+});
+
+describe("拒收规则（D-107）", () => {
+  it("GET 未设置 → 空串；PUT 存入后读回一致（自由文本原样，不解析结构）", async () => {
+    const t = await makeTestAccount();
+    const before = await t.inject({ method: "GET", url: "/api/settings/rejection-rules" });
+    expect(before.statusCode).toBe(200);
+    expect(before.json<{ rules: string }>().rules).toBe("");
+
+    const rules = "不要拼多多砍一刀、集赞、投票拉票类的链接；\n群里的早安图不要收。";
+    const put = await t.inject({
+      method: "PUT",
+      url: "/api/settings/rejection-rules",
+      payload: { rules },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json<{ rules: string }>().rules).toBe(rules);
+
+    const after = await t.inject({ method: "GET", url: "/api/settings/rejection-rules" });
+    expect(after.json<{ rules: string }>().rules).toBe(rules);
+    // repo 侧读到的与 HTTP 读到的一致（提示词注入与设置界面同源）
+    expect(repo.readRejectionRules(t.db)).toBe(rules);
+  });
+
+  it("PUT 空串 = 清空规则", async () => {
+    const t = await makeTestAccount();
+    await t.inject({
+      method: "PUT",
+      url: "/api/settings/rejection-rules",
+      payload: { rules: "什么都不要" },
+    });
+    const cleared = await t.inject({
+      method: "PUT",
+      url: "/api/settings/rejection-rules",
+      payload: { rules: "" },
+    });
+    expect(cleared.json<{ rules: string }>().rules).toBe("");
+    expect(repo.readRejectionRules(t.db)).toBe("");
+  });
+
+  it("PUT 非字符串（数字/对象/数组）→ 400，不猜用户本意", async () => {
+    const t = await makeTestAccount();
+    for (const bad of [42, { a: 1 }, ["x"], null]) {
+      const res = await t.inject({
+        method: "PUT",
+        url: "/api/settings/rejection-rules",
+        payload: { rules: bad },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    expect(repo.readRejectionRules(t.db)).toBe(""); // 一个都没存进去
+  });
+
+  it("PUT 超长（>4000）→ 400（防巨型串直灌提示词）", async () => {
+    const t = await makeTestAccount();
+    const res = await t.inject({
+      method: "PUT",
+      url: "/api/settings/rejection-rules",
+      payload: { rules: "x".repeat(4001) },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("按账户隔离：A 写的规则 B 读不到", async () => {
+    const realm = await makeTestRealm();
+    const a = await realm.addAccount({ username: "alice" });
+    const b = await realm.addAccount({ username: "bob" });
+    await a.inject({
+      method: "PUT",
+      url: "/api/settings/rejection-rules",
+      payload: { rules: "alice 的规则" },
+    });
+    const bRead = await b.inject({ method: "GET", url: "/api/settings/rejection-rules" });
+    expect(bRead.json<{ rules: string }>().rules).toBe("");
   });
 });

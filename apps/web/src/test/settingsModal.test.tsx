@@ -166,3 +166,91 @@ describe("滚动联动判定（用户走查 2026-10-03 修）", () => {
     ).toBe("sources");
   });
 });
+
+/** 拒收规则区 fetch 替身（D-107）：GET/PUT /api/settings/rejection-rules。
+ *  写请求记录；stored 记录服务端最后存的值（断言「失焦即存」真的发出去了）。 */
+function stubRules(): { puts: { rules: string }[] } {
+  const puts: { rules: string }[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = fetchUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/api/settings/ai")) {
+        return Promise.resolve(
+          jsonResponse({
+            baseUrl: "http://x/v1",
+            model: "m1",
+            apiKeyMasked: null,
+            overridden: false,
+          }),
+        );
+      }
+      if (url.includes("/api/settings/rejection-rules")) {
+        if (method === "PUT") {
+          const parsed: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+          const rules =
+            typeof parsed === "object" && parsed !== null && "rules" in parsed
+              ? String(parsed.rules)
+              : "";
+          puts.push({ rules });
+          return Promise.resolve(jsonResponse({ rules }));
+        }
+        return Promise.resolve(jsonResponse({ rules: "" }));
+      }
+      if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+  return { puts };
+}
+
+describe("设置弹层：收取规则（D-107）", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("左栏有「收取规则」入口；渲染出规则文本框", async () => {
+    stubRules();
+    render(<SettingsModal open onClose={() => {}} />);
+    // 左栏按钮 + 分区标题都叫「收取规则」——两处都在（≥2）
+    expect((await screen.findAllByText("收取规则")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByPlaceholderText(/不要拼多多砍一刀/)).toBeInTheDocument();
+  });
+
+  it("失焦即存：改了规则后 blur → PUT 发出，body 带 rules", async () => {
+    const { puts } = stubRules();
+    render(<SettingsModal open onClose={() => {}} />);
+    const box = await screen.findByPlaceholderText(/不要拼多多砍一刀/);
+    fireEvent.change(box, { target: { value: "不要集赞拉票" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]?.rules).toBe("不要集赞拉票");
+  });
+
+  it("没改动就不发 PUT（不制造无意义写）", async () => {
+    const { puts } = stubRules();
+    render(<SettingsModal open onClose={() => {}} />);
+    const box = await screen.findByPlaceholderText(/不要拼多多砍一刀/);
+    fireEvent.focus(box);
+    fireEvent.blur(box);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/不要拼多多砍一刀/)).toBeInTheDocument(),
+    );
+    expect(puts).toHaveLength(0);
+  });
+
+  it("Esc 关闭前 flush：改完没失焦，Esc 也能把规则发出去（评审 H1 同款守卫）", async () => {
+    const { puts } = stubRules();
+    render(<SettingsModal open onClose={() => {}} />);
+    const box = await screen.findByPlaceholderText(/不要拼多多砍一刀/);
+    fireEvent.change(box, { target: { value: "esc 前存下" } });
+    handleEsc(); // App 的全局 Esc 消费实际就是调它（本测试单渲染 Modal，没有 App 在听 keydown）
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]?.rules).toBe("esc 前存下");
+  });
+});

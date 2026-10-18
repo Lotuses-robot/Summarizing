@@ -629,6 +629,20 @@ export const AiTestResultSchema = z.object({
 });
 export type AiTestResult = z.infer<typeof AiTestResultSchema>;
 
+// ──────────────── 用户拒收规则（D-107：用户设置 → agent0 提示词硬闸）────────────────
+// 一份字段同时管事项/通知/存疑库（用户心智是「我不想要这些内容」，不是「事项一套通知一套」）。
+// 值是自由文本原文（storage 不解释内容——同 source_settings 哲学）；上限防一个巨型串直灌提示词。
+
+/** 拒收规则原文（用户自由文本）。上限 4000 字符——再长就该拆成条目而非一段话。 */
+export const RejectionRulesSchema = z.string().max(4000);
+export type RejectionRules = z.infer<typeof RejectionRulesSchema>;
+
+/** GET /api/settings/rejection-rules 响应。 */
+export const RejectionRulesViewSchema = z.object({
+  rules: z.string(),
+});
+export type RejectionRulesView = z.infer<typeof RejectionRulesViewSchema>;
+
 // ──────────────── 信源列表（GET /api/sources；D-88 T3 / D-89 类型上移）────────────────
 // 跨边界契约住 shared（D-52）：前端按 schema 渲染通用设置表单，**不知道信源名**——
 // core 与前端都不含信源专属知识。

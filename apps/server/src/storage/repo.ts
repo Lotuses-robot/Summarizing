@@ -37,6 +37,27 @@ export const SOURCE_SCHEMA_KEY = "__schema__";
 /** 存量 AI 设置在 app_settings 的键（设置路由写、空间装配读——同住 storage 单一出处）。 */
 export const AI_SETTINGS_KEY = "ai";
 
+/** 用户拒收规则在 app_settings 的键（D-107：用户设置 → agent0 提示词硬闸）。
+ *  值是用户原文（自由文本），storage 只管存取、不解释内容（同 source_settings 哲学）。 */
+export const REJECTION_RULES_KEY = "rejection_rules";
+
+/** 读用户拒收规则原文；缺失 = 空串（提示词据此注入「（用户未设置任何拒收规则）」）。
+ *  坏 JSON 一律当未设置并留痕——用户自由文本不该让消化崩掉（红线「不许静默」只要求可见）。 */
+export function readRejectionRules(db: DbOrTx): string {
+  const raw = getAppSetting(db, REJECTION_RULES_KEY);
+  if (raw === null) return "";
+  try {
+    const value: unknown = JSON.parse(raw);
+    // 契约窄到只收「一个字符串」：别的形状（对象/数组/数字）当未设置，不猜用户本意
+    return typeof value === "string" ? value : "";
+  } catch {
+    process.stderr.write(
+      "[settings] app_settings 的 rejection_rules 行不是合法 JSON，按未设置处理\n",
+    );
+    return "";
+  }
+}
+
 /** 读存量 AI 设置（app_settings 的 ai 行）；缺失、坏 JSON、形状不符都视为**未配置**（不崩不静默崩溃）。
  *  空间装配（spaces）与设置路由共用——解析逻辑唯一出处。 */
 export function readStoredAi(db: DbOrTx): AiSettings | null {

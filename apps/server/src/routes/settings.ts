@@ -2,6 +2,8 @@ import {
   AiSettingsSchema,
   AiSettingsViewSchema,
   AiTestResultSchema,
+  RejectionRulesSchema,
+  RejectionRulesViewSchema,
   errText,
   type AiSettings,
   type AiSettingsView,
@@ -52,9 +54,30 @@ function mergeAiConfig(form: AiSettings, stored: AiSettings | null): AiSettings 
   };
 }
 
-/** 注册 settings 路由（GET/PUT/DELETE ai、POST ai/test、GET backup）。 */
+/** 注册 settings 路由（GET/PUT/DELETE ai、POST ai/test、GET/PUT rejection-rules、GET backup）。 */
 export function registerSettingsRoutes(app: FastifyInstance): void {
   app.get("/api/settings/ai", async (req) => view(req.space.db));
+
+  // 用户拒收规则（D-107）：读（原样回显）/ 写（整段覆盖，无结构化解析——用户自由文本）
+  app.get("/api/settings/rejection-rules", async (req) => {
+    return RejectionRulesViewSchema.parse({ rules: repo.readRejectionRules(req.space.db) });
+  });
+
+  app.put("/api/settings/rejection-rules", async (req, reply) => {
+    const parsed = RejectionRulesSchema.safeParse(
+      (req.body as { rules?: unknown } | undefined)?.rules,
+    );
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "请求体不合法",
+        issues: parsed.error.issues.map((i) => ({ message: i.message })),
+      });
+    }
+    // 空串 = 清空规则：存空串而不是删行（读路径对「行缺失」与「空串」同一视之，删行也行——
+    // 但存空串让「用户设过又清了」与「从没设过」在库里可分辨，便于排查）
+    repo.setAppSetting(req.space.db, repo.REJECTION_RULES_KEY, JSON.stringify(parsed.data));
+    return RejectionRulesViewSchema.parse({ rules: parsed.data });
+  });
 
   // 保存即热切换（05§五）：先建新客户端成功才换+落库，失败保旧——切换是原子的
   app.put("/api/settings/ai", async (req, reply) => {

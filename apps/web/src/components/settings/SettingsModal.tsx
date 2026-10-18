@@ -3,6 +3,7 @@ import {
   Bot,
   Check,
   Database,
+  Filter as FilterIcon,
   Loader2,
   Palette as PaletteIcon,
   Rss,
@@ -52,12 +53,13 @@ const DENSITY_NAMES: Record<Density, string> = { comfortable: "舒适", compact:
 
 // 左侧分类栏（用户 2026-09-27 定：左导航 + 右侧内容，点击定位）。
 // 右侧内容 = 分组卡（macOS 系统设置式，用户 2026-09-30 走查定：一行一设置、控件右对齐、**改完即生效**）。
-type SectionId = "appearance" | "ai" | "data" | "sources";
+type SectionId = "appearance" | "ai" | "rules" | "data" | "sources";
 
 /** 段 id → DOM 锚点 id 的**唯一出处**（JSX 挂锚点、滚动定位、联动观测都查它；漏一段编译不过）。 */
 const SECTION_DOM = {
   appearance: "settings-appearance",
   ai: "settings-ai",
+  rules: "settings-rules",
   data: "settings-data",
   sources: "settings-sources",
 } satisfies Record<SectionId, string>;
@@ -66,6 +68,7 @@ type SectionMeta = { id: SectionId; label: string; icon: LucideIcon };
 const SECTIONS: SectionMeta[] = [
   { id: "appearance", label: "外观", icon: PaletteIcon },
   { id: "ai", label: "AI", icon: Bot },
+  { id: "rules", label: "收取规则", icon: FilterIcon },
   { id: "data", label: "数据", icon: Database },
   { id: "sources", label: "信源", icon: Rss },
 ];
@@ -111,6 +114,10 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const [prefs, setPrefs] = useState<AppearancePrefs>(loadAppearance);
   const [ai, setAi] = useState<AiSettingsView | null>(null);
   const [form, setForm] = useState({ baseUrl: "", model: "", apiKey: "" });
+  /** 用户拒收规则（D-107）：自由文本；rulesDirty 记录「与盘上值不同」——失焦即存只在脏时发。 */
+  const [rules, setRules] = useState("");
+  const [rulesDirty, setRulesDirty] = useState(false);
+  const [rulesFailed, setRulesFailed] = useState(false);
   const [busy, setBusy] = useState<"none" | "test" | "clear">("none");
   const [readFailed, setReadFailed] = useState(false);
   const { statuses, flash, sticky } = useStatus();
@@ -162,9 +169,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     };
   }, [open]);
 
-  /** 关闭（三条路径共用）：先 blur 触发「失焦即存」的提交，再关——Esc 否则会静默丢未失焦的输入。 */
+  /** 关闭（三条路径共用）：先 blur 触发「失焦即存」的提交，再关——Esc 否则会静默丢未失焦的输入。
+   *  blur 只对当前聚焦元素生效（textarea 未聚焦时规则不会因此落盘）——补一次显式补发。 */
   const closeWithFlush = useCallback(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    saveRulesRef.current();
     onCloseRef.current();
   }, []);
 
@@ -190,6 +199,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       .aiSettings()
       .then(applyAiView)
       .catch(() => setReadFailed(true));
+    api
+      .rejectionRules()
+      .then((v) => {
+        setRules(v.rules);
+        setRulesDirty(false);
+        setRulesFailed(false);
+      })
+      .catch(() => setRulesFailed(true));
     return () => offEsc();
   }, [open, closeWithFlush]);
 
@@ -201,6 +218,29 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     setAi(v);
     setForm({ baseUrl: v.baseUrl, model: v.model, apiKey: "" });
   };
+
+  /** 拒收规则失焦即存（与 AI 区同一交互总则）：只在脏时发，失败常驻红字（不静默）。
+   *  保存成功即清脏标——**下一条进站消息**就用上新规则（提示词每批重新组装，无需重启）。 */
+  const saveRules = useCallback(() => {
+    if (!rulesDirty) return;
+    setRulesDirty(false);
+    api
+      .saveRejectionRules(rules)
+      .then((v) => {
+        setRules(v.rules);
+        setRulesFailed(false);
+        flash("rules", "已保存");
+      })
+      .catch((err: unknown) => {
+        setRulesDirty(true); // 存失败则恢复脏标——下次失焦重试，不吞
+        setRulesFailed(true);
+        flash("rules", `保存失败：${errText(err)}`);
+      });
+  }, [rulesDirty, rules, flash]);
+  const saveRulesRef = useRef(saveRules);
+  useEffect(() => {
+    saveRulesRef.current = saveRules;
+  }, [saveRules]);
 
   // 保存管道（评审 H2）：在飞时再来的失焦记 pending，落地后补发——busy 不再吞保存。
   // ⚠️ 补发必须走 ref 取**最新** saveNow：finally 闭包是发起时那次渲染的快照，
@@ -440,6 +480,41 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                       })}
                 />
               </>
+            )}
+          </Card>
+
+          {/* 收取规则（D-107）：用户亲手写下「不要」——注入 agent0 提示词作最高优先硬闸。
+              一份字段同时管事项/通知/存疑库；用户自由文本原样进提示词，系统不解析结构。 */}
+          <Card
+            id={SECTION_DOM.rules}
+            title="收取规则"
+            icon={FilterIcon}
+            desc="告诉 AI 哪些内容不要收——你点名的会被直接拒收，没提到的一律照常判断"
+          >
+            {rulesFailed ? (
+              <Row label={<span className="text-danger">读不到当前规则（后端在跑吗？）</span>} />
+            ) : (
+              <div className="px-1 pb-1">
+                <textarea
+                  className="input min-h-32 w-full resize-y font-normal"
+                  value={rules}
+                  placeholder="例如：
+不要拼多多砍一刀、集赞、投票拉票类的链接；
+群里的灌水、早安图、无内容的转发不要收；
+「以学校通知为准」这类空话不要建事项。"
+                  onChange={(e) => {
+                    setRules(e.target.value);
+                    setRulesDirty(true);
+                  }}
+                  onBlur={saveRules}
+                />
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <p className="text-xs text-ink-muted">
+                    失焦即生效——下一条新消息就按这个判。被它拒收的内容仍会在流水里留痕，不会无声消失。
+                  </p>
+                  <StatusSlot statuses={statuses} />
+                </div>
+              </div>
             )}
           </Card>
 

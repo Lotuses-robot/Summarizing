@@ -1005,3 +1005,69 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
     expect(refused).toBe(true);
   });
 });
+
+describe("用户拒收规则进入提示词（D-107：真实消化链路）", () => {
+  /** 造一条待消化批次。 */
+  function seedRaw(db: ReturnType<typeof makeDb>): RawInput {
+    return repo.insertRawInput(db, {
+      content: "帮我砍一下，拼多多链接 xxx，还差 0.01 元",
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "班级群" },
+      receivedAt: "2026-10-17T10:00:00",
+      eventTime: null,
+    });
+  }
+
+  it("设了规则 →  LLM 收到的 system 里带着它（不只盘上存了）", async () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    repo.setAppSetting(db, repo.REJECTION_RULES_KEY, JSON.stringify("不要拼多多砍一刀类链接"));
+
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+
+    // 第 0 次调用就是 elicitation 轮——它的 system 必须含用户规则
+    expect(chatAt(llm, 0).system).toContain("不要拼多多砍一刀类链接");
+    expect(chatAt(llm, 0).system).toContain("【用户拒收规则");
+  });
+
+  it("没设规则 → system 里有「未设置」明示，不留空块", async () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+
+    expect(chatAt(llm, 0).system).toContain("（用户未设置任何拒收规则）");
+  });
+
+  it("修正轮（围栏拒收后）也带同一套规则——规则不因轮次丢失", async () => {
+    const db = makeDb(":memory:");
+    const raw = seedRaw(db);
+    repo.setAppSetting(db, repo.REJECTION_RULES_KEY, JSON.stringify("测试规则甲"));
+    const llm = new FakeLlm();
+    // 第 1 轮：产出必被围栏拒的东西（引文非原文逐字 → 拒）→ 触发修正轮
+    llm.push({
+      content: JSON.stringify({
+        changes: [
+          {
+            action: "create_item",
+            elements: [{ label: "name", text: "甲", quotes: ["原文里没有的引文"] }],
+            tags: [],
+            doubtNote: null,
+          },
+        ],
+      }),
+    });
+    // 第 2 轮（修正轮）：给合法空清单
+    llm.push({ content: '{"changes":[]}' });
+    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw).catch(() => {
+      // 修正轮失败只降级留痕，不抛——这里不关心最终 state，只断言每轮 system 都带规则
+    });
+
+    for (const [i, args] of llm.chats.entries()) {
+      expect(args.system, `第 ${i} 次调用应带用户规则`).toContain("测试规则甲");
+    }
+  });
+});

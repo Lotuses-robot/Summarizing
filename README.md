@@ -27,7 +27,7 @@
   <a href="#"><img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind v4" /></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-每账户一库-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-394%20passing-brightgreen?style=flat-square" alt="tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-413%20passing-brightgreen?style=flat-square" alt="tests" /></a>
 </p>
 
 ## 它解决什么
@@ -41,6 +41,7 @@
 - **三段看板**：已排期 / 日期未知 / 已完成；按截止时间排序，标不标日期都不会被硬凑。
 - **通知**：群里发来的、不用你去做但值得知道的事——"课改到明理楼3楼""时间调到周五"——单独进**通知**页，不用去翻群。通知不带截止时间，不占看板。
 - **回收站**：删掉的信息先进回收站，可随时恢复；删掉超过 15 天的才被「一键清理」真正清掉——**原文档案永远不删**，每条信息都能追回最初那条消息。
+- **收取规则**：在设置里写下你不想要的内容（"拼多多砍一刀链接不要"、"早安图不要收"）——AI 会把它当最高优先的硬闸，命中的一律不收；没提到的一律照常判断。
 - **群机器人接入**：群里消息自动进站，按白名单过滤，合并成批后自动消化成事项。
 - **对话录入**：像聊天一样丢信息，AI 自己判断怎么处理；也可以 @ 提及看板上的事项。
 - **自动整理**：抽日期、抽要素、找归属、合并同一件事的多次提及；推断出来的日期会标「推断」。
@@ -72,7 +73,7 @@ npm run dev                # 打开 http://localhost:5173 登录 → 设置 → 
 装完之后，常用检查：
 
 ```bash
-npm test              # vitest（394 个用例）
+npm test              # vitest（413 个用例）
 npm run check         # 类型 + 代码规范 + 测试
 npm run check:dead    # 死代码检查
 npm run build -w @summarizing/web
