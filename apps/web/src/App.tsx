@@ -260,14 +260,15 @@ export default function App() {
     ].sort();
   }, [board]);
 
-  /** @ 提及候选：全部事项（三段都在——提及历史事项合理）。 */
+  /** @ 提及候选：看板三段 + 通知（OQ-9：@ 提及候选收录通知）——提及历史信息合理。 */
   const chatItems = useMemo(() => {
-    if (board === null) return [];
-    return [...board.undated, ...board.scheduled, ...board.done].map((r) => ({
+    const boardRows = board === null ? [] : [...board.undated, ...board.scheduled, ...board.done];
+    const noticeRows = notices?.notices ?? [];
+    return [...boardRows, ...noticeRows].map((r) => ({
       id: r.item.id,
       title: itemName(r.item.elements),
     }));
-  }, [board]);
+  }, [board, notices]);
 
   /** 通知未读数（活动栏徽标，OQ-10）：纯计数，有未读才显示。
    *  形状防御：`notices` 字段缺席（异常载荷/接口降级）时按 0 计——徽标缺省不显示，

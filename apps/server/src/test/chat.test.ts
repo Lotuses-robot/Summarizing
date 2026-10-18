@@ -565,3 +565,114 @@ describe("对话历史持久化（L16：刷新/换设备可回填）", () => {
     expect(got.at(-1)?.content).toBe("回复4"); // 时间升序、最新在尾
   });
 });
+
+describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () => {
+  /** 造一条通知（经执行器，kind=notice）。 */
+  function seedNotice(db: ReturnType<typeof makeDb>): string {
+    const raw = repo.insertRawInput(db, {
+      content: "课改到明理楼3楼",
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      receivedAt: "2026-10-17T10:00:00",
+      eventTime: null,
+    });
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "create_item",
+          kind: "notice",
+          elements: [{ label: "name", text: "课改到明理楼3楼", quotes: [] }],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: MODEL },
+    );
+    const item = repo.deriveItems(db)[0];
+    if (!item) throw new Error("播种失败");
+    return item.id;
+  }
+
+  it("删事项 → status=trashed、进回收站、看板不再有它、版本链留痕", async () => {
+    const db = makeDb(":memory:");
+    const id = seedBoard(db);
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
+    });
+    llm.push({ content: "已删除，进了回收站（可恢复）。" });
+
+    const result = await handleChat(db, llm, MODEL, "把那条删了", []);
+
+    expect(repo.deriveItem(db, id)?.status).toBe("trashed");
+    expect(repo.deriveHistory(db, id).map((v) => v.action)).toEqual(["create_item", "trash_item"]);
+    // 版本署名 = 前台（对话触发，D-88）
+    expect(repo.deriveHistory(db, id).at(-1)?.by.actor).toBe("前台");
+    expect(result.actions.some((a) => a.tool === "delete_item")).toBe(true);
+  });
+
+  it("删通知 → 同样进回收站（两类共用同一机制）", async () => {
+    const db = makeDb(":memory:");
+    const id = seedNotice(db);
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
+    });
+    llm.push({ content: "已删除。" });
+    await handleChat(db, llm, MODEL, "把那条通知删了", []);
+    expect(repo.deriveItem(db, id)?.status).toBe("trashed");
+  });
+
+  it("幂等：已在回收站的再删一次 → 不追加无意义版本", async () => {
+    const db = makeDb(":memory:");
+    const id = seedBoard(db);
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
+    });
+    llm.push({ content: "删了。" });
+    await handleChat(db, llm, MODEL, "删了", []);
+    const before = repo.deriveHistory(db, id).length;
+
+    const llm2 = new FakeLlm();
+    llm2.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
+    });
+    llm2.push({ content: "本来就在回收站。" });
+    await handleChat(db, llm2, MODEL, "再删一次", []);
+    expect(repo.deriveHistory(db, id)).toHaveLength(before); // 版本数不变
+  });
+
+  it("id 不存在 → ok:false 且不炸（模型可自行纠正）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "delete_item", argsJson: '{"id":"nope"}' }],
+    });
+    llm.push({ content: "没找到那条。" });
+    const result = await handleChat(db, llm, MODEL, "删掉 nope", []);
+    expect(result.reply).toContain("没找到");
+    const toolMsg = chatAt(llm, 1).messages.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain('ok":false');
+  });
+
+  it("get_board 结果里带通知（OQ-9：前台可只读查通知）", async () => {
+    const db = makeDb(":memory:");
+    seedBoard(db);
+    seedNotice(db);
+    const llm = new FakeLlm();
+    llm.push({ content: null, toolCalls: [{ id: "t1", name: "get_board", argsJson: "{}" }] });
+    llm.push({ content: "有 1 条通知。" });
+    await handleChat(db, llm, MODEL, "有什么通知", []);
+    const toolMsg = chatAt(llm, 1).messages.find((m) => m.role === "tool");
+    expect(toolMsg?.content).toContain("课改到明理楼3楼");
+    expect(toolMsg?.content).toContain('"kind":"notice"');
+  });
+});

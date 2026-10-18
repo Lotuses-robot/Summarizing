@@ -12,6 +12,7 @@ import type { Db } from "../storage/db";
 import { nowWallClock } from "../shared/time";
 import * as repo from "../storage/repo";
 import { buildBoard } from "./board";
+import { deriveNotices } from "./notice";
 import { describeSweep, sweepUncertainLibrary } from "../agent0/sweep";
 import { kickDigest } from "../agent0/digest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
@@ -33,22 +34,24 @@ const ChitchatArgsSchema = z.object({ content: z.string().min(1) });
 const SweepArgsSchema = z.object({});
 /** 人工移除单条存疑（A10；端点 D-87④）：id 由模型从 search_uncertain 结果里取（真实 id 才可命中）。 */
 const ResolveUncertainArgsSchema = z.object({ id: z.string().min(1) });
+/** 删除一条信息（007 / OQ-8：对话删除 = 进回收站、可恢复）。id 由模型从 search_items / get_board 取。 */
+const DeleteItemArgsSchema = z.object({ id: z.string().min(1) });
 
 const FRONT_TOOL_DEFS: ToolDef[] = [
   {
     name: "get_board",
     description:
-      "读取看板全部事项（存疑/日期未知/已排期/已完成五段）——回答「最近有什么要交的」这类问题用它",
+      "读取看板全部事项（日期未知/已排期/已完成三段）+ 全部通知（notices）——回答「最近有什么要交的」「有什么通知」这类问题用它",
     parametersJsonSchema: z.toJSONSchema(BoardArgsSchema),
   },
   {
     name: "search_items",
-    description: "按关键词检索已有事项（关键词要用事项里出现过的词，如课程名）",
+    description: "按关键词检索已有事项与通知（关键词要用里面出现过的词，如课程名）",
     parametersJsonSchema: z.toJSONSchema(SearchItemsArgsSchema),
   },
   {
     name: "get_item",
-    description: "读取单个事项详情（元素/证据/版本历史——查看编辑记录）",
+    description: "读取单个事项/通知详情（元素/证据/版本历史——查看编辑记录）",
     parametersJsonSchema: z.toJSONSchema(GetItemArgsSchema),
   },
   {
@@ -66,8 +69,14 @@ const FRONT_TOOL_DEFS: ToolDef[] = [
   {
     name: "resolve_uncertain",
     description:
-      "把存疑库里**指定的一条**标记为已解决/丢弃（人工移除）——用户说「把那条删了/清了/处理掉」并指明是哪条时用它。id 必须先用 search_uncertain 查到（只能处理库里真实存在的条目）",
+      "把**存疑库**里指定的一条标记为已处理/丢弃（人工移除）——**只用于存疑库条目**。用户说「把那条存疑删了/清了」并指明是哪条时用它；id 必须先用 search_uncertain 查到。⚠️ 要删除看板/通知里的信息请用 delete_item，不要用这个",
     parametersJsonSchema: z.toJSONSchema(ResolveUncertainArgsSchema),
+  },
+  {
+    name: "delete_item",
+    description:
+      "删除一条**事项或通知**——进回收站、可恢复（不是彻底删）。用户说「把那条删了/不要了」并指明是看板或通知里的哪条时用它；id 必须先 search_items 或 get_board 查到。⚠️ 存疑库条目用 resolve_uncertain",
+    parametersJsonSchema: z.toJSONSchema(DeleteItemArgsSchema),
   },
   {
     name: "ingest",
@@ -237,7 +246,8 @@ async function runTool(
       case "get_board": {
         BoardArgsSchema.parse(args);
         state.actions.push({ tool: "get_board", note: "查了看板" });
-        return JSON.stringify(buildBoard(db));
+        // 看板三段 + 通知（OQ-9：前台可只读查通知）——挂成额外键，看板形状不动
+        return JSON.stringify({ ...buildBoard(db), notices: deriveNotices(db).notices });
       }
       case "search_items": {
         const { query } = SearchItemsArgsSchema.parse(args);
@@ -299,6 +309,37 @@ async function runTool(
         }
         state.actions.push({ tool: "resolve_uncertain", note: `从存疑库移除 1 条` });
         return JSON.stringify({ ok: true, note: "已从存疑库移除" });
+      }
+      case "delete_item": {
+        // 对话删除（OQ-8）：与 POST /api/items/:id/trash 同语义——追加 trashed 版本、进回收站可恢复。
+        // 不是裸写库：只走 repo 的版本链追加这一条路径（与审核页/看板行删除完全同一行为）。
+        const { id } = DeleteItemArgsSchema.parse(args);
+        const item = repo.deriveItem(db, id);
+        if (item === null) {
+          return JSON.stringify({
+            ok: false,
+            error: "没有这条信息（id 可能不对，先用 search_items 或 get_board 查）",
+          });
+        }
+        const title = itemName(item.elements);
+        state.refTitles.set(id, title);
+        if (item.status === "trashed") {
+          // 幂等：已在回收站，不追加无意义版本（与端点同款）
+          state.actions.push({ tool: "delete_item", note: `「${title}」已在回收站` });
+          return JSON.stringify({ ok: true, note: `「${title}」本来就在回收站里` });
+        }
+        repo.appendItemVersion(db, {
+          itemId: id,
+          action: "trash_item",
+          detail: `删除「${title}」（对话）`,
+          snapshot: { ...item, status: "trashed" },
+          by: { actor: "前台", model: modelTag },
+        });
+        state.actions.push({ tool: "delete_item", note: `删除「${title}」` });
+        return JSON.stringify({
+          ok: true,
+          note: `已删除「${title}」，进了回收站（可恢复）`,
+        });
       }
       case "ingest": {
         if (state.ingested) {
@@ -377,10 +418,11 @@ const FRONT_DESK_SYSTEM_PROMPT = `你是「前台」——用户的信息管家 
 - 纯寒暄（"你好""谢谢"，无任何具体事情）→ 调 log_chitchat 留痕。
 
 指令类诉求：
-- **凡是「修改」类的操作（改事项、改标签、改日期、加/删内容、合并……），你一律尝试通过 agent0 完成**——即把用户原话 ingest 进管线，由 agent0 消化执行。你**没有**任何直接改数据的工具，绝不自己动手、也绝不假装执行（说"改好了"而没走 ingest = 假声称）。
-- "把 xx 改成 yy""标签改成 zz""这条不要了"这类 → 一律当新信息 ingest（content 逐字原话）——agent0 会识别为对已有事项的修正并落地。你做不到的修改，正是 agent0 能做的：交给它。
-- 要"清掉/处理掉存疑库里某条" → 先用 search_uncertain 找到它拿到 id，再调 resolve_uncertain（只能处理真实存在的条目，id 不对会失败）——这是唯一的例外：存疑库处置你有专用工具，不必绕 agent0。
-- 要求撤回/删除历史记录 → 系统暂未提供该能力（D-79），如实说明，并引导：直接再发一条更正信息即可，系统会合并处理。
+- **凡是「修改」类的操作（改事项、改标签、改日期、加/删内容、合并……），你一律尝试通过 agent0 完成**——即把用户原话 ingest 进管线，由 agent0 消化执行。除了「删除」与「存疑库处置」这两个专用工具，你**没有**其它直接改数据的能力；绝不自己动手、也绝不假装执行（说"改好了"而没走 ingest = 假声称）。
+- "把 xx 改成 yy""标签改成 zz"这类 → 一律当新信息 ingest（content 逐字原话）——agent0 会识别为对已有事项的修正并落地。你做不到的修改，正是 agent0 能做的：交给它。
+- **删除一条具体信息**（"把那条删了""这条不要了"）→ 先用 search_items / get_board 找到它拿到 id，再调 delete_item。它是**进回收站、可恢复**，不是彻底删——回复时如实这么说。不要用 ingest 去删（删不是"修改内容"）。
+- **要"清掉/处理掉存疑库里某条"** → 先用 search_uncertain 找到它拿到 id，再调 resolve_uncertain（只能处理真实存在的条目，id 不对会失败）。⚠️ 这两个"删"别混：看板/通知里的信息用 delete_item，存疑库条目用 resolve_uncertain。
+- **撤回历史版本 / 彻底删除（清空回收站）** → 系统未提供对话能力（D-79/FR-008）：如实说明；撤回可引导"再发一条更正信息"，彻底删只能由用户在回收站界面点「一键清理」。
 
 用户可能用指代（"就是刚才那条"）——结合对话历史理解；不确定就先查证再回答。
 
