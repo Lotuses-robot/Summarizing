@@ -74,7 +74,7 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
   // 最新在上（走查 2026-10-10：与状态卡轨迹同向——越往下越旧）
   const events = [...detail.events].reverse();
   return (
-    <div data-testid="run-detail" className="rounded-b-lg bg-surface px-4 pb-3.5 pt-2">
+    <div data-testid="run-detail" className="fit-text rounded-b-lg bg-surface px-4 pb-3.5 pt-2">
       <section>
         {/* 原文：保留换行 + 长 URL 框内断行（fit-text——不溢出这条灰底的框） */}
         <p className="fit-text whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">

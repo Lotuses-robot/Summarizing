@@ -67,7 +67,7 @@ function ChangelogList() {
       {versions.map((v) => (
         <section key={v.version} className="mb-5 last:mb-0">
           <h3 className="mb-1.5 text-sm font-semibold text-accent">{v.version}</h3>
-          <div className="text-sm text-ink">
+          <div className="fit-text text-sm text-ink">
             <Markdown text={v.body} />
           </div>
         </section>

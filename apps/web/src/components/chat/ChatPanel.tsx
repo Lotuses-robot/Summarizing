@@ -208,7 +208,8 @@ export function ChatPanel({
       </div>
       <div
         ref={logRef}
-        className="flex-1 space-y-2 overflow-y-auto p-3 text-sm"
+        // fit-text 挂容器：消息、工具轨迹、错误提示里的长串一律框内断行（气泡各自也挂了，双保险）
+        className="fit-text flex-1 space-y-2 overflow-y-auto p-3 text-sm"
         data-chat-log
         onScroll={syncStick}
       >
@@ -220,10 +221,12 @@ export function ChatPanel({
         {msgs.map((m, i) => (
           <div key={i}>
             <div
+              // fit-text：长 URL/无空格连续字符在气泡内断行（overflow-wrap/word-break 可继承，
+              // Markdown 子元素同样受保护）——与详情展开体/引文浮窗同一原语
               className={
                 m.role === "user"
-                  ? "ml-8 rounded-lg bg-accent-soft px-3 py-1.5"
-                  : "mr-8 rounded-lg bg-canvas px-3 py-1.5"
+                  ? "fit-text ml-8 rounded-lg bg-accent-soft px-3 py-1.5"
+                  : "fit-text mr-8 rounded-lg bg-canvas px-3 py-1.5"
               }
             >
               <span className="text-xs text-ink-muted">{m.role === "user" ? "你" : "前台"}：</span>
