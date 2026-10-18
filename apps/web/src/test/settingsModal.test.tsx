@@ -219,13 +219,13 @@ describe("设置弹层：收取规则（D-107）", () => {
     render(<SettingsModal open onClose={() => {}} />);
     // 左栏按钮 + 分区标题都叫「收取规则」——两处都在（≥2）
     expect((await screen.findAllByText("收取规则")).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByPlaceholderText(/不要拼多多砍一刀/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/拼多多砍一刀/)).toBeInTheDocument();
   });
 
   it("失焦即存：改了规则后 blur → PUT 发出，body 带 rules", async () => {
     const { puts } = stubRules();
     render(<SettingsModal open onClose={() => {}} />);
-    const box = await screen.findByPlaceholderText(/不要拼多多砍一刀/);
+    const box = await screen.findByPlaceholderText(/拼多多砍一刀/);
     fireEvent.change(box, { target: { value: "不要集赞拉票" } });
     fireEvent.blur(box);
     await waitFor(() => expect(puts).toHaveLength(1));
@@ -235,19 +235,17 @@ describe("设置弹层：收取规则（D-107）", () => {
   it("没改动就不发 PUT（不制造无意义写）", async () => {
     const { puts } = stubRules();
     render(<SettingsModal open onClose={() => {}} />);
-    const box = await screen.findByPlaceholderText(/不要拼多多砍一刀/);
+    const box = await screen.findByPlaceholderText(/拼多多砍一刀/);
     fireEvent.focus(box);
     fireEvent.blur(box);
-    await waitFor(() =>
-      expect(screen.getByPlaceholderText(/不要拼多多砍一刀/)).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByPlaceholderText(/拼多多砍一刀/)).toBeInTheDocument());
     expect(puts).toHaveLength(0);
   });
 
   it("Esc 关闭前 flush：改完没失焦，Esc 也能把规则发出去（评审 H1 同款守卫）", async () => {
     const { puts } = stubRules();
     render(<SettingsModal open onClose={() => {}} />);
-    const box = await screen.findByPlaceholderText(/不要拼多多砍一刀/);
+    const box = await screen.findByPlaceholderText(/拼多多砍一刀/);
     fireEvent.change(box, { target: { value: "esc 前存下" } });
     handleEsc(); // App 的全局 Esc 消费实际就是调它（本测试单渲染 Modal，没有 App 在听 keydown）
     await waitFor(() => expect(puts).toHaveLength(1));

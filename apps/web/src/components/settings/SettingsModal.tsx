@@ -489,7 +489,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             id={SECTION_DOM.rules}
             title="收取规则"
             icon={FilterIcon}
-            desc="告诉 AI 哪些内容不要收——你点名的会被直接拒收，没提到的一律照常判断"
+            desc="指定不希望收取的内容——点名提及的会被直接拒收，其余照常判断"
           >
             {rulesFailed ? (
               <Row label={<span className="text-danger">读不到当前规则（后端在跑吗？）</span>} />
@@ -498,14 +498,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                  px-4/py-2.5 内距与 border 节奏；不再自己套 div 造成「文字贴框线」。 */
               <Row
                 stacked
-                label="不收哪些内容"
-                description="用大白话写，一行一条也行。失焦即生效——下一条新消息就按这个判。只拒你点名的，没提到的一律照常判断；被拒的内容仍会在流水里留痕。"
+                label="拒收规则"
+                description="用日常语言描述不希望收取的内容，一行一条。失焦即生效——下一条新消息便按此判断。仅拒你点名提及的，其余照常处理；被拒的内容仍会在流水中留痕。"
               >
                 <textarea
                   className="textarea min-h-40"
                   value={rules}
                   placeholder={
-                    "例如：\n· 不要拼多多砍一刀、集赞、投票拉票类的链接\n· 群里的灌水、早安图、无内容的转发不要收\n· 「以学校通知为准」这类空话不要建事项"
+                    "例如：\n· 拼多多砍一刀、集赞、投票拉票一类链接\n· 群内灌水、问候图片、无实质内容的转发\n· 「以学校通知为准」这类没有实质信息的表述"
                   }
                   onChange={(e) => {
                     setRules(e.target.value);
