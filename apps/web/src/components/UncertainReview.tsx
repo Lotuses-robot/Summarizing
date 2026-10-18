@@ -122,7 +122,7 @@ export function UncertainReview({
               )}
             >
               <div className="min-w-0 flex-1">
-                <p className="text-sm">{it.content}</p>
+                <p className="fit-text text-sm">{it.content}</p>
                 <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-muted">
                   <span
                     className="chip"

@@ -671,3 +671,43 @@ describe("删除后从原视图消失（007：trashed 不进通知页/看板）"
     expect(deriveTrashed(db).rows).toHaveLength(1);
   });
 });
+
+describe("流水摘要区分事项/通知（D-106 修订：通知不说「日期未知」）", () => {
+  /** 经执行器落一笔 create_item，返回它给流水摘要用的那行文案。 */
+  function createSummary(
+    db: ReturnType<typeof makeDb>,
+    kind: "task" | "notice" | undefined,
+  ): string {
+    const raw = seedRaw(db);
+    const { details } = executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "create_item",
+          ...(kind === undefined ? {} : { kind }),
+          elements: [{ label: "name", text: "课改到明理楼3楼", quotes: [] }],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+    return details.join("；");
+  }
+
+  it("建事项 → 文案写「新建事项」+ 日期未知（事项无 ddl 时如实说明）", () => {
+    const db = makeDb(":memory:");
+    const detail = createSummary(db, undefined);
+    expect(detail).toContain("新建事项「课改到明理楼3楼」");
+    expect(detail).toContain("日期未知");
+  });
+
+  it("建通知 → 文案写「新建通知」，且**不出现 ddl / 日期未知**", () => {
+    const db = makeDb(":memory:");
+    const detail = createSummary(db, "notice");
+    expect(detail).toContain("新建通知「课改到明理楼3楼」");
+    expect(detail).not.toContain("日期未知");
+    expect(detail).not.toContain("ddl");
+  });
+});

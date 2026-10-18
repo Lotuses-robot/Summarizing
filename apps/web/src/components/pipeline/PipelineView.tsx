@@ -76,7 +76,8 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
   return (
     <div data-testid="run-detail" className="rounded-b-lg bg-surface px-4 pb-3.5 pt-2">
       <section>
-        <p className="whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">
+        {/* 原文：保留换行 + 长 URL 框内断行（fit-text——不溢出这条灰底的框） */}
+        <p className="fit-text whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">
           {detail.raw.content}
         </p>
       </section>

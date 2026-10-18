@@ -38,7 +38,8 @@ export function QuoteOverlay({
             关闭
           </button>
         </div>
-        <p className="max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+        {/* whitespace-pre-wrap 保留原文换行；fit-text 让无空格长 URL 也在框内断行（不横向溢出） */}
+        <p className="fit-text max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
           {idx >= 0 ? (
             <>
               {rawInput.content.slice(0, idx)}

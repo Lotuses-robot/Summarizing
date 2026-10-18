@@ -56,8 +56,9 @@ export function NoticePanel({
             key={item.id}
             id={`row-${item.id}`}
             className={cn(
-              "group relative cursor-pointer overflow-hidden rounded-md border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
-              expandedId === item.id && "bg-canvas ring-1 ring-accent",
+              // 常态 = 浅色细框（不勾注意力）；选中 = 加深背景（与看板同色系、不用描边抢视线）
+              "group relative cursor-pointer overflow-hidden rounded-md border border-line/60 py-2 pl-5 pr-3 hover:bg-canvas",
+              expandedId === item.id && "border-line bg-canvas",
             )}
             onClick={() => toggle(item.id)}
           >

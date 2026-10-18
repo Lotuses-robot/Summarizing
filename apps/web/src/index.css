@@ -109,6 +109,14 @@
 
 /* 高频复用形态：shadcn 风格的几个原语（组件里配 cn() 组合，不堆 Tailwind 长串） */
 @layer components {
+  /* 长串（URL / 无空格连续字符）一律在框内断行——不横向溢出框线。
+   *  加在「装用户内容的容器」上（详情展开体 / 存疑条目 / 引文浮窗 / 流水），
+   *  一处生效、后加的内容自动受保护（2026-10-18 用户反馈链接顶出框线）。 */
+  .fit-text {
+    overflow-wrap: anywhere; /* 长 URL 无空格也能断 */
+    word-break: break-word; /* 老浏览器兜底 */
+    min-width: 0; /* flex 子项默认 min-width:auto 会顶破父容器——这是横向溢出的真正根因 */
+  }
   .btn {
     @apply inline-flex cursor-pointer items-center gap-1 rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-50;
   }
@@ -130,6 +138,11 @@
   }
   .input {
     @apply w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none;
+  }
+  /* 长文本设置项（收取规则等自由文本）：多行 + 垂直拉伸。
+   *  leading-relaxed 让中文多行文本行间不至于挤在一起——紧贴框线的观感主要来自行高与内边距。 */
+  .textarea {
+    @apply w-full resize-y rounded-md border border-line bg-surface px-3 py-2.5 text-sm leading-relaxed text-ink placeholder:text-ink-muted/70 focus:border-accent focus:outline-none;
   }
   /* 深链短促高亮（05§三）：背景色动画不产生 containing block，不伤 sticky */
   .row-flash {

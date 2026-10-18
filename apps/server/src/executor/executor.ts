@@ -8,6 +8,7 @@ import {
   type ChangeItem,
   type Element,
   type ElementInput,
+  type Item,
   type Provenance,
   type RawInput,
 } from "@summarizing/shared";
@@ -52,22 +53,23 @@ function applyChanges(
     switch (item.action) {
       case "create_item": {
         const elements = buildElements(item.elements);
+        const kind = item.kind ?? "task"; // 分类轴（007）：缺省 task；通知=notice（无 dueDate，围栏已强制）
         const itemId = newItemId();
         repo.appendItemVersion(tx, {
           itemId,
           action: "create_item",
-          detail: describe(elements, item.tags, item.doubtNote),
+          detail: describe(elements, item.tags, item.doubtNote, kind),
           snapshot: {
             elements,
             tags: item.tags,
             status: "todo",
-            kind: item.kind ?? "task", // 分类轴（007）：缺省 task；通知=notice（无 dueDate，围栏已强制）
+            kind,
             doubtNote: item.doubtNote,
           },
           by,
         });
         attachElementEvidence(tx, raw, itemId, item.elements, by);
-        details.push(describe(elements, item.tags, item.doubtNote));
+        details.push(describe(elements, item.tags, item.doubtNote, kind));
         break;
       }
       case "update_item": {
@@ -102,7 +104,8 @@ function applyChanges(
           by,
         });
         attachElementEvidence(tx, raw, current.id, item.elements, by);
-        details.push(`更新事项「${itemName(elements)}」`);
+        const noun = (item.kind ?? current.kind) === "notice" ? "通知" : "事项";
+        details.push(`更新${noun}「${itemName(elements)}」`);
         break;
       }
       case "resolve_doubt": {
@@ -286,15 +289,24 @@ function attachElementEvidence(
   }
 }
 
-/** 生成 create_item 的人话描述：ddl（含推断标注）+ 标签 + 存疑。 */
-function describe(elements: Element[], tags: string[], doubtNote: string | null): string {
+/** 生成 create_item 的人话描述：kind（事项/通知）+ ddl（含推断标注）+ 标签 + 存疑。
+ *  通知无 ddl——摘要里不出现任何日期字样（它进通知页、不占看板，说「日期未知」是噪声）。 */
+function describe(
+  elements: Element[],
+  tags: string[],
+  doubtNote: string | null,
+  kind: Item["kind"] = "task",
+): string {
+  const tagText = tags.length > 0 ? `；标签：${tags.join("、")}` : "";
+  const doubtText = doubtNote !== null ? `；⚠ 存疑：${doubtNote}` : "";
+  if (kind === "notice") {
+    return `新建通知「${itemName(elements)}」${tagText}${doubtText}`;
+  }
   const due = elements.find((e) => e.label === "dueDate"); // 与 shared 的 dueDateElement 同义（此处为局部元素数组，保持直查）
   const dateText =
     !due || due.text === ""
       ? "日期未知"
       : `ddl ${due.text}${due.note ? `（推断：${due.note}）` : ""}`;
-  const tagText = tags.length > 0 ? `；标签：${tags.join("、")}` : "";
-  const doubtText = doubtNote !== null ? `；⚠ 存疑：${doubtNote}` : "";
   return `新建事项「${itemName(elements)}」${dateText}${tagText}${doubtText}`;
 }
 

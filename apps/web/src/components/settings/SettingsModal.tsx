@@ -494,23 +494,24 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             {rulesFailed ? (
               <Row label={<span className="text-danger">读不到当前规则（后端在跑吗？）</span>} />
             ) : (
-              <div className="px-1 pb-1">
+              <div className="px-0.5">
                 <textarea
-                  className="input min-h-32 w-full resize-y font-normal"
+                  className="textarea min-h-40"
                   value={rules}
-                  placeholder="例如：
-不要拼多多砍一刀、集赞、投票拉票类的链接；
-群里的灌水、早安图、无内容的转发不要收；
-「以学校通知为准」这类空话不要建事项。"
+                  placeholder={
+                    "例如：\n· 不要拼多多砍一刀、集赞、投票拉票类的链接\n· 群里的灌水、早安图、无内容的转发不要收\n· 「以学校通知为准」这类空话不要建事项"
+                  }
                   onChange={(e) => {
                     setRules(e.target.value);
                     setRulesDirty(true);
                   }}
                   onBlur={saveRules}
                 />
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <p className="text-xs text-ink-muted">
-                    失焦即生效——下一条新消息就按这个判。被它拒收的内容仍会在流水里留痕，不会无声消失。
+                <div className="mt-2 flex items-start justify-between gap-3">
+                  <p className="text-xs leading-relaxed text-ink-muted">
+                    失焦即生效——下一条新消息就按这个判。
+                    <br />
+                    只拒你点名的，没提到的一律照常判断；被它拒收的内容仍会在流水里留痕，不会无声消失。
                   </p>
                   <StatusSlot statuses={statuses} />
                 </div>

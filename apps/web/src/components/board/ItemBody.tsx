@@ -103,7 +103,8 @@ export function ItemBody({ id }: { id: string }) {
   const sources = collectSources(detail);
 
   return (
-    <div className="text-sm">
+    // fit-text：元素/来源/引文里的长 URL 在框内断行（不溢出框线）——单点挂容器，内部全生效
+    <div className="fit-text text-sm">
       <div className="p-3">
         <h3 className="text-sm font-semibold">基本信息</h3>
         <p className="mt-2">

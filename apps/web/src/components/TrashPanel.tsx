@@ -71,8 +71,9 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
             <li
               key={item.id}
               className={cn(
-                "group relative cursor-pointer overflow-hidden rounded-md border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
-                expandedId === item.id && "bg-canvas ring-1 ring-accent",
+                // 同通知页：常态浅框、选中加深背景（不用描边——与事项的选中观感拉开但同一套语言）
+                "group relative cursor-pointer overflow-hidden rounded-md border border-line/60 py-2 pl-5 pr-3 hover:bg-canvas",
+                expandedId === item.id && "border-line bg-canvas",
               )}
               onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
             >
