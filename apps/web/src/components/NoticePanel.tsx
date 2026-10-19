@@ -440,12 +440,12 @@ export function NoticePanel({
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
           >
-            {/* 左右缘的 ‹ ›：居中在「卡片边缘 → 信息左缘(34px)」这段空隙的正中；纯显示（用户 2026-10-19） */}
+            {/* 左右缘固定位置的 ‹ ›：纯显示，不随下方信息内收而移动（用户 2026-10-19） */}
             {selected !== null && (
               <>
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute left-1.5 top-1/2 z-10 w-6 -translate-y-1/2 select-none text-center text-base leading-none text-ink-muted/40"
+                  className="pointer-events-none absolute left-0 top-1/2 z-10 w-6 -translate-y-1/2 select-none text-center text-base leading-none text-ink-muted/40"
                 >
                   ‹
                 </span>
