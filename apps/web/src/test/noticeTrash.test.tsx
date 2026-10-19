@@ -118,9 +118,25 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     expect(screen.getByText("1/2")).toBeInTheDocument();
   });
 
-  it("已读的通知不显示「新」", () => {
-    render(<NoticePanel notices={[notice({ viewed: true })]} filter={ALL} onRefresh={() => {}} />);
-    expect(screen.queryByText("新")).not.toBeInTheDocument();
+  it("未读点：选中即已读；列表里其它未读条仍亮（title 未读/已读）", () => {
+    const second = notice({
+      item: { ...notice().item, id: "n2", elements: [{ label: "name", text: "线性代数调课" }] },
+    });
+    const { unmount } = render(
+      <NoticePanel notices={[notice(), second]} filter={ALL} onRefresh={() => {}} />,
+    );
+    // 第一条被自动选中→标已读；第二条仍是未读
+    expect(screen.getAllByTitle("已读").length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle("未读").length).toBeGreaterThan(0);
+    unmount();
+    render(
+      <NoticePanel
+        notices={[notice({ viewed: true }), notice({ ...second, viewed: true })]}
+        filter={ALL}
+        onRefresh={() => {}}
+      />,
+    );
+    expect(screen.queryAllByTitle("未读")).toHaveLength(0);
   });
 
   it("自动选中第一条即报已读；点列表另一条也报已读", async () => {
@@ -170,9 +186,9 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     });
     render(<NoticePanel notices={[notice(), second]} filter={ALL} onRefresh={() => {}} />);
     fireEvent.click(screen.getByTitle(/稍后（本次跳过/));
-    await waitFor(() => expect(screen.getByText("稍后")).toBeInTheDocument()); // 列表行标记
-    // 主卡切到第二条（1/2 → 2/2）
-    expect(screen.getByText("2/2")).toBeInTheDocument();
+    // 主卡切到第二条（1/2 → 2/2）；不再有「稍后」标签（用户 2026-10-19：只要已读/未读）
+    await waitFor(() => expect(screen.getByText("2/2")).toBeInTheDocument());
+    expect(screen.queryByText("稍后")).not.toBeInTheDocument();
   });
 });
 
@@ -269,13 +285,13 @@ describe("NoticePanel：更新后重新标未读（OQ-11 前端半侧）", () =>
     vi.restoreAllMocks();
   });
 
-  it("同一次更新内选中过 → 不再亮「新」；updatedAt 变了 → 重新亮", () => {
+  it("同一次更新内选中过 → 已读；updatedAt 变了 → 重新变未读", () => {
     const r1 = notice({ updatedAt: "2026-10-17 10:00" });
     const { rerender } = render(<NoticePanel notices={[r1]} filter={ALL} onRefresh={() => {}} />);
-    expect(screen.queryByText("新")).not.toBeInTheDocument(); // 自动选中即已读
+    expect(screen.queryAllByTitle("未读")).toHaveLength(0); // 自动选中即已读
     const r2 = notice({ updatedAt: "2026-10-18 09:00" });
     rerender(<NoticePanel notices={[r2]} filter={ALL} onRefresh={() => {}} />);
-    expect(screen.getByText("新")).toBeInTheDocument();
+    expect(screen.getAllByTitle("未读").length).toBeGreaterThan(0);
   });
 });
 

@@ -34,7 +34,14 @@ import { QuoteOverlay } from "./QuoteOverlay";
 
 /** 事项展开体（D-80 手风琴内容）：基本信息开 / 信息元素平铺引文收 / 版本史收只显计数。
  *  滚动四铁规（内滚隔离/sticky/70vh）由父级的展开容器承担，这里只管内容。 */
-export function ItemBody({ id }: { id: string }) {
+export function ItemBody({
+  id,
+  variant = "default",
+}: {
+  id: string;
+  /** default = 看板展开体（小节标题齐全）；reader = 通知主卡（去小节标题、空的基本信息不渲染）。 */
+  variant?: "default" | "reader";
+}) {
   const [detail, setDetail] = useState<GetItemResult | null>(null);
   const [openQuotes, setOpenQuotes] = useState<readonly string[]>([]);
   const [openSources, setOpenSources] = useState<readonly string[]>([]);
@@ -101,109 +108,127 @@ export function ItemBody({ id }: { id: string }) {
   // 来源信息：逐批次铺开（一行 = 一个进站批次，**不按身份串去重/合并**——见 collectSources，用户 2026-10-14）；
   // 一个事项的证据可跨多批次/多来源，全部如实列出
   const sources = collectSources(detail);
+  /** 阅读器形态：通知主卡里少几层标题——只留内容本身（用户 2026-10-19：聚焦内容太多）。 */
+  const isReader = variant === "reader";
+  /** 基本信息块只在有内容时渲染：事项（ddl 行）或有 summary；通知没 summary 时整块不出现。 */
+  const showBasic = item.kind === "task" || summaryElement !== undefined;
 
   return (
     // fit-text：元素/来源/引文里的长 URL 在框内断行（不溢出框线）——单点挂容器，内部全生效
     <div className="fit-text text-sm">
-      <div className="p-3">
-        <h3 className="text-sm font-semibold">基本信息</h3>
-        {/* 通知无 ddl（结构上就没有 dueDate）——不渲染 [ddl] 行（同 executor 摘要口径：
+      {showBasic && (
+        <div className={isReader ? "px-3 pb-1 pt-2" : "p-3"}>
+          {!isReader && <h3 className="text-sm font-semibold">基本信息</h3>}
+          {/* 通知无 ddl（结构上就没有 dueDate）——不渲染 [ddl] 行（同 executor 摘要口径：
             对通知说「未知/日期未知」是噪声，D-106） */}
-        {item.kind === "task" && (
-          <>
-            <p className="mt-2">
-              <b className="text-ink-muted">[ddl]</b>{" "}
-              {dueText !== null ? (
-                <>
-                  {fmtFullTime(dueText)}
-                  {dueRelative !== null && (
-                    <span className="ml-1.5 text-xs text-ink-muted">（{dueRelative}）</span>
-                  )}
-                  {/* 「推断」= 行内后缀开关（与「· 证据(n)」同款，用户 2026-09-30 走查定）：
+          {item.kind === "task" && (
+            <>
+              <p className="mt-2">
+                <b className="text-ink-muted">[ddl]</b>{" "}
+                {dueText !== null ? (
+                  <>
+                    {fmtFullTime(dueText)}
+                    {dueRelative !== null && (
+                      <span className="ml-1.5 text-xs text-ink-muted">（{dueRelative}）</span>
+                    )}
+                    {/* 「推断」= 行内后缀开关（与「· 证据(n)」同款，用户 2026-09-30 走查定）：
                   点开/收起说明文字（样式同引文块）。哨兵键带 @ 前缀——不与自由元素 label 撞键 */}
-                  {dueNote !== null && (
-                    <button
-                      className="cursor-pointer text-xs text-accent hover:underline"
-                      onClick={() => toggleQuotes(DDL_NOTE_KEY)}
-                    >
-                      {" "}
-                      · 推断
-                    </button>
-                  )}
-                </>
-              ) : (
-                <span className="text-ink-muted">未知</span>
+                    {dueNote !== null && (
+                      <button
+                        className="cursor-pointer text-xs text-accent hover:underline"
+                        onClick={() => toggleQuotes(DDL_NOTE_KEY)}
+                      >
+                        {" "}
+                        · 推断
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-ink-muted">未知</span>
+                )}
+              </p>
+              {dueNote !== null && openQuotes.includes(DDL_NOTE_KEY) && (
+                <blockquote className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted">
+                  {dueNote}
+                </blockquote>
               )}
-            </p>
-            {dueNote !== null && openQuotes.includes(DDL_NOTE_KEY) && (
-              <blockquote className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted">
-                {dueNote}
-              </blockquote>
-            )}
-          </>
-        )}
-        {summaryElement !== undefined && (
-          <div className="mt-2">
-            <p
-              className={cn("text-sm", summaryEvidence.length > 0 && "cursor-pointer")}
-              onClick={() => {
-                if (summaryEvidence.length > 0) toggleQuotes("summary");
-              }}
-            >
-              <b className="text-ink-muted">[sum]</b> {summaryElement.text}
-              {summaryEvidence.length > 0 && (
-                <span className="text-xs text-accent"> · 证据({summaryEvidence.length})</span>
-              )}
-            </p>
-            {openQuotes.includes("summary") && (
-              <Quotes detail={detail} evidence={summaryEvidence} onOpenQuote={setQuote} />
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-line p-3">
-        <h3 className="text-sm font-semibold">
-          信息元素{" "}
-          <span className="ml-1 text-xs font-normal text-ink-muted">{freeElements.length}</span>
-        </h3>
-        {freeElements.length === 0 && (
-          <p className="mt-2 text-xs text-ink-muted">
-            暂无——对前台说话即可补充（agent0 自主归类，无需表单）
-          </p>
-        )}
-        {freeElements.map((el) => {
-          const evidence = evidenceFor(el.label);
-          const open = openQuotes.includes(el.label);
-          return (
-            <div key={el.label} className="mt-3">
-              {/* 点元素行 = 展开/收起该元素的引文（引文是唯一折叠层，D-80） */}
+            </>
+          )}
+          {summaryElement !== undefined && (
+            <div className="mt-2">
               <p
-                className={cn("text-sm", evidence.length > 0 && "cursor-pointer")}
+                className={cn("text-sm", summaryEvidence.length > 0 && "cursor-pointer")}
                 onClick={() => {
-                  if (evidence.length > 0) toggleQuotes(el.label);
+                  if (summaryEvidence.length > 0) toggleQuotes("summary");
                 }}
               >
-                <b className="text-ink-muted">[{el.label}]</b> {el.text}
-                <span
-                  className={evidence.length > 0 ? "text-xs text-accent" : "text-xs text-ink-muted"}
-                >
-                  {" "}
-                  · 证据({evidence.length})
-                </span>
+                <b className="text-ink-muted">[sum]</b> {summaryElement.text}
+                {summaryEvidence.length > 0 && (
+                  <span className="text-xs text-accent"> · 证据({summaryEvidence.length})</span>
+                )}
               </p>
-              {open && <Quotes detail={detail} evidence={evidence} onOpenQuote={setQuote} />}
+              {openQuotes.includes("summary") && (
+                <Quotes detail={detail} evidence={summaryEvidence} onOpenQuote={setQuote} />
+              )}
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
+
+      {(freeElements.length > 0 || !isReader) && (
+        <div className="border-t border-line p-3">
+          {!isReader && (
+            <h3 className="text-sm font-semibold">
+              信息元素{" "}
+              <span className="ml-1 text-xs font-normal text-ink-muted">{freeElements.length}</span>
+            </h3>
+          )}
+          {freeElements.length === 0 && (
+            <p className="mt-2 text-xs text-ink-muted">
+              暂无——对前台说话即可补充（agent0 自主归类，无需表单）
+            </p>
+          )}
+          {freeElements.map((el) => {
+            const evidence = evidenceFor(el.label);
+            const open = openQuotes.includes(el.label);
+            return (
+              <div key={el.label} className="mt-3">
+                {/* 点元素行 = 展开/收起该元素的引文（引文是唯一折叠层，D-80） */}
+                <p
+                  className={cn("text-sm", evidence.length > 0 && "cursor-pointer")}
+                  onClick={() => {
+                    if (evidence.length > 0) toggleQuotes(el.label);
+                  }}
+                >
+                  <b className="text-ink-muted">[{el.label}]</b> {el.text}
+                  <span
+                    className={
+                      evidence.length > 0 ? "text-xs text-accent" : "text-xs text-ink-muted"
+                    }
+                  >
+                    {" "}
+                    · 证据({evidence.length})
+                  </span>
+                </p>
+                {open && <Quotes detail={detail} evidence={evidence} onOpenQuote={setQuote} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {sources.length > 0 && (
         <div className="border-t border-line p-3">
-          <h3 className="text-sm font-semibold">
-            来源信息{" "}
-            <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
-          </h3>
+          {isReader ? (
+            <p className="text-xs text-ink-muted">
+              来源信息 <span className="text-ink-muted/70">{sources.length}</span>
+            </p>
+          ) : (
+            <h3 className="text-sm font-semibold">
+              来源信息{" "}
+              <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
+            </h3>
+          )}
           {sources.map((src) => {
             const open = openSources.includes(src.raw.id);
             return (

@@ -259,7 +259,9 @@ describe("通知展开体不显示 [ddl]（D-106：通知无 ddl）", () => {
     });
     stubFetch(detail);
     render(<ItemBody id="n1" />);
-    await waitFor(() => expect(screen.getByText("基本信息")).toBeInTheDocument());
+    // 通知无 summary → 基本信息整块不渲染（阅读器与默认形态一致）；等元素区的空态出现即视为已加载
+    await waitFor(() => expect(screen.getByText(/暂无——对前台说话即可补充/)).toBeInTheDocument());
+    expect(screen.queryByText("基本信息")).not.toBeInTheDocument();
     expect(screen.queryByText("[ddl]")).not.toBeInTheDocument();
     expect(screen.queryByText("未知")).not.toBeInTheDocument();
   });

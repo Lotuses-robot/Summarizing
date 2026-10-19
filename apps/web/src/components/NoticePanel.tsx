@@ -14,8 +14,9 @@ import { fmtFullTime, fmtShortTime } from "../lib/time";
 
 // 通知页（007 / D-108 阅读器形态）：主卡固定展示当前通知的完整内容（复用 ItemBody），
 // 下方列表只做索引与选择。手势：向左拖 = 稍后（本次跳过，不写库）、向右拖 = 清除
-// （进回收站、可撤销）。常驻的左右缘提示同时也是点击兜底（鼠标用户无需拖）。
+// （进回收站、可撤销）。左右缘常驻浅提示同时也是点击兜底。
 // 自动选择：进入 / 筛选变化 / 清除 / 稍后之后，选下一条未跳过的；轮询不抢焦点。
+// 拖动走直接 DOM 变换（不经 state）——ItemBody 内容重不参与逐帧重渲染，手感跟手。
 
 /** 拖动阈值：卡片宽度的 35%。 */
 const SWIPE_RATIO = 0.35;
@@ -76,10 +77,13 @@ export function NoticePanel({
   );
   /** 删除/撤销失败必须可见（红线「不许静默」）。 */
   const [actionError, setActionError] = useState<string | null>(null);
-  /** 拖动位移（px）：正 = 向右（清除），负 = 向左（稍后）。 */
-  const [drag, setDrag] = useState<{ dx: number } | null>(null);
 
-  const cardRef = useRef<HTMLDivElement | null>(null);
+  /** 拖动位移（px）：正 = 向右（清除），负 = 向左（稍后）。 */
+  const dxRef = useRef(0);
+  const cardBodyRef = useRef<HTMLDivElement | null>(null);
+  const revealRef = useRef<HTMLDivElement | null>(null);
+  const leftActRef = useRef<HTMLSpanElement | null>(null);
+  const rightActRef = useRef<HTMLSpanElement | null>(null);
   const dragRef = useRef<{ startX: number; width: number } | null>(null);
   const pendingRef = useRef<typeof pending>(null);
   useEffect(() => {
@@ -132,7 +136,7 @@ export function NoticePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleKey]);
 
-  // 选中即已读——但**只在"选中的那条发生变化"时**标：轮询把同一条内容更新后应亮「新」
+  // 选中即已读——但**只在"选中的那条发生变化"时**标：轮询把同一条内容更新后应亮「未读」
   // （OQ-11：更新后重新标未读），不能被每轮刷新立刻又标回已读。
   const selectRef = useRef(select);
   useEffect(() => {
@@ -190,7 +194,7 @@ export function NoticePanel({
     commitRef.current = commitDelete;
   }, [commitDelete]);
 
-  /** 倒计时 interval（用 ref 持有——避免每次渲染重置、也避免 effect 依赖抖动）。 */
+  /** 倒计时 interval（用 ref 持有——避免每次渲染重置）。 */
   const timerRef = useRef<number | null>(null);
   /** 取消撤销窗口（撤回按钮 / Esc）。 */
   const cancelDelete = useCallback(() => {
@@ -202,7 +206,7 @@ export function NoticePanel({
     setActionError(null);
   }, []);
 
-  /** 撤销窗口的 Esc 层：只取消本次清除，不连带弹走页面（按「是否有待删」注册，避免每秒重注册）。 */
+  /** 撤销窗口的 Esc 层：只取消本次清除（按「是否有待删」注册，避免每秒重注册）。 */
   const hasPending = pending !== null;
   useEffect(() => {
     if (!hasPending) return;
@@ -221,7 +225,7 @@ export function NoticePanel({
     };
   }, []);
 
-  /** 稍后：进本次跳过集合，选下一条未跳过的。 */
+  /** 稍后：进本次跳过集合，选下一条未跳过的（不写库）。 */
   const skip = useCallback(
     (row: NoticeRow) => {
       const next = nextUnskippedAfter(row.item.id);
@@ -251,44 +255,59 @@ export function NoticePanel({
     }, 1000);
   }, []);
 
-  // ── 拖动 ──
+  // ── 拖动：直接改写 DOM（不 setState），内容不参与逐帧重渲染 ──
   /** 按下：记录起点与卡宽；交互元素上不启动拖动（点证据/链接/按钮要正常）。 */
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (pending !== null) return;
-    if (selected === null) return;
-    // 交互元素上的按下不启动拖动（点证据/链接/按钮要正常工作）
+    if (pending !== null || selected === null) return;
     if ((e.target as HTMLElement).closest("button,a,summary,input,textarea,select")) return;
-    dragRef.current = { startX: e.clientX, width: cardRef.current?.clientWidth ?? 320 };
+    dragRef.current = { startX: e.clientX, width: cardBodyRef.current?.clientWidth ?? 320 };
+    dxRef.current = 0;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ dx: 0 });
+    if (cardBodyRef.current !== null) cardBodyRef.current.style.transition = "none";
+    if (revealRef.current !== null) revealRef.current.style.display = "block";
   };
-  /** 移动：位移限制在 ±60% 卡宽内（越界回弹由阈值逻辑兜住）。 */
+  /** 移动：位移限制在 ±60% 卡宽；底层动作层随位移加深，方向决定露哪一侧。 */
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (d === null) return;
     const limit = d.width * 0.6;
     const dx = Math.max(-limit, Math.min(limit, e.clientX - d.startX));
-    setDrag({ dx });
+    dxRef.current = dx;
+    if (cardBodyRef.current !== null) {
+      cardBodyRef.current.style.transform = `translateX(${dx}px)`;
+    }
+    const strength = Math.min(1, Math.abs(dx) / Math.max(1, d.width * SWIPE_RATIO));
+    if (revealRef.current !== null) {
+      revealRef.current.style.opacity = String(0.35 + strength * 0.65);
+    }
+    if (leftActRef.current !== null) {
+      leftActRef.current.style.display = dx > 4 ? "inline-flex" : "none";
+      leftActRef.current.style.opacity = String(strength);
+    }
+    if (rightActRef.current !== null) {
+      rightActRef.current.style.display = dx < -4 ? "inline-flex" : "none";
+      rightActRef.current.style.opacity = String(strength);
+    }
   };
   /** 松开：过阈值即执行（右=清除、左=稍后），否则回弹。 */
   const endDrag = () => {
     const d = dragRef.current;
     dragRef.current = null;
-    if (d === null || selected === null) {
-      setDrag(null);
-      return;
+    const dx = dxRef.current;
+    dxRef.current = 0;
+    if (cardBodyRef.current !== null) {
+      cardBodyRef.current.style.transition = "";
+      cardBodyRef.current.style.transform = "";
     }
-    const dx = drag?.dx ?? 0;
+    if (revealRef.current !== null) revealRef.current.style.display = "none";
+    if (leftActRef.current !== null) leftActRef.current.style.display = "none";
+    if (rightActRef.current !== null) rightActRef.current.style.display = "none";
+    if (d === null || selected === null) return;
     const threshold = d.width * SWIPE_RATIO;
     if (dx >= threshold)
       startDelete(selected); // 向右拖 = 清除
     else if (dx <= -threshold) skip(selected); // 向左拖 = 稍后
-    setDrag(null);
   };
-
-  const dragDx = drag?.dx ?? 0;
-  const thresholdNow = (cardRef.current?.clientWidth ?? 320) * SWIPE_RATIO;
-  const dragStrength = Math.min(1, Math.abs(dragDx) / Math.max(1, thresholdNow));
 
   const emptyCardText =
     notices.length === 0
@@ -296,6 +315,10 @@ export function NoticePanel({
       : visible.length === 0
         ? "没有匹配的通知"
         : "这一轮没有待看的通知";
+
+  /** 该条是否未读（本地标记也算已读）。 */
+  const isUnread = (r: NoticeRow): boolean =>
+    !r.viewed && viewedLocally.get(r.item.id) !== r.updatedAt;
 
   return (
     <div className="px-4 py-3">
@@ -307,50 +330,49 @@ export function NoticePanel({
 
       {/* 主卡：固定（列表滚动时不动）；内容超出在卡内滚动 */}
       <div className="sticky top-0 z-10 -mx-1 bg-canvas px-1 pb-3">
-        <div ref={cardRef} className="relative">
-          {/* 底层：低一层的画布色 + 方向箭头 + 垂直居中的动作词（拖动时露出） */}
-          {drag !== null && dragDx !== 0 && (
-            <div
-              aria-hidden
-              className="absolute inset-0 flex items-center justify-between overflow-hidden rounded-lg bg-canvas px-4 text-sm text-ink-muted"
-              style={{ opacity: 0.4 + dragStrength * 0.6 }}
+        <div className="relative">
+          {/* 底层：低一层的画布色 + 方向箭头 + 垂直居中的动作词（拖动时露出，标题不抢） */}
+          <div
+            ref={revealRef}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg bg-canvas"
+            style={{ opacity: 0.35 }}
+          >
+            <span
+              ref={leftActRef}
+              className="absolute left-6 top-1/2 hidden -translate-y-1/2 items-center gap-1 text-sm font-medium text-ink-muted"
             >
-              {dragDx > 0 ? (
-                <span className="flex items-center gap-1 font-medium">{">>>"} 清除</span>
-              ) : (
-                <span className="flex-1" />
-              )}
-              {dragDx < 0 ? (
-                <span className="flex items-center gap-1 font-medium">稍后 {"<<<"}</span>
-              ) : null}
-            </div>
-          )}
+              {">>>"} 清除
+            </span>
+            <span
+              ref={rightActRef}
+              className="absolute right-6 top-1/2 hidden -translate-y-1/2 items-center gap-1 text-sm font-medium text-ink-muted"
+            >
+              稍后 {"<<<"}
+            </span>
+          </div>
 
           {/* 卡片本体 */}
           <div
-            className={cn(
-              // touch-pan-y：纵向滚动照常，横向拖动归我们处理（手机端）
-              "relative z-10 touch-pan-y rounded-lg border border-line bg-surface transition-transform",
-              drag === null && "duration-150",
-            )}
-            style={{ transform: dragDx === 0 ? undefined : `translateX(${dragDx}px)` }}
+            ref={cardBodyRef}
+            className="relative z-10 touch-pan-y rounded-lg border border-line bg-surface transition-transform duration-150"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
           >
-            {/* 左右缘垂直居中的常驻提示（同时是点击兜底） */}
+            {/* 左右缘垂直居中的常驻浅提示（同时是点击兜底）；内容已内缩，不会与正文相撞 */}
             {selected !== null && pending === null && (
               <>
                 <button
-                  className="absolute left-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1.5 py-1 text-xs text-ink-muted/40 hover:bg-canvas hover:text-ink-muted"
+                  className="absolute left-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1 py-0.5 text-[10px] text-ink-muted/50 hover:bg-canvas hover:text-ink-muted"
                   title="稍后（本次跳过；也可向左拖动卡片）"
                   onClick={() => skip(selected)}
                 >
                   ‹ 稍后
                 </button>
                 <button
-                  className="absolute right-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1.5 py-1 text-xs text-ink-muted/40 hover:bg-canvas hover:text-ink-muted"
+                  className="absolute right-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1 py-0.5 text-[10px] text-ink-muted/50 hover:bg-canvas hover:text-ink-muted"
                   title="清除（进回收站，可撤销；也可向右拖动卡片）"
                   onClick={() => startDelete(selected)}
                 >
@@ -361,38 +383,41 @@ export function NoticePanel({
 
             {selected !== null ? (
               <div>
-                {/* 头部：来源 / 时间 / 未读 / 进度 */}
-                <div className="flex items-center gap-2 border-b border-line px-4 py-2 text-xs text-ink-muted">
-                  {selected.sourceLabel !== null && (
-                    <span className="chip">{selected.sourceLabel}</span>
-                  )}
-                  <span title={`更新于 ${fmtFullTime(selected.updatedAt)}`}>
-                    {fmtShortTime(selected.updatedAt)}
-                  </span>
-                  {!selected.viewed &&
-                    viewedLocally.get(selected.item.id) !== selected.updatedAt && (
-                      <span className="chip border-accent/50 text-accent">新</span>
-                    )}
-                  {selected.item.tags.map((t) => (
-                    <span key={t} className="chip">
-                      {t}
+                {/* 标题在上、meta 一行小灰字在下——来源不再做成 chip（用户 2026-10-19） */}
+                <div className="px-6 pt-4">
+                  <h2 className="pr-3 text-lg font-semibold leading-snug">
+                    {itemName(selected.item.elements)}
+                  </h2>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
+                        isUnread(selected) ? "bg-accent" : "bg-line",
+                      )}
+                      title={isUnread(selected) ? "未读" : "已读"}
+                      aria-label={isUnread(selected) ? "未读" : "已读"}
+                    />
+                    {selected.sourceLabel !== null && <span>{selected.sourceLabel}</span>}
+                    <span title={`更新于 ${fmtFullTime(selected.updatedAt)}`}>
+                      {fmtShortTime(selected.updatedAt)}
                     </span>
-                  ))}
-                  <span className="ml-auto tabular-nums">
-                    {selectedIndex + 1}/{visible.length}
-                  </span>
+                    {selected.item.tags.map((t) => (
+                      <span key={t} className="text-ink-muted/70">
+                        #{t}
+                      </span>
+                    ))}
+                    <span className="ml-auto tabular-nums">
+                      {selectedIndex + 1}/{visible.length}
+                    </span>
+                  </div>
                 </div>
-                {/* 标题：语义名（ItemBody 不渲染 name——看板行才渲染，这里由主卡承担 H1） */}
-                <h2 className="px-4 pt-3 text-base font-semibold">
-                  {itemName(selected.item.elements)}
-                </h2>
-                {/* 内容：复用事项展开体（元素/证据/来源信息一整套） */}
-                <div className="max-h-[60vh] overflow-y-auto">
-                  <ItemBody id={selected.item.id} />
+                {/* 内容：复用展开体（阅读器形态：去小节标题、空的基本信息不渲染） */}
+                <div className="max-h-[60vh] overflow-y-auto px-2">
+                  <ItemBody id={selected.item.id} variant="reader" />
                 </div>
               </div>
             ) : (
-              <p className="px-4 py-10 text-sm text-ink-muted">{emptyCardText}</p>
+              <p className="px-6 py-10 text-sm text-ink-muted">{emptyCardText}</p>
             )}
 
             {/* 清除的撤销窗口：模糊卡片 + 环形倒计时 + 撤回 */}
@@ -409,13 +434,11 @@ export function NoticePanel({
         </div>
       </div>
 
-      {/* 下方列表：只做索引与选择 */}
+      {/* 下方列表：只做索引与选择（未读点 + 语义名 + 来源 + 时间） */}
       {visible.length > 0 && (
         <ul className="mt-1 flex flex-col gap-0.5">
           {visible.map((r) => {
             const isSelected = r.item.id === selectedId;
-            const unread =
-              !r.viewed && viewedLocally.get(r.item.id) !== r.updatedAt && !skipped.has(r.item.id);
             return (
               <li key={r.item.id}>
                 <button
@@ -428,21 +451,14 @@ export function NoticePanel({
                   <span
                     className={cn(
                       "h-1.5 w-1.5 shrink-0 rounded-full",
-                      unread ? "bg-accent" : "bg-line",
+                      isUnread(r) ? "bg-accent" : "bg-line",
                     )}
-                    aria-hidden
+                    title={isUnread(r) ? "未读" : "已读"}
+                    aria-label={isUnread(r) ? "未读" : "已读"}
                   />
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate",
-                      skipped.has(r.item.id) && "text-ink-muted",
-                    )}
-                  >
-                    {itemName(r.item.elements)}
-                  </span>
-                  {skipped.has(r.item.id) && <span className="chip shrink-0">稍后</span>}
+                  <span className="min-w-0 flex-1 truncate">{itemName(r.item.elements)}</span>
                   {r.sourceLabel !== null && (
-                    <span className="chip shrink-0 text-ink-muted">{r.sourceLabel}</span>
+                    <span className="shrink-0 text-xs text-ink-muted">{r.sourceLabel}</span>
                   )}
                   <span
                     className="shrink-0 text-xs text-ink-muted"
