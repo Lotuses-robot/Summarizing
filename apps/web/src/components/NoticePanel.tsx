@@ -21,7 +21,7 @@ import { fmtFullTime, fmtShortTime } from "../lib/time";
 /** 拖动阈值：卡片宽度的 35%。 */
 const SWIPE_RATIO = 0.35;
 /** 清除的撤销窗口（秒）。 */
-const UNDO_SECONDS = 3;
+const UNDO_SECONDS = 2;
 
 /** 环形倒计时：挂载瞬间起整段线性排空（数字每秒递减）；pathLength 归一使弧长与半径解耦。 */
 function CountdownRing({ remaining, total }: { remaining: number; total: number }) {

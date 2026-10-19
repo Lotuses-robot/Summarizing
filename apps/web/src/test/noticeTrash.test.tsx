@@ -178,14 +178,14 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     expect(screen.getByText("没有匹配的通知")).toBeInTheDocument();
   });
 
-  it("清除：右滑 → 模糊倒计时 → 3 秒后才写库", async () => {
+  it("清除：右滑 → 模糊倒计时 → 2 秒后才写库", async () => {
     vi.useFakeTimers();
     const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
     swipeCard(200);
     expect(screen.getByText("已清除")).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled(); // 还没到点
-    await vi.advanceTimersByTimeAsync(3100);
+    await vi.advanceTimersByTimeAsync(2100);
     expect(spy).toHaveBeenCalledWith("n1");
   });
 
@@ -195,7 +195,7 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
     swipeCard(200);
     fireEvent.click(screen.getByText("撤 回"));
-    await vi.advanceTimersByTimeAsync(3100);
+    await vi.advanceTimersByTimeAsync(2100);
     expect(spy).not.toHaveBeenCalled();
     expect(screen.queryByText("已清除")).not.toBeInTheDocument();
   });
