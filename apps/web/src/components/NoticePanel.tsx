@@ -440,18 +440,18 @@ export function NoticePanel({
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
           >
-            {/* 左右缘垂直居中的 ‹ ›：纯显示，不拦截手势、不可点（用户 2026-10-19） */}
+            {/* 左右缘的 ‹ ›：居中在「卡片边缘 → 内容(24px)」这段空隙的正中；纯显示（用户 2026-10-19） */}
             {selected !== null && (
               <>
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute left-1 top-1/2 z-10 -translate-y-1/2 select-none text-base leading-none text-ink-muted/40"
+                  className="pointer-events-none absolute left-0 top-1/2 z-10 w-6 -translate-y-1/2 select-none text-center text-base leading-none text-ink-muted/40"
                 >
                   ‹
                 </span>
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute right-1 top-1/2 z-10 -translate-y-1/2 select-none text-base leading-none text-ink-muted/40"
+                  className="pointer-events-none absolute right-0 top-1/2 z-10 w-6 -translate-y-1/2 select-none text-center text-base leading-none text-ink-muted/40"
                 >
                   ›
                 </span>
@@ -466,7 +466,7 @@ export function NoticePanel({
                   <h2 className="pr-3 text-lg font-semibold leading-snug">
                     {itemName(selected.item.elements)}
                   </h2>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-muted">
                     <span
                       className={cn(
                         "h-1.5 w-1.5 shrink-0 rounded-full",

@@ -273,7 +273,7 @@ export function ItemBody({
         <button
           className={cn(
             "flex w-full items-center gap-2 text-left",
-            isReader ? "text-xs text-ink-muted" : "font-semibold",
+            isReader ? "text-[11px] text-ink-muted" : "font-semibold",
           )}
           onClick={() => setVersionsOpen(!versionsOpen)}
         >
@@ -283,7 +283,9 @@ export function ItemBody({
             <ChevronRight size={14} className="text-ink-muted" />
           )}
           编辑列表（版本史）
-          <span className="text-xs font-normal text-ink-muted">{detail.versions.length}</span>
+          <span className={cn("font-normal text-ink-muted", isReader ? "text-[11px]" : "text-xs")}>
+            {detail.versions.length}
+          </span>
         </button>
         {versionsOpen && (
           <ul className="mt-2 space-y-2">
