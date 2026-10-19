@@ -109,3 +109,25 @@ describe("App 接线（D-89：主视图切换 / Esc 分层 / 审核页错误面�
     await waitFor(() => expect(screen.queryByDisplayValue("http://y/v1")).not.toBeInTheDocument());
   });
 });
+
+describe("通知页：标签展开选择模块（与看板同款）", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("切到通知页 → 有「标签」折叠栏；点开显示通知标签空态", async () => {
+    stubApp();
+    render(<App />);
+    expect(await screen.findByText("日期未知")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("通知（都已读过）"));
+    // 标签栏在（与看板同一组件），默认折叠 → 点开见空态
+    const tagToggle = await screen.findByRole("button", { name: /^标签/ });
+    fireEvent.click(tagToggle);
+    expect(await screen.findByText("还没有标签——通知带了标签就会出现在这")).toBeInTheDocument();
+  });
+});

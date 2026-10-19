@@ -41,6 +41,54 @@ function Banner({ text }: { text: string }) {
   );
 }
 
+/** 「标签」折叠栏（看板与通知页共用，2026-09-27 定）：默认折叠，点开见全部标签，
+ *  点击 chip = 加/删一个筛选 token。两页共用同一份手势与视觉，避免抄第二份。 */
+function TagBar({
+  tags,
+  open,
+  onToggleOpen,
+  selected,
+  onToggleTag,
+  emptyText,
+}: {
+  tags: string[];
+  open: boolean;
+  onToggleOpen: () => void;
+  selected: string[];
+  onToggleTag: (tag: string) => void;
+  /** 无标签时的空态一句话（按视图措辞：事项 / 通知）。 */
+  emptyText: string;
+}) {
+  return (
+    <div className="px-4 pt-2">
+      <button
+        className="flex cursor-pointer items-center gap-1 text-xs text-ink-muted hover:text-ink"
+        onClick={onToggleOpen}
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        标签{tags.length > 0 ? `（${tags.length}）` : ""}
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {tags.length === 0 && <span className="text-xs text-ink-muted">{emptyText}</span>}
+          {tags.map((t) => (
+            <button
+              key={t}
+              className={cn(
+                "chip cursor-pointer",
+                selected.includes(t) && "border-accent bg-accent-soft text-accent",
+              )}
+              onClick={() => onToggleTag(t)}
+            >
+              #{t}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 应用外壳（05§一 布局；006 起前置认证闸门）：未登录只有认证壳（备案号挂那）、登录后进主界面。
  *  主界面 = 最左活动栏（主视图切换）+ 顶部整栏筛选 + 主区（看板/存疑库审核/流水）+ 右侧停靠对话面板。
  *  录入统一走对话输入（投递条已砍）；未选标签收在筛选栏下方的「标签」栏（默认折叠）。 */
@@ -374,6 +422,15 @@ export default function App() {
             <div className="flex items-center gap-2 px-4 pt-4">
               <FilterBar filter={filter} allTags={noticeTags} onChange={setFilter} />
             </div>
+            {/* 标签栏与看板同一组件：通知的标签同样可展开点选（同一套筛选语义） */}
+            <TagBar
+              tags={noticeTags}
+              open={tagsOpen}
+              onToggleOpen={() => setTagsOpen((open) => !open)}
+              selected={filter.tags}
+              onToggleTag={toggleFilterTag}
+              emptyText="还没有标签——通知带了标签就会出现在这"
+            />
             <NoticePanel
               notices={notices?.notices ?? []}
               filter={noticeVisible}
@@ -402,36 +459,14 @@ export default function App() {
             </div>
 
             {/* 标签栏：默认折叠，点开见全部标签，点击 = 加/删 token（用户 2026-09-27 定） */}
-            <div className="px-4 pt-2">
-              <button
-                className="flex cursor-pointer items-center gap-1 text-xs text-ink-muted hover:text-ink"
-                onClick={() => setTagsOpen((open) => !open)}
-              >
-                {tagsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                标签{allTags.length > 0 ? `（${allTags.length}）` : ""}
-              </button>
-              {tagsOpen && (
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {allTags.length === 0 && (
-                    <span className="text-xs text-ink-muted">
-                      还没有标签——事项带了标签就会出现在这
-                    </span>
-                  )}
-                  {allTags.map((t) => (
-                    <button
-                      key={t}
-                      className={cn(
-                        "chip cursor-pointer",
-                        filter.tags.includes(t) && "border-accent bg-accent-soft text-accent",
-                      )}
-                      onClick={() => toggleFilterTag(t)}
-                    >
-                      #{t}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <TagBar
+              tags={allTags}
+              open={tagsOpen}
+              onToggleOpen={() => setTagsOpen((open) => !open)}
+              selected={filter.tags}
+              onToggleTag={toggleFilterTag}
+              emptyText="还没有标签——事项带了标签就会出现在这"
+            />
 
             {board !== null && board.failedRawInputs.length > 0 && (
               <div className="mx-4 mt-2 flex items-center gap-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
