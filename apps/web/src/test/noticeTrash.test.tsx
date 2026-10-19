@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NoticeRow, TrashRow } from "@summarizing/shared";
 import { NoticePanel } from "../components/NoticePanel";
 import { TrashPanel } from "../components/TrashPanel";
 import { api } from "../api";
+import { jsonResponse } from "./helpers/http";
 import "@testing-library/jest-dom/vitest";
 
 afterEach(cleanup);
@@ -58,27 +59,82 @@ function itemFixture(id: string, status: "todo" | "trashed", kind: "task" | "not
 /** 全部通过的筛选谓词——筛选语义本身由 filter.test.ts 覆盖（单一出处 matchesFilter）。 */
 const ALL = (_r: NoticeRow) => true;
 
-describe("NoticePanel（007 通知页）", () => {
-  it("列出通知：语义名 + 未读微标", () => {
-    render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
-    expect(screen.getByText("数据结构课改到明理楼3楼")).toBeInTheDocument();
-    expect(screen.getByText("新")).toBeInTheDocument();
+/** 主卡内的 ItemBody 会拉详情：给 /api/items/:id 一个最小合法 GetItemResult（不走网络）。 */
+function stubItemFetch(): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL): Promise<Response> => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const id = /\/api\/items\/([^/?]+)/.exec(url)?.[1] ?? "n1";
+      return Promise.resolve(
+        jsonResponse({
+          item: {
+            id,
+            elements: [{ label: "name", text: "条目" }],
+            tags: [],
+            status: "todo",
+            kind: "notice",
+            doubtNote: null,
+          },
+          evidence: [],
+          fragments: [],
+          versions: [],
+          rawInputs: {},
+        }),
+      );
+    }),
+  );
+}
+
+describe("NoticePanel（D-108 主卡阅读器）", () => {
+  beforeEach(stubItemFetch);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
-  it("已读的通知不显示「新」微标", () => {
+  it("主卡默认选中第一条；下方列表列出全部；进度 1/N", () => {
+    render(
+      <NoticePanel
+        notices={[
+          notice(),
+          notice({
+            item: {
+              ...notice().item,
+              id: "n2",
+              elements: [{ label: "name", text: "线性代数调课" }],
+            },
+          }),
+        ]}
+        filter={ALL}
+        onRefresh={() => {}}
+      />,
+    );
+    // 语义名在卡片标题与列表行各出现一次
+    expect(screen.getAllByText("数据结构课改到明理楼3楼").length).toBeGreaterThan(0);
+    expect(screen.getByText("线性代数调课")).toBeInTheDocument();
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+  });
+
+  it("已读的通知不显示「新」", () => {
     render(<NoticePanel notices={[notice({ viewed: true })]} filter={ALL} onRefresh={() => {}} />);
     expect(screen.queryByText("新")).not.toBeInTheDocument();
   });
 
-  it("点开即报已读（viewed 请求发出）", async () => {
+  it("自动选中第一条即报已读；点列表另一条也报已读", async () => {
     const spy = vi.spyOn(api, "viewed").mockResolvedValue(undefined);
-    render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
-    fireEvent.click(screen.getByText("数据结构课改到明理楼3楼"));
+    const second = notice({
+      item: { ...notice().item, id: "n2", elements: [{ label: "name", text: "线性代数调课" }] },
+    });
+    render(<NoticePanel notices={[notice(), second]} filter={ALL} onRefresh={() => {}} />);
     await waitFor(() => expect(spy).toHaveBeenCalledWith("n1"));
-    spy.mockRestore();
+    fireEvent.click(screen.getByText("线性代数调课"));
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("n2"));
   });
 
-  it("空态与筛选无结果给不同文案（不许拿假空态说事）", () => {
+  it("空态与筛选无结果给不同文案", () => {
     const { unmount } = render(<NoticePanel notices={[]} filter={ALL} onRefresh={() => {}} />);
     expect(screen.getByText(/还没有通知/)).toBeInTheDocument();
     unmount();
@@ -86,12 +142,37 @@ describe("NoticePanel（007 通知页）", () => {
     expect(screen.getByText("没有匹配的通知")).toBeInTheDocument();
   });
 
-  it("行右缘删除 → 调 api.trash（一步进回收站）", async () => {
+  it("清除：点右缘提示 → 模糊倒计时 → 3 秒后才写库", async () => {
+    vi.useFakeTimers();
     const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
-    fireEvent.click(screen.getByTitle("删除（进回收站，可恢复）"));
-    await waitFor(() => expect(spy).toHaveBeenCalledWith("n1"));
-    spy.mockRestore();
+    fireEvent.click(screen.getByTitle(/清除（进回收站/));
+    expect(screen.getByText("已清除")).toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled(); // 还没到点
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(spy).toHaveBeenCalledWith("n1");
+  });
+
+  it("撤回：倒计时内点「撤回」→ 什么都不发生", async () => {
+    vi.useFakeTimers();
+    const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
+    render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
+    fireEvent.click(screen.getByTitle(/清除（进回收站/));
+    fireEvent.click(screen.getByText("撤 回"));
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(spy).not.toHaveBeenCalled();
+    expect(screen.queryByText("已清除")).not.toBeInTheDocument();
+  });
+
+  it("稍后：点左缘提示 → 标记「稍后」并跳到下一条，不写库", async () => {
+    const second = notice({
+      item: { ...notice().item, id: "n2", elements: [{ label: "name", text: "线性代数调课" }] },
+    });
+    render(<NoticePanel notices={[notice(), second]} filter={ALL} onRefresh={() => {}} />);
+    fireEvent.click(screen.getByTitle(/稍后（本次跳过/));
+    await waitFor(() => expect(screen.getByText("稍后")).toBeInTheDocument()); // 列表行标记
+    // 主卡切到第二条（1/2 → 2/2）
+    expect(screen.getByText("2/2")).toBeInTheDocument();
   });
 });
 
@@ -155,6 +236,13 @@ describe("TrashPanel（007 回收站）", () => {
 });
 
 describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
+  beforeEach(stubItemFetch);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it("有来源时显示徽标；无来源（null）不显示也不编造", () => {
     const { unmount } = render(
       <NoticePanel
@@ -163,7 +251,7 @@ describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
         onRefresh={() => {}}
       />,
     );
-    expect(screen.getByText("数据结构课群")).toBeInTheDocument();
+    expect(screen.getAllByText("数据结构课群").length).toBeGreaterThan(0);
     unmount();
     render(
       <NoticePanel notices={[notice({ sourceLabel: null })]} filter={ALL} onRefresh={() => {}} />,
@@ -174,31 +262,45 @@ describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
 });
 
 describe("NoticePanel：更新后重新标未读（OQ-11 前端半侧）", () => {
-  it("同一次更新内点开过 → 不再亮「新」；updatedAt 变了 → 重新亮", () => {
+  beforeEach(stubItemFetch);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("同一次更新内选中过 → 不再亮「新」；updatedAt 变了 → 重新亮", () => {
     const r1 = notice({ updatedAt: "2026-10-17 10:00" });
     const { rerender } = render(<NoticePanel notices={[r1]} filter={ALL} onRefresh={() => {}} />);
-    fireEvent.click(screen.getByText("数据结构课改到明理楼3楼"));
-    // 同一次更新：本地已读生效，微标消失（服务端 viewed 仍 false 也不亮）
-    expect(screen.queryByText("新")).not.toBeInTheDocument();
-    // 模拟 agent0 更新（updatedAt 变）→ 应重新亮「新」
+    expect(screen.queryByText("新")).not.toBeInTheDocument(); // 自动选中即已读
     const r2 = notice({ updatedAt: "2026-10-18 09:00" });
     rerender(<NoticePanel notices={[r2]} filter={ALL} onRefresh={() => {}} />);
     expect(screen.getByText("新")).toBeInTheDocument();
   });
 });
 
-describe("NoticePanel：深链打开也报已读（FR-016）", () => {
-  it("focus 指向某条 → 展开并调 api.viewed", async () => {
+describe("NoticePanel：深链选中也报已读（FR-016）", () => {
+  beforeEach(stubItemFetch);
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("focus 指向第二条 → 选中它并调 api.viewed", async () => {
     const spy = vi.spyOn(api, "viewed").mockResolvedValue(undefined);
+    const second = notice({
+      item: { ...notice().item, id: "n2", elements: [{ label: "name", text: "线性代数调课" }] },
+    });
     render(
       <NoticePanel
-        notices={[notice()]}
+        notices={[notice(), second]}
         filter={ALL}
         onRefresh={() => {}}
-        focus={{ id: "n1", token: 1 }}
+        focus={{ id: "n2", token: 1 }}
       />,
     );
-    await waitFor(() => expect(spy).toHaveBeenCalledWith("n1"));
-    spy.mockRestore();
+    await waitFor(() => expect(spy).toHaveBeenCalledWith("n2"));
+    expect(screen.getByText("2/2")).toBeInTheDocument();
   });
 });
