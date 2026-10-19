@@ -463,7 +463,7 @@ export function NoticePanel({
                 {/* 标题在上、meta 一行小灰字在下——来源不再做成 chip（用户 2026-10-19）；
                     左右 24px：正文常规内边距（边缘只剩下 ‹ › 标记，不再为它大内缩） */}
                 <div className="px-6 pt-4">
-                  <h2 className="pr-3 indent-[2em] text-xl font-semibold leading-snug">
+                  <h2 className="pr-3 indent-[1em] text-xl font-semibold leading-snug">
                     {itemName(selected.item.elements)}
                   </h2>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-muted">
