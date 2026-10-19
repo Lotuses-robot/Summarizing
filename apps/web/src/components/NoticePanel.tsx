@@ -14,7 +14,7 @@ import { fmtFullTime, fmtShortTime } from "../lib/time";
 
 // 通知页（007 / D-108 阅读器形态）：主卡固定展示当前通知的完整内容（复用 ItemBody），
 // 下方列表只做索引与选择。手势：向左拖 = 稍后（本次跳过，不写库）、向右拖 = 清除
-// （进回收站、可撤销）。左右缘常驻浅提示同时也是点击兜底。
+// （进回收站、可撤销）。左右缘只留 ‹ › 纯显示标记（不可点，用户 2026-10-19）。
 // 自动选择：进入 / 筛选变化 / 清除 / 稍后之后，选下一条未跳过的；轮询不抢焦点。
 // 拖动走直接 DOM 变换（不经 state）——ItemBody 内容重不参与逐帧重渲染，手感跟手。
 
@@ -440,32 +440,29 @@ export function NoticePanel({
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
           >
-            {/* 左右缘垂直居中的极简标记（同时是点击兜底）；语义留在 title 里 */}
-            {selected !== null && pending === null && (
+            {/* 左右缘垂直居中的 ‹ ›：纯显示，不拦截手势、不可点（用户 2026-10-19） */}
+            {selected !== null && (
               <>
-                <button
-                  className="absolute left-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1.5 py-1 text-base leading-none text-ink-muted/40 hover:bg-canvas hover:text-ink-muted"
-                  title="稍后（本次跳过；也可向左拖动卡片）"
-                  onClick={() => skip(selected)}
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute left-1 top-1/2 z-10 -translate-y-1/2 select-none text-base leading-none text-ink-muted/40"
                 >
                   ‹
-                </button>
-                <button
-                  className="absolute right-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1.5 py-1 text-base leading-none text-ink-muted/40 hover:bg-canvas hover:text-ink-muted"
-                  title="清除（进回收站，可撤销；也可向右拖动卡片）"
-                  onClick={() => startDelete(selected)}
+                </span>
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-1 top-1/2 z-10 -translate-y-1/2 select-none text-base leading-none text-ink-muted/40"
                 >
                   ›
-                </button>
+                </span>
               </>
             )}
 
             {selected !== null ? (
               <div>
                 {/* 标题在上、meta 一行小灰字在下——来源不再做成 chip（用户 2026-10-19）；
-                    左右内缩 40px 给边缘标记留净空；底部 20px：小灰字贴分界线会显挤，
-                    头部区要比下面的段落间隔更松（用户 2026-10-19 走查） */}
-                <div className="px-10 pb-5 pt-4">
+                    左右 24px：正文常规内边距（边缘只剩下 ‹ › 标记，不再为它大内缩） */}
+                <div className="px-6 pt-4">
                   <h2 className="pr-3 text-lg font-semibold leading-snug">
                     {itemName(selected.item.elements)}
                   </h2>
@@ -492,8 +489,8 @@ export function NoticePanel({
                     </span>
                   </div>
                 </div>
-                {/* 内容内缩：给左右缘提示留出净空（读者正文不与其相撞） */}
-                <div className="max-h-[60vh] overflow-y-auto px-10">
+                {/* 内容不再左右内缩：ItemBody 的 reader 形态自己带 24px 水平内边距 */}
+                <div className="max-h-[60vh] overflow-y-auto">
                   <ItemBody id={selected.item.id} variant="reader" />
                 </div>
               </div>

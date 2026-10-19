@@ -39,7 +39,8 @@ export function ItemBody({
   variant = "default",
 }: {
   id: string;
-  /** default = 看板展开体（小节标题齐全）；reader = 通知主卡（去小节标题、空的基本信息不渲染）。 */
+  /** default = 看板展开体（小节标题 + 分界线齐全）；reader = 通知主卡（无分界线与小节标题，
+   *  空的基本信息不渲染，统一 16px 间距的扁平流——用户 2026-10-19）。 */
   variant?: "default" | "reader";
 }) {
   const [detail, setDetail] = useState<GetItemResult | null>(null);
@@ -117,7 +118,7 @@ export function ItemBody({
     // fit-text：元素/来源/引文里的长 URL 在框内断行（不溢出框线）——单点挂容器，内部全生效
     <div className="fit-text text-sm">
       {showBasic && (
-        <div className={isReader ? "px-3 pb-3 pt-1" : "p-3"}>
+        <div className={isReader ? "mt-4 px-6" : "p-3"}>
           {!isReader && <h3 className="text-sm font-semibold">基本信息</h3>}
           {/* 通知无 ddl（结构上就没有 dueDate）——不渲染 [ddl] 行（同 executor 摘要口径：
             对通知说「未知/日期未知」是噪声，D-106） */}
@@ -176,7 +177,7 @@ export function ItemBody({
       )}
 
       {(freeElements.length > 0 || !isReader) && (
-        <div className="border-t border-line p-3">
+        <div className={isReader ? "mt-4 px-6" : "border-t border-line p-3"}>
           {!isReader && (
             <h3 className="text-sm font-semibold">
               信息元素{" "}
@@ -192,7 +193,7 @@ export function ItemBody({
             const evidence = evidenceFor(el.label);
             const open = openQuotes.includes(el.label);
             return (
-              <div key={el.label} className="mt-3 first:mt-0">
+              <div key={el.label} className={isReader ? "mt-4 first:mt-0" : "mt-3"}>
                 {/* 点元素行 = 展开/收起该元素的引文（引文是唯一折叠层，D-80） */}
                 <p
                   className={cn("text-sm", evidence.length > 0 && "cursor-pointer")}
@@ -220,12 +221,9 @@ export function ItemBody({
       )}
 
       {sources.length > 0 && (
-        <div className="border-t border-line p-3">
-          {isReader ? (
-            <p className="text-xs text-ink-muted">
-              来源信息 <span className="text-ink-muted/70">{sources.length}</span>
-            </p>
-          ) : (
+        <div className={isReader ? "mt-4 px-6" : "border-t border-line p-3"}>
+          {/* 阅读器不标「来源信息」小节——扁平流里 [信源类型] 行自解释（用户 2026-10-19） */}
+          {!isReader && (
             <h3 className="text-sm font-semibold">
               来源信息{" "}
               <span className="ml-1 text-xs font-normal text-ink-muted">{sources.length}</span>
@@ -234,7 +232,7 @@ export function ItemBody({
           {sources.map((src) => {
             const open = openSources.includes(src.raw.id);
             return (
-              <div key={src.raw.id} className="mt-3">
+              <div key={src.raw.id} className={isReader ? "mt-4 first:mt-0" : "mt-3"}>
                 {/* 收起态行 = [信源类型] sourceLabel（用户 2026-10-14 定：nc 放最前、不放别的）。
                     点行展开/收起——手势与元素行同款；行与批次一一对应，同标签多批次 = 多行 */}
                 <p className="cursor-pointer text-sm" onClick={() => toggleSource(src.raw.id)}>
@@ -271,7 +269,7 @@ export function ItemBody({
         </div>
       )}
 
-      <div className={cn("border-t border-line", isReader ? "px-3 pb-4 pt-3" : "p-3")}>
+      <div className={isReader ? "mt-4 px-6 pb-4" : "border-t border-line p-3"}>
         <button
           className={cn(
             "flex w-full items-center gap-2 text-left",

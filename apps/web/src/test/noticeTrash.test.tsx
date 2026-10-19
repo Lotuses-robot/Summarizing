@@ -56,6 +56,26 @@ function itemFixture(id: string, status: "todo" | "trashed", kind: "task" | "not
   };
 }
 
+/** 在通知主卡上模拟一次触屏横滑（正 = 向右/清除，负 = 向左/稍后）。
+ *  happy-dom 没有布局，clientWidth 恒为 0——先临时给一个宽度，35% 阈值才有意义。 */
+function swipeCard(dx: number): void {
+  const heading = screen.getByRole("heading", { level: 2 });
+  const card = heading.closest(".touch-pan-y");
+  if (!(card instanceof HTMLElement)) throw new Error("找不到通知主卡");
+  Object.defineProperty(card, "clientWidth", { configurable: true, value: 400 });
+  /** 某个横坐标上的「手指」——touch 事件只用到 clientX/clientY。 */
+  const at = (x: number) => ({ clientX: x, clientY: 120 });
+  /** 派发带 touches 的原生事件（组件用原生 touch 监听，不走 TouchEvent 构造器）。 */
+  const fire = (type: string, touches: { clientX: number; clientY: number }[]) => {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "touches", { value: touches });
+    fireEvent(card, ev);
+  };
+  fire("touchstart", [at(200)]);
+  fire("touchmove", [at(200 + dx)]);
+  fire("touchend", []);
+}
+
 /** 全部通过的筛选谓词——筛选语义本身由 filter.test.ts 覆盖（单一出处 matchesFilter）。 */
 const ALL = (_r: NoticeRow) => true;
 
@@ -158,11 +178,11 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     expect(screen.getByText("没有匹配的通知")).toBeInTheDocument();
   });
 
-  it("清除：点右缘提示 → 模糊倒计时 → 3 秒后才写库", async () => {
+  it("清除：右滑 → 模糊倒计时 → 3 秒后才写库", async () => {
     vi.useFakeTimers();
     const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
-    fireEvent.click(screen.getByTitle(/清除（进回收站/));
+    swipeCard(200);
     expect(screen.getByText("已清除")).toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled(); // 还没到点
     await vi.advanceTimersByTimeAsync(3100);
@@ -173,19 +193,19 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     vi.useFakeTimers();
     const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
-    fireEvent.click(screen.getByTitle(/清除（进回收站/));
+    swipeCard(200);
     fireEvent.click(screen.getByText("撤 回"));
     await vi.advanceTimersByTimeAsync(3100);
     expect(spy).not.toHaveBeenCalled();
     expect(screen.queryByText("已清除")).not.toBeInTheDocument();
   });
 
-  it("稍后：点左缘提示 → 标记「稍后」并跳到下一条，不写库", async () => {
+  it("稍后：左滑 → 标记「稍后」并跳到下一条，不写库", async () => {
     const second = notice({
       item: { ...notice().item, id: "n2", elements: [{ label: "name", text: "线性代数调课" }] },
     });
     render(<NoticePanel notices={[notice(), second]} filter={ALL} onRefresh={() => {}} />);
-    fireEvent.click(screen.getByTitle(/稍后（本次跳过/));
+    swipeCard(-200);
     // 主卡切到第二条（1/2 → 2/2）；不再有「稍后」标签（用户 2026-10-19：只要已读/未读）
     await waitFor(() => expect(screen.getByText("2/2")).toBeInTheDocument());
     expect(screen.queryByText("稍后")).not.toBeInTheDocument();
