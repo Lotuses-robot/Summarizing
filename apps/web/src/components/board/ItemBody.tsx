@@ -116,7 +116,7 @@ export function ItemBody({
 
   return (
     // fit-text：元素/来源/引文里的长 URL 在框内断行（不溢出框线）——单点挂容器，内部全生效
-    <div className={cn("fit-text", isReader ? "text-[13px]" : "text-sm")}>
+    <div className={cn("fit-text", isReader ? "text-[13px] leading-[1.4]" : "text-sm")}>
       {showBasic && (
         <div className={isReader ? "mt-4 px-6" : "p-3"}>
           {!isReader && <h3 className="text-sm font-semibold">基本信息</h3>}
