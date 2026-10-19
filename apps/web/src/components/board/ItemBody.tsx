@@ -116,7 +116,7 @@ export function ItemBody({
 
   return (
     // fit-text：元素/来源/引文里的长 URL 在框内断行（不溢出框线）——单点挂容器，内部全生效
-    <div className="fit-text text-sm">
+    <div className={cn("fit-text", isReader ? "text-[13px]" : "text-sm")}>
       {showBasic && (
         <div className={isReader ? "mt-4 px-6" : "p-3"}>
           {!isReader && <h3 className="text-sm font-semibold">基本信息</h3>}
@@ -158,7 +158,10 @@ export function ItemBody({
           {summaryElement !== undefined && (
             <div className="mt-2">
               <p
-                className={cn("text-sm", summaryEvidence.length > 0 && "cursor-pointer")}
+                className={cn(
+                  isReader ? "text-[13px]" : "text-sm",
+                  summaryEvidence.length > 0 && "cursor-pointer",
+                )}
                 onClick={() => {
                   if (summaryEvidence.length > 0) toggleQuotes("summary");
                 }}
@@ -196,7 +199,10 @@ export function ItemBody({
               <div key={el.label} className={isReader ? "mt-4 first:mt-0" : "mt-3"}>
                 {/* 点元素行 = 展开/收起该元素的引文（引文是唯一折叠层，D-80） */}
                 <p
-                  className={cn("text-sm", evidence.length > 0 && "cursor-pointer")}
+                  className={cn(
+                    isReader ? "text-[13px]" : "text-sm",
+                    evidence.length > 0 && "cursor-pointer",
+                  )}
                   onClick={() => {
                     if (evidence.length > 0) toggleQuotes(el.label);
                   }}
@@ -235,7 +241,10 @@ export function ItemBody({
               <div key={src.raw.id} className={isReader ? "mt-4 first:mt-0" : "mt-3"}>
                 {/* 收起态行 = [信源类型] sourceLabel（用户 2026-10-14 定：nc 放最前、不放别的）。
                     点行展开/收起——手势与元素行同款；行与批次一一对应，同标签多批次 = 多行 */}
-                <p className="cursor-pointer text-sm" onClick={() => toggleSource(src.raw.id)}>
+                <p
+                  className={cn("cursor-pointer", isReader ? "text-[13px]" : "text-sm")}
+                  onClick={() => toggleSource(src.raw.id)}
+                >
                   <b className="text-ink-muted">[{src.raw.sourceType}]</b>{" "}
                   {sourceLabelOf(src.raw.sourceIdentity)}
                 </p>
