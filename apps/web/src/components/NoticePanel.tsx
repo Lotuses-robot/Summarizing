@@ -423,13 +423,20 @@ export function NoticePanel({
       <div className="sticky top-0 z-10 -mx-1 bg-canvas px-1 pb-3">
         {/* overflow-hidden：卡片左右拖动时被容器裁剪，不把页面撑出横向滚动条 */}
         <div className="relative overflow-hidden rounded-lg">
-          {/* 底层：低一层的画布色（拖动时露出；不写动作词，用户 2026-10-19 定） */}
+          {/* 底层：低一层的画布色 + 左右两个记号（拖动时随卡片滑开露出；纯显示，用户 2026-10-19） */}
           <div
             ref={revealRef}
             aria-hidden
             className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg bg-canvas"
             style={{ opacity: 0.35 }}
-          />
+          >
+            <span className="absolute left-6 top-1/2 -translate-y-1/2 select-none text-lg leading-none text-ink-muted">
+              ‹
+            </span>
+            <span className="absolute right-6 top-1/2 -translate-y-1/2 select-none text-lg leading-none text-ink-muted">
+              ›
+            </span>
+          </div>
 
           {/* 卡片本体 */}
           <div
