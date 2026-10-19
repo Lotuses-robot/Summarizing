@@ -440,12 +440,12 @@ export function NoticePanel({
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerCancel}
           >
-            {/* 左右缘的 ‹ ›：居中在「卡片边缘 → 内容(24px)」这段空隙的正中；纯显示（用户 2026-10-19） */}
+            {/* 左右缘的 ‹ ›：居中在「卡片边缘 → 信息左缘(34px)」这段空隙的正中；纯显示（用户 2026-10-19） */}
             {selected !== null && (
               <>
                 <span
                   aria-hidden
-                  className="pointer-events-none absolute left-0 top-1/2 z-10 w-6 -translate-y-1/2 select-none text-center text-base leading-none text-ink-muted/40"
+                  className="pointer-events-none absolute left-1.5 top-1/2 z-10 w-6 -translate-y-1/2 select-none text-center text-base leading-none text-ink-muted/40"
                 >
                   ‹
                 </span>
@@ -463,10 +463,10 @@ export function NoticePanel({
                 {/* 标题在上、meta 一行小灰字在下——来源不再做成 chip（用户 2026-10-19）；
                     左右 24px：正文常规内边距（边缘只剩下 ‹ › 标记，不再为它大内缩） */}
                 <div className="px-6 pt-4">
-                  <h2 className="pr-3 indent-[1em] text-xl font-semibold leading-snug">
+                  <h2 className="pr-3 text-xl font-semibold leading-snug">
                     {itemName(selected.item.elements)}
                   </h2>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-muted">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 pl-2.5 text-[11px] text-ink-muted">
                     <span
                       className={cn(
                         "h-1.5 w-1.5 shrink-0 rounded-full",
@@ -489,8 +489,8 @@ export function NoticePanel({
                     </span>
                   </div>
                 </div>
-                {/* 内容不再左右内缩：ItemBody 的 reader 形态自己带 24px 水平内边距 */}
-                <div className="max-h-[60vh] overflow-y-auto">
+                {/* 内容整体右移 10px：标题不缩进、标题下的信息轻内收（用户 2026-10-19） */}
+                <div className="max-h-[60vh] overflow-y-auto pl-2.5">
                   <ItemBody id={selected.item.id} variant="reader" />
                 </div>
               </div>
