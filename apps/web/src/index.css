@@ -156,6 +156,11 @@
   .pop-in {
     animation: pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
   }
+  /* 清除倒计时环（D-108）：挂载即整段线性排空（时长由组件内联 animation-duration 给；
+     不能跟着每秒数字 tick 走 transition——第一秒会原地不动）。 */
+  .ring-drain {
+    animation: ring-drain linear forwards;
+  }
   /* 关于弹层头部（2026-10-13）：主题色径向光晕 + 极淡点阵纹理——无头图排版靠底纹立层次。
      色用 color-mix 现算（换色板/暗色自动跟随，与 accent-soft 同配方手法）。 */
   .about-hero {
@@ -212,5 +217,15 @@
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 倒计时环排空：pathLength=100 把弧长归一为 100，dasharray/dashoffset 与半径解耦 */
+@keyframes ring-drain {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: 100;
   }
 }

@@ -23,11 +23,9 @@ const SWIPE_RATIO = 0.35;
 /** 清除的撤销窗口（秒）。 */
 const UNDO_SECONDS = 3;
 
-/** 环形倒计时：细环随剩余秒数消退，数字居中（用户 2026-10-19 定的样式）。 */
+/** 环形倒计时：挂载瞬间起整段线性排空（数字每秒递减）；pathLength 归一使弧长与半径解耦。 */
 function CountdownRing({ remaining, total }: { remaining: number; total: number }) {
   const R = 22;
-  const C = 2 * Math.PI * R;
-  const progress = Math.max(0, Math.min(1, remaining / total));
   return (
     <div className="relative h-16 w-16">
       <svg viewBox="0 0 56 56" className="h-16 w-16 -rotate-90">
@@ -39,9 +37,11 @@ function CountdownRing({ remaining, total }: { remaining: number; total: number 
           fill="none"
           strokeWidth="2"
           strokeLinecap="round"
-          strokeDasharray={C}
-          strokeDashoffset={C * (1 - progress)}
-          className="stroke-accent transition-[stroke-dashoffset] duration-1000 ease-linear"
+          pathLength={100}
+          strokeDasharray={100}
+          strokeDashoffset={0}
+          style={{ animationDuration: `${total}s` }}
+          className="ring-drain stroke-accent"
         />
       </svg>
       <span className="absolute inset-0 flex items-center justify-center text-lg font-medium tabular-nums text-ink">
@@ -82,9 +82,13 @@ export function NoticePanel({
   const dxRef = useRef(0);
   const cardBodyRef = useRef<HTMLDivElement | null>(null);
   const revealRef = useRef<HTMLDivElement | null>(null);
-  const leftActRef = useRef<HTMLSpanElement | null>(null);
-  const rightActRef = useRef<HTMLSpanElement | null>(null);
-  const dragRef = useRef<{ startX: number; width: number } | null>(null);
+  /** 拖动会话：axis 起手时按前 8px 位移定方向——竖向 = 滚内容，不参与滑动手势。 */
+  const dragRef = useRef<{
+    startX: number;
+    startY: number;
+    width: number;
+    axis: "none" | "x" | "y";
+  } | null>(null);
   const pendingRef = useRef<typeof pending>(null);
   useEffect(() => {
     pendingRef.current = pending;
@@ -92,6 +96,11 @@ export function NoticePanel({
 
   /** 当前选中行（不在可见集里则 null）。 */
   const selected = visible.find((r) => r.item.id === selectedId) ?? null;
+  /** 手势收尾要取最新选中行（原生 touch 监听只挂一次，不能闭包旧值）。 */
+  const selectedRef = useRef<NoticeRow | null>(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  });
   const selectedIndex = selected === null ? -1 : visible.indexOf(selected);
   /** 下一条未跳过的候选（从当前条之后找；没有则 null）。 */
   const nextUnskippedAfter = useCallback(
@@ -256,22 +265,37 @@ export function NoticePanel({
   }, []);
 
   // ── 拖动：直接改写 DOM（不 setState），内容不参与逐帧重渲染 ──
-  /** 按下：记录起点与卡宽；交互元素上不启动拖动（点证据/链接/按钮要正常）。 */
-  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (pending !== null || selected === null) return;
-    if ((e.target as HTMLElement).closest("button,a,summary,input,textarea,select")) return;
-    dragRef.current = { startX: e.clientX, width: cardBodyRef.current?.clientWidth ?? 320 };
+  // 鼠标/触控笔走 pointer 事件；触屏走原生 touch 事件——只靠 pointermove 时，浏览器会在手势
+  // 被识别成滚动/后退时半路 pointercancel（实测移动 28px 即被收走）；原生 touchmove 里
+  // preventDefault 才能把横向手势留下，竖向留给原生滚动。
+  /** 起手：记录起点与卡宽；交互元素上不启动拖动（点证据/链接/按钮要正常）。 */
+  const beginDrag = (target: EventTarget | null, x: number, y: number, width: number): boolean => {
+    if (pendingRef.current !== null || selectedRef.current === null) return false;
+    if (target instanceof Element && target.closest("button,a,summary,input,textarea,select")) {
+      return false;
+    }
+    dragRef.current = { startX: x, startY: y, width, axis: "none" };
     dxRef.current = 0;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (cardBodyRef.current !== null) cardBodyRef.current.style.transition = "none";
+    if (cardBodyRef.current !== null) {
+      cardBodyRef.current.style.transition = "none";
+      cardBodyRef.current.style.userSelect = "none"; // 拖动中别顺带选中文字
+    }
     if (revealRef.current !== null) revealRef.current.style.display = "block";
+    return true;
   };
-  /** 移动：位移限制在 ±60% 卡宽；底层动作层随位移加深，方向决定露哪一侧。 */
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+  /** 移动一帧：先定轴向（横向才拖动）；位移限制在 ±60% 卡宽；底层动作层随位移加深。 */
+  const moveDrag = (x: number, y: number): void => {
     const d = dragRef.current;
     if (d === null) return;
+    if (d.axis === "none") {
+      const ax = Math.abs(x - d.startX);
+      const ay = Math.abs(y - d.startY);
+      if (Math.max(ax, ay) < 8) return;
+      d.axis = ax > ay ? "x" : "y";
+    }
+    if (d.axis !== "x") return;
     const limit = d.width * 0.6;
-    const dx = Math.max(-limit, Math.min(limit, e.clientX - d.startX));
+    const dx = Math.max(-limit, Math.min(limit, x - d.startX));
     dxRef.current = dx;
     if (cardBodyRef.current !== null) {
       cardBodyRef.current.style.transform = `translateX(${dx}px)`;
@@ -280,33 +304,100 @@ export function NoticePanel({
     if (revealRef.current !== null) {
       revealRef.current.style.opacity = String(0.35 + strength * 0.65);
     }
-    if (leftActRef.current !== null) {
-      leftActRef.current.style.display = dx > 4 ? "inline-flex" : "none";
-      leftActRef.current.style.opacity = String(strength);
-    }
-    if (rightActRef.current !== null) {
-      rightActRef.current.style.display = dx < -4 ? "inline-flex" : "none";
-      rightActRef.current.style.opacity = String(strength);
-    }
   };
-  /** 松开：过阈值即执行（右=清除、左=稍后），否则回弹。 */
-  const endDrag = () => {
+  /** 复位拖动期间写下的临时样式与底层动作层（只动 DOM，不改状态）。 */
+  const resetDragVisuals = (): void => {
+    if (cardBodyRef.current !== null) {
+      cardBodyRef.current.style.transition = "";
+      cardBodyRef.current.style.transform = "";
+      cardBodyRef.current.style.userSelect = "";
+    }
+    if (revealRef.current !== null) revealRef.current.style.display = "none";
+  };
+  /** 松手：过阈值即执行（右=清除、左=稍后），否则回弹。 */
+  const finishDrag = (): void => {
     const d = dragRef.current;
     dragRef.current = null;
     const dx = dxRef.current;
     dxRef.current = 0;
-    if (cardBodyRef.current !== null) {
-      cardBodyRef.current.style.transition = "";
-      cardBodyRef.current.style.transform = "";
-    }
-    if (revealRef.current !== null) revealRef.current.style.display = "none";
-    if (leftActRef.current !== null) leftActRef.current.style.display = "none";
-    if (rightActRef.current !== null) rightActRef.current.style.display = "none";
-    if (d === null || selected === null) return;
+    resetDragVisuals();
+    if (d === null) return;
+    const row = selectedRef.current;
+    if (row === null) return;
     const threshold = d.width * SWIPE_RATIO;
     if (dx >= threshold)
-      startDelete(selected); // 向右拖 = 清除
-    else if (dx <= -threshold) skip(selected); // 向左拖 = 稍后
+      startDelete(row); // 向右拖 = 清除
+    else if (dx <= -threshold) skip(row); // 向左拖 = 稍后
+  };
+  /** 手势被系统取消（pointercancel/touchcancel）：只回弹，不执行动作。 */
+  const abortDrag = (): void => {
+    dragRef.current = null;
+    dxRef.current = 0;
+    resetDragVisuals();
+  };
+  /** 触屏用的最新手势函数（原生监听只挂一次）。 */
+  const gestureRef = useRef({ beginDrag, moveDrag, finishDrag, abortDrag });
+  useEffect(() => {
+    gestureRef.current = { beginDrag, moveDrag, finishDrag, abortDrag };
+  });
+
+  // 触屏手势：touchmove 非 passive——判定为横向后 preventDefault，浏览器才不会把它当滚动/后退收走
+  useEffect(() => {
+    const el = cardBodyRef.current;
+    if (el === null) return;
+    /** 单指起手（多指 = 缩放等，不接管）。 */
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (t === undefined || e.touches.length > 1) return;
+      gestureRef.current.beginDrag(e.target, t.clientX, t.clientY, el.clientWidth);
+    };
+    /** 单指移动：定轴后横向 preventDefault；竖向不拦（原生滚动）。 */
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (t === undefined) return;
+      gestureRef.current.moveDrag(t.clientX, t.clientY);
+      if (dragRef.current !== null && dragRef.current.axis === "x") e.preventDefault();
+    };
+    /** 单指结束：与鼠标同一收尾。 */
+    const onTouchEnd = () => {
+      if (dragRef.current !== null) gestureRef.current.finishDrag();
+    };
+    /** 手势被系统收走（来电/系统导航等）：只回弹。 */
+    const onTouchCancel = () => {
+      if (dragRef.current !== null) gestureRef.current.abortDrag();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("touchcancel", onTouchCancel);
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchCancel);
+    };
+  }, []);
+
+  /** 鼠标/触控笔按下（触屏走上面的原生 touch 监听）。 */
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch") return;
+    if (!beginDrag(e.target, e.clientX, e.clientY, e.currentTarget.clientWidth)) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  /** 鼠标/触控笔移动。 */
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch") return;
+    moveDrag(e.clientX, e.clientY);
+  };
+  /** 鼠标/触控笔松开。 */
+  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch") return;
+    finishDrag();
+  };
+  /** 鼠标/触控笔取消：只回弹，不动作。 */
+  const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "touch") return;
+    abortDrag();
   };
 
   const emptyCardText =
@@ -330,27 +421,15 @@ export function NoticePanel({
 
       {/* 主卡：固定（列表滚动时不动）；内容超出在卡内滚动 */}
       <div className="sticky top-0 z-10 -mx-1 bg-canvas px-1 pb-3">
-        <div className="relative">
-          {/* 底层：低一层的画布色 + 方向箭头 + 垂直居中的动作词（拖动时露出，标题不抢） */}
+        {/* overflow-hidden：卡片左右拖动时被容器裁剪，不把页面撑出横向滚动条 */}
+        <div className="relative overflow-hidden rounded-lg">
+          {/* 底层：低一层的画布色（拖动时露出；不写动作词，用户 2026-10-19 定） */}
           <div
             ref={revealRef}
             aria-hidden
             className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg bg-canvas"
             style={{ opacity: 0.35 }}
-          >
-            <span
-              ref={leftActRef}
-              className="absolute left-6 top-1/2 hidden -translate-y-1/2 items-center gap-1 text-sm font-medium text-ink-muted"
-            >
-              {">>>"} 清除
-            </span>
-            <span
-              ref={rightActRef}
-              className="absolute right-6 top-1/2 hidden -translate-y-1/2 items-center gap-1 text-sm font-medium text-ink-muted"
-            >
-              稍后 {"<<<"}
-            </span>
-          </div>
+          />
 
           {/* 卡片本体 */}
           <div
@@ -358,33 +437,35 @@ export function NoticePanel({
             className="relative z-10 touch-pan-y rounded-lg border border-line bg-surface transition-transform duration-150"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerCancel}
           >
-            {/* 左右缘垂直居中的常驻浅提示（同时是点击兜底）；内容已内缩，不会与正文相撞 */}
+            {/* 左右缘垂直居中的极简标记（同时是点击兜底）；语义留在 title 里 */}
             {selected !== null && pending === null && (
               <>
                 <button
-                  className="absolute left-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1 py-0.5 text-[10px] text-ink-muted/50 hover:bg-canvas hover:text-ink-muted"
+                  className="absolute left-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1.5 py-1 text-base leading-none text-ink-muted/40 hover:bg-canvas hover:text-ink-muted"
                   title="稍后（本次跳过；也可向左拖动卡片）"
                   onClick={() => skip(selected)}
                 >
-                  ‹ 稍后
+                  ‹
                 </button>
                 <button
-                  className="absolute right-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1 py-0.5 text-[10px] text-ink-muted/50 hover:bg-canvas hover:text-ink-muted"
+                  className="absolute right-1 top-1/2 z-10 -translate-y-1/2 cursor-pointer rounded px-1.5 py-1 text-base leading-none text-ink-muted/40 hover:bg-canvas hover:text-ink-muted"
                   title="清除（进回收站，可撤销；也可向右拖动卡片）"
                   onClick={() => startDelete(selected)}
                 >
-                  清除 ›
+                  ›
                 </button>
               </>
             )}
 
             {selected !== null ? (
               <div>
-                {/* 标题在上、meta 一行小灰字在下——来源不再做成 chip（用户 2026-10-19） */}
-                <div className="px-6 pt-4">
+                {/* 标题在上、meta 一行小灰字在下——来源不再做成 chip（用户 2026-10-19）；
+                    左右内缩 40px 给边缘标记留净空；底部 20px：小灰字贴分界线会显挤，
+                    头部区要比下面的段落间隔更松（用户 2026-10-19 走查） */}
+                <div className="px-10 pb-5 pt-4">
                   <h2 className="pr-3 text-lg font-semibold leading-snug">
                     {itemName(selected.item.elements)}
                   </h2>
@@ -411,8 +492,8 @@ export function NoticePanel({
                     </span>
                   </div>
                 </div>
-                {/* 内容：复用展开体（阅读器形态：去小节标题、空的基本信息不渲染） */}
-                <div className="max-h-[60vh] overflow-y-auto px-2">
+                {/* 内容内缩：给左右缘提示留出净空（读者正文不与其相撞） */}
+                <div className="max-h-[60vh] overflow-y-auto px-10">
                   <ItemBody id={selected.item.id} variant="reader" />
                 </div>
               </div>
@@ -446,7 +527,10 @@ export function NoticePanel({
                     "flex w-full cursor-pointer items-center gap-2 rounded-md border border-transparent px-3 py-1.5 text-left text-sm hover:bg-canvas",
                     isSelected && "border-line bg-canvas",
                   )}
-                  onClick={() => select(r)}
+                  onClick={() => {
+                    // 清除倒计时期间列表不改选中（卡片正被上一条的遮罩盖着）
+                    if (pending === null) select(r);
+                  }}
                 >
                   <span
                     className={cn(

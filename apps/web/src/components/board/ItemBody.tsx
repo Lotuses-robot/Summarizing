@@ -117,7 +117,7 @@ export function ItemBody({
     // fit-text：元素/来源/引文里的长 URL 在框内断行（不溢出框线）——单点挂容器，内部全生效
     <div className="fit-text text-sm">
       {showBasic && (
-        <div className={isReader ? "px-3 pb-1 pt-2" : "p-3"}>
+        <div className={isReader ? "px-3 pb-3 pt-1" : "p-3"}>
           {!isReader && <h3 className="text-sm font-semibold">基本信息</h3>}
           {/* 通知无 ddl（结构上就没有 dueDate）——不渲染 [ddl] 行（同 executor 摘要口径：
             对通知说「未知/日期未知」是噪声，D-106） */}
@@ -192,7 +192,7 @@ export function ItemBody({
             const evidence = evidenceFor(el.label);
             const open = openQuotes.includes(el.label);
             return (
-              <div key={el.label} className="mt-3">
+              <div key={el.label} className="mt-3 first:mt-0">
                 {/* 点元素行 = 展开/收起该元素的引文（引文是唯一折叠层，D-80） */}
                 <p
                   className={cn("text-sm", evidence.length > 0 && "cursor-pointer")}
@@ -201,14 +201,16 @@ export function ItemBody({
                   }}
                 >
                   <b className="text-ink-muted">[{el.label}]</b> {el.text}
-                  <span
-                    className={
-                      evidence.length > 0 ? "text-xs text-accent" : "text-xs text-ink-muted"
-                    }
-                  >
-                    {" "}
-                    · 证据({evidence.length})
-                  </span>
+                  {(evidence.length > 0 || !isReader) && (
+                    <span
+                      className={
+                        evidence.length > 0 ? "text-xs text-accent" : "text-xs text-ink-muted"
+                      }
+                    >
+                      {" "}
+                      · 证据({evidence.length})
+                    </span>
+                  )}
                 </p>
                 {open && <Quotes detail={detail} evidence={evidence} onOpenQuote={setQuote} />}
               </div>
@@ -269,9 +271,12 @@ export function ItemBody({
         </div>
       )}
 
-      <div className="border-t border-line p-3">
+      <div className={cn("border-t border-line", isReader ? "px-3 pb-4 pt-3" : "p-3")}>
         <button
-          className="flex w-full items-center gap-2 text-left font-semibold"
+          className={cn(
+            "flex w-full items-center gap-2 text-left",
+            isReader ? "text-xs text-ink-muted" : "font-semibold",
+          )}
           onClick={() => setVersionsOpen(!versionsOpen)}
         >
           {versionsOpen ? (
