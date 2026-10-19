@@ -536,6 +536,7 @@ async function requestRepair(
 function buildUserBrief(raw: RawInput): string {
   return [
     "[原始信息]",
+    `批次 id：${raw.id}`,
     `内容（逐字）：${raw.content}`,
     `来源类型：${raw.sourceType}`,
     `来源身份：${JSON.stringify(raw.sourceIdentity)}`,

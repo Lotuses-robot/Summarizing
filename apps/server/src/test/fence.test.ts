@@ -554,3 +554,63 @@ describe("围栏 007：批内投影（同批多次改动按序校验）", () => 
     expect(r.rejected[0]?.reason).toMatch(/通知/);
   });
 });
+
+describe("围栏：record_note 的批次目标必须真实且是本批", () => {
+  it("targetId 用时间戳（历史事故形态）→ 拒收，并提示批次 id 在哪", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "record_note",
+          targetType: "raw_input",
+          targetId: "2026-10-19T22:24:23",
+          note: "判不建：测试文本",
+        },
+      ],
+    });
+    expect(r.accepted).toHaveLength(0);
+    expect(r.rejected[0]?.reason).toMatch(/批次 id/);
+  });
+
+  it("targetId 指向别的批次 → 拒收（批次留痕只属于本批）", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const other = repo.insertRawInput(db, {
+      content: "另一批",
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      receivedAt: "2026-09-25T10:00:00",
+      eventTime: null,
+    });
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "record_note",
+          targetType: "raw_input",
+          targetId: other.id,
+          note: "写到别批",
+        },
+      ],
+    });
+    expect(r.accepted).toHaveLength(0);
+    expect(r.rejected[0]?.reason).toMatch(/必须是本批/);
+  });
+
+  it("targetId = 本批 id → 接受", () => {
+    const db = makeDb(":memory:");
+    const raw = seedFenceRaw(db);
+    const r = runFence(db, raw, {
+      changes: [
+        {
+          action: "record_note",
+          targetType: "raw_input",
+          targetId: raw.id,
+          note: "判不建：测试文本",
+        },
+      ],
+    });
+    expect(r.rejected).toHaveLength(0);
+    expect(r.accepted).toHaveLength(1);
+  });
+});

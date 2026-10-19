@@ -1071,3 +1071,21 @@ describe("用户拒收规则进入提示词（D-107：真实消化链路）", ()
     }
   });
 });
+
+describe("record_note 批次留痕（2026-10-19 拒收复盘）", () => {
+  it("提示词里带「批次 id」——模型不必拿时间戳猜", async () => {
+    const db = makeDb(":memory:");
+    const raw = repo.insertRawInput(db, {
+      content: "测试通知1：测试1、测试通知2、测试通知3",
+      sourceType: "chat",
+      sourceIdentity: { sourceLabel: "前台" },
+      receivedAt: "2026-10-19T22:24:23",
+      eventTime: null,
+    });
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const brief = chatAt(llm, 0).messages[0]?.content ?? "";
+    expect(brief).toContain(`批次 id：${raw.id}`);
+  });
+});

@@ -114,6 +114,7 @@ ${rejectionRulesBlock(rejectionRules)}
 2. elements 尽量提取，label 用一两个词自拟。
 3. ⚠️ 新建事项必须一次性写全所有元素（name + dueDate + summary + 自由元素都在 create_item 的 elements 里）。不要先 create_item 再 update_item 补——你拿不到刚创建事项的 id。update_item 只用于工具查到 id 的既有事项。
 4. 检索阶段可用工具：search_items / get_item / search_recent_raws / search_uncertain / fetch_image（search_kb 当前恒空，不用调）。
+5. **record_note 的 targetId 必须是真实 id**：留痕当前批次 → targetType 写 "raw_input"，targetId 逐字用【原始信息】里「批次 id」那一行的值（不要用时间、不要用事项 id）；留痕某个事项 → targetType 写 "item"，targetId 用工具查到的事项 id。写错 id 会被围栏整条拒收。
 
 【输出格式】
 ${CHANGE_FORMAT_DOC}

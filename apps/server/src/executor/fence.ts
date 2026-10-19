@@ -199,14 +199,17 @@ function checkItem(
       return null;
     }
     case "record_note": {
-      const target =
-        item.targetType === "raw_input" ? undefined : repo.deriveItem(db, item.targetId);
       if (item.targetType === "raw_input") {
         if (!repo.getRawInput(db, item.targetId)) {
-          return `targetId 不存在: ${item.targetId}`;
+          return `targetId 不存在: ${item.targetId}（当前批次的 id 见【原始信息】的「批次 id」一行，逐字复制）`;
+        }
+        // 批次级留痕只属于正在消化的这一批（防把备注写到别的批次上——曾出现模型拿接收时间当 id）
+        if (item.targetId !== raw.id) {
+          return `record_note 的 raw_input 目标必须是本批（批次 id：${raw.id}）`;
         }
         return null;
       }
+      const target = repo.deriveItem(db, item.targetId);
       if (!target) {
         return `targetId 不存在: ${item.targetId}`;
       }
