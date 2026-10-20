@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Summarizing（小尺寸：去掉细线，只留块与四点）</title>
+  <rect width="128" height="128" rx="26" fill="#0f766e"/>
+  <rect x="40" y="40" width="48" height="48" rx="15" fill="#ffffff"/>
+  <g fill="#ffffff">
+    <rect x="88" y="16" width="22" height="22" rx="6"/>
+    <rect x="18" y="26" width="24" height="24" rx="7"/>
+    <rect x="86" y="86" width="24" height="24" rx="7"/>
+    <rect x="19" y="90" width="22" height="22" rx="6"/>
+  </g>
+</svg>

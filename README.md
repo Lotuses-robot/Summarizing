@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/icon.png" alt="Summarizing" width="150" />
+</p>
+
 <h1 align="center">个人信息中枢 · Summarizing</h1>
 
 <h3 align="center">从碎片信息到完整的事项。</h3>

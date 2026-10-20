@@ -1,0 +1,14 @@
+{
+  "name": "Summarizing · 个人信息中枢",
+  "short_name": "Summarizing",
+  "description": "把散落的信息拼成完整的事项；每块都可查回原文。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f6f4",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

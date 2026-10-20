@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Summarizing（主屏图标：满幅方底，由系统自行裁圆角）</title>
+  <rect width="128" height="128" fill="#0f766e"/>
+  <g stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M64 64 98 28M64 64 30 36M64 64 98 92M64 64 30 100" stroke-width="3.2" opacity=".28"/>
+    <path d="M98 28 30 36 98 92 30 100" fill="none" stroke-width="4" opacity=".28"/>
+  </g>
+  <rect x="44" y="44" width="40" height="40" rx="13" fill="#ffffff"/>
+  <g fill="#ffffff">
+    <rect x="92" y="22" width="12" height="12" rx="4"/>
+    <rect x="22" y="28" width="16" height="16" rx="5"/>
+    <rect x="90" y="84" width="16" height="16" rx="5"/>
+    <rect x="24" y="94" width="12" height="12" rx="4"/>
+  </g>
+</svg>
