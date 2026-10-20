@@ -31,6 +31,18 @@ function wallClockAgo(ms: number): string {
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 
+/** 相对今天偏移 n 天的墙钟（23:59:59 / 指定时刻）——演示数据永不「全是已过期」（截图可长期复用）。 */
+function dueInDays(days: number, time = "23:59:59"): string {
+  const d = new Date(Date.now() + days * DAY);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${time}`;
+}
+
+/** 原文里口语化的日期（"M 月 D 日"）——与 dueInDays 同一偏移，保证引文仍是原文子串。 */
+function spokenDate(days: number): string {
+  const d = new Date(Date.now() + days * DAY);
+  return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
+}
+
 // 演示账户落登记（已存在则复用）；库固定为该账户自己的用户库（清空重建在下面按表删）
 const registry = makeRegistryDb(path.join(DATA, "system.db"));
 const account =
@@ -69,15 +81,14 @@ type RawSeed = {
 };
 const raws: RawSeed[] = [
   {
-    content:
-      "【课程设计】数据结构大作业：实现一个图书管理系统（图书增删改查 + 读者管理），10 月 8 日前把设计文档和源码打包交到教学网。",
+    content: `【课程设计】数据结构大作业：实现一个图书管理系统（图书增删改查 + 读者管理），${spokenDate(3)}前把设计文档和源码打包交到教学网。`,
     sourceLabel: "学习交流群",
     sender: "班长 小林",
     groupId: "10001",
     receivedAt: wallClockAgo(3 * DAY),
   },
   {
-    content: "图书馆提醒：《算法导论》应还日期为 10 月 5 日，可在图书馆公众号续借一次。",
+    content: `图书馆提醒：《算法导论》应还日期为 ${spokenDate(-1)}，可在图书馆公众号续借一次。`,
     sourceLabel: "班级通知群",
     sender: "图书馆",
     groupId: "10002",
@@ -119,7 +130,7 @@ const raws: RawSeed[] = [
     receivedAt: wallClockAgo(9 * DAY),
   },
   {
-    content: "帮我记一下，10 月 1 日要和导师开组会讨论选题。",
+    content: `帮我记一下，${spokenDate(6)}要和导师开组会讨论选题。`,
     sourceLabel: "前台对话",
     sender: "我",
     groupId: "",
@@ -135,8 +146,8 @@ const raws: RawSeed[] = [
 ];
 
 const rawIds: string[] = [];
-raws.forEach((r, i) => {
-  const sourceType = i === raws.length - 1 ? "chat" : "nc";
+raws.forEach((r) => {
+  const sourceType = r.sourceLabel === "前台对话" ? "chat" : "nc";
   const row = repo.insertRawInput(db, {
     content: r.content,
     sourceType,
@@ -199,7 +210,7 @@ const itemA = makeItem(
   {
     elements: [
       { label: "name", text: "数据结构课程设计（图书管理系统）", note: null },
-      { label: "dueDate", text: "2026-10-08T23:59:59", note: null },
+      { label: "dueDate", text: dueInDays(3), note: null },
       {
         label: "summary",
         text: "数据结构课设：实现一个图书管理系统，提交设计文档与源码。",
@@ -216,7 +227,7 @@ const itemA = makeItem(
   3 * DAY,
 );
 ev(itemA, "元素:name", fragFrom(0, "数据结构大作业：实现一个图书管理系统"));
-ev(itemA, "元素:dueDate", fragFrom(0, "10 月 8 日前把设计文档和源码打包交到教学网"));
+ev(itemA, "元素:dueDate", fragFrom(0, `${spokenDate(3)}前把设计文档和源码打包交到教学网`));
 ev(itemA, "元素:提交平台", fragFrom(0, "交到教学网"));
 ev(itemA, "元素:提交物", fragFrom(0, "设计文档和源码打包"));
 
@@ -227,10 +238,10 @@ const itemG = makeItem(
   {
     elements: [
       { label: "name", text: "归还《算法导论》（图书馆）", note: null },
-      { label: "dueDate", text: "2026-10-05T23:59:59", note: null },
+      { label: "dueDate", text: dueInDays(-1), note: null },
       {
         label: "summary",
-        text: "图书馆借的《算法导论》10 月 5 日到期，记得续借或归还。",
+        text: `图书馆借的《算法导论》${spokenDate(-1)}到期，记得续借或归还。`,
         note: null,
       },
       { label: "馆藏地", text: "北区图书馆三层", note: null },
@@ -241,7 +252,7 @@ const itemG = makeItem(
   },
   1 * DAY,
 );
-ev(itemG, "元素:dueDate", fragFrom(1, "应还日期为 10 月 5 日"));
+ev(itemG, "元素:dueDate", fragFrom(1, `应还日期为 ${spokenDate(-1)}`));
 
 // C. 高数期中考试（推断日期带 note）
 const itemC = makeItem(
@@ -250,7 +261,7 @@ const itemC = makeItem(
   {
     elements: [
       { label: "name", text: "高等数学期中考试", note: null },
-      { label: "dueDate", text: "2026-10-22T14:00:00", note: "第 8 周周四——按校历第 8 周推算" },
+      { label: "dueDate", text: dueInDays(2, "14:00:00"), note: "第 8 周周四——按校历第 8 周推算" },
       {
         label: "summary",
         text: "高数期中考试：第 8 周周四下午，考场待通知。",
@@ -275,10 +286,10 @@ const itemI = makeItem(
       { label: "name", text: "与导师开组会讨论毕设选题", note: null },
       {
         label: "dueDate",
-        text: "2026-10-01T14:00:00",
-        note: "用户口述「10 月 1 日」——下午时段未指定，按上课时段默认 14:00",
+        text: dueInDays(6, "14:00:00"),
+        note: `用户口述「${spokenDate(6)}」——下午时段未指定，按上课时段默认 14:00`,
       },
-      { label: "summary", text: "和导师约好 10 月 1 日讨论毕设选题方向。", note: null },
+      { label: "summary", text: `和导师约好${spokenDate(6)}讨论毕设选题方向。`, note: null },
       { label: "地点", text: "信电楼 302（导师办公室）", note: null },
     ],
     tags: ["学业"],
@@ -287,7 +298,7 @@ const itemI = makeItem(
   },
   30 * 60_000,
 );
-ev(itemI, "元素:name", fragFrom(7, "10 月 1 日要和导师开组会讨论选题"));
+ev(itemI, "元素:name", fragFrom(7, `${spokenDate(6)}要和导师开组会讨论选题`));
 
 // D. 校医院体检复查（无日期）
 const itemD = makeItem(
@@ -435,7 +446,7 @@ ev(itemF, "元素:name", fragFrom(6, "本周六招新摊位值班"));
     },
     by: { actor: "agent0", model: "demo" },
   });
-  ev(notice.itemId, "元素:name", fragFrom(7, "数据结构课下周起改到明理楼3楼上课"));
+  ev(notice.itemId, "元素:name", fragFrom(8, "数据结构课下周起改到明理楼3楼上课"));
   client
     .prepare("UPDATE item_versions SET at = ? WHERE id = ?")
     .run(wallClockAgo(3 * HOUR), notice.id);
@@ -515,18 +526,17 @@ const turns: { role: "user" | "assistant"; content: string; atAgo: number }[] = 
   },
   {
     role: "assistant",
-    content:
-      "看板上有这几件：\n\n- **数据结构课设**：10 月 8 日前交设计文档和源码到教学网\n- **《算法导论》**：10 月 5 日到期，记得续借或归还\n- **高数期中**：第 8 周周四下午考试，考场还没通知",
+    content: `看板上有这几件：\n\n- **数据结构课设**：${spokenDate(3)}前交设计文档和源码到教学网\n- **《算法导论》**：${spokenDate(-1)}到期，记得续借或归还\n- **高数期中**：第 8 周周四下午考试，考场还没通知`,
     atAgo: 39 * 60_000,
   },
   {
     role: "user",
-    content: "帮我记一下，10 月 1 日要和导师开组会讨论选题。",
+    content: `帮我记一下，${spokenDate(6)}要和导师开组会讨论选题。`,
     atAgo: 30 * 60_000,
   },
   {
     role: "assistant",
-    content: "好，已记下：10 月 1 日与导师组会讨论毕设选题——稍后会出现在看板上。",
+    content: `好，已记下：${spokenDate(6)}与导师组会讨论毕设选题——稍后会出现在看板上。`,
     atAgo: 29 * 60_000,
   },
 ];
