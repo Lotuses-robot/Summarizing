@@ -8,6 +8,12 @@ import tseslint from "typescript-eslint";
 export default tseslint.config(
   { ignores: ["**/dist/**", "data/**", "archive/**", "docs/**"] },
   eslint.configs.recommended,
+  {
+    rules: {
+      // 引号字符串里写 ${…} 不会被插值——多半是模板字符串漏了反引号，字面量会原样进库
+      "no-template-curly-in-string": "error",
+    },
+  },
   ...tseslint.configs.recommended,
   {
     files: ["**/*.{ts,tsx}"],
