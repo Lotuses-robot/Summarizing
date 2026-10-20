@@ -199,7 +199,8 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     // 批次行「看原文」直达该批次原文（无待高亮句 → 整段平铺）
     fireEvent.click(screen.getByText("看原文"));
     const overlayText = await screen.findByText("补发");
-    expect(overlayText.tagName).toBe("P");
+    // 漂浮窗原文区是 whitespace-pre-wrap 的块（009 起外层为 div——内嵌图片占位渲染）
+    expect(overlayText.closest("div")?.className).toContain("whitespace-pre-wrap");
     act(() => {
       handleEsc();
     });
@@ -232,10 +233,17 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     fireEvent.click(screen.getByText("看原文"));
     // 高亮句落在 <mark> 里（indexOf 定位成功）；其所在 <p> 的完整文本 = 批次原文。
     // 同文本有两处（引文 blockquote + 悬浮窗 mark），取 tagName=MARK 的那个
-    const candidates = await screen.findAllByText("英语作业 9 月 30 号截止");
-    const mark = candidates.find((el) => el.tagName === "MARK");
-    if (mark === undefined) throw new Error("悬浮窗未给出 <mark> 高亮");
-    expect(mark.closest("p")?.textContent).toBe("群通知：英语作业 9 月 30 号截止，请互相转告");
+    // 高亮句落在 <mark> 里（indexOf 定位成功）。009 起引文/原文都过 MediaText 渲染，
+    // mark 内容外层多了 span——用标签选择器直接取，不断言层级
+    const overlayBlock = await waitFor(() => {
+      const el = document.querySelector("mark");
+      if (el === null) throw new Error("悬浮窗未给出 <mark> 高亮");
+      return el;
+    });
+    expect(overlayBlock.textContent).toBe("英语作业 9 月 30 号截止");
+    // 悬浮窗整体含完整原文（mark + 上下文段拼回来 = 原文）
+    expect(document.body.textContent).toContain("群通知：英语作业 9 月 30 号截止，请互相转告");
+    const mark = overlayBlock;
     // Esc 分层退出：悬浮窗挂着层，handleEsc 让最上层收起（App 全局键实际就是这么触发的）
     fireEvent.keyDown(window, { key: "Escape" }); // 无人监听也不应出错
     expect(mark).toBeInTheDocument();

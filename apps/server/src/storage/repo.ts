@@ -14,6 +14,8 @@ import {
   UncertainInputSchema,
   normalizeSourceIdentity,
   sourceLabelOf,
+  extractImageUrls,
+  mediaIdFromUrl,
   type AiSettings,
   type EvidenceSource,
   type Fragment,
@@ -27,7 +29,6 @@ import {
   type UncertainInput,
 } from "@summarizing/shared";
 import { nowWallClock, wallClockFromDate } from "../shared/time";
-import { extractImageUrls, mediaIdFromUrl } from "../shared/mediaPlaceholders";
 import type { DbOrTx } from "./db";
 import * as s from "./schema";
 

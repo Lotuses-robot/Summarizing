@@ -4,7 +4,9 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync } from "nod
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
+import { extractImageUrls, mediaIdFromUrl, textCitesMedia } from "@summarizing/shared";
 import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
+import { executeChanges } from "../executor/executor";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { storeImageBytes, sweepExpiredMedia, mediaFilePath } from "../application/media";
@@ -15,7 +17,6 @@ import {
   initialMediaExpiry,
   uncitedMediaExpiry,
 } from "../shared/mediaTtl";
-import { extractImageUrls, mediaIdFromUrl, textCitesMedia } from "../shared/mediaPlaceholders";
 import { nowWallClock } from "../shared/time";
 
 // 图片持久化（009 刀 1）：后端底座——TTL 纯函数、占位解析、上传校验/压缩、读取隔离、清理器。
@@ -117,11 +118,15 @@ describe("图片占位解析", () => {
     expect(extractImageUrls("[图片](https://a/b.jpg)")).toEqual(["https://a/b.jpg"]);
   });
 
-  it("本地占位识别：/api/media/<id> 与带域名的绝对写法都认；非本地返回 null", () => {
+  it("本地占位识别：/api/media/<id> 与带域名的绝对写法都认；带扩展名也认；非本地返回 null", () => {
     expect(mediaIdFromUrl("/api/media/abc123")).toBe("abc123");
     expect(mediaIdFromUrl("https://sum.lotuses.cn/api/media/abc123")).toBe("abc123");
+    // 从地址栏复制会带上扩展名——判「是不是本地媒体」不该因此漏判成外链
+    expect(mediaIdFromUrl("/api/media/abc123.jpg")).toBe("abc123");
+    expect(mediaIdFromUrl("https://sum.lotuses.cn/api/media/abc123.jpg")).toBe("abc123");
     expect(mediaIdFromUrl("https://a/1.jpg")).toBeNull();
     expect(mediaIdFromUrl("/api/board")).toBeNull();
+    expect(mediaIdFromUrl("/api/media/")).toBeNull();
   });
 
   it("引用判定：本地图按 id、信源图按 originUrl", () => {
@@ -359,5 +364,78 @@ describe("TTL 三档在存储层的联动（bump / shorten）", () => {
     repo.deleteMediaRow(db, stored.id);
     expect(repo.bumpMediaExpiry(db, stored.id, "2099-01-01T00:00:00")).toBe(false);
     expect(repo.shortenMediaExpiry(db, stored.id, "2026-01-01T00:00:00")).toBe(false);
+  });
+});
+
+describe("详情接口的 media 映射（009 刀 2；前端 MediaText 的唯一数据源）", () => {
+  it("原文/引文的本地占位进映射；未缓存的外部 URL 不进（前端据此回退链接）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const bytes = await smallJpeg();
+    const stored = await storeImageBytes(db, dir, bytes);
+
+    const raw = repo.insertRawInput(db, {
+      content: `看这张 [图片](/api/media/${stored.id}) 还有这张 [图片](https://qq.example/expired.jpg)`,
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      receivedAt: "2026-09-28T10:00:00",
+      eventTime: null,
+    });
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "create_item",
+          elements: [
+            {
+              label: "name",
+              text: "带图的事项",
+              quotes: [`[图片](/api/media/${stored.id})`],
+            },
+          ],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+
+    const item = repo.deriveItems(db)[0];
+    expect(item).toBeDefined();
+    if (item === undefined) return;
+    const full = repo.getItemFull(db, item.id);
+    expect(full).not.toBeNull();
+    if (full === null) return;
+    // 本地占位在映射里；未缓存的外部 URL 不在
+    expect(Object.keys(full.media)).toEqual([`/api/media/${stored.id}`]);
+    expect(full.media[`/api/media/${stored.id}`]?.id).toBe(stored.id);
+  });
+
+  it("无图片的详情 → media 为空对象（前端据「空」不做任何渲染分支）", async () => {
+    const db = makeDb(":memory:");
+    const raw = repo.insertRawInput(db, {
+      content: "纯文字，没有图",
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      receivedAt: "2026-09-28T10:00:00",
+      eventTime: null,
+    });
+    executeChanges(
+      db,
+      raw,
+      [
+        {
+          action: "create_item",
+          elements: [{ label: "name", text: "无图事项", quotes: [] }],
+          tags: [],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+    const item = repo.deriveItems(db)[0];
+    if (item === undefined) throw new Error("播种失败");
+    expect(repo.getItemFull(db, item.id)?.media).toEqual({});
   });
 });

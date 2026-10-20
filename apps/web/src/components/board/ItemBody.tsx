@@ -31,6 +31,7 @@ import { api } from "../../api";
 import { cn } from "../../lib/cn";
 import { fmtFullTime } from "../../lib/time";
 import { QuoteOverlay } from "./QuoteOverlay";
+import { MediaText } from "./MediaText";
 
 /** 事项展开体（D-80 手风琴内容）：基本信息开 / 信息元素平铺引文收 / 版本史收只显计数。
  *  滚动四铁规（内滚隔离/sticky/70vh）由父级的展开容器承担，这里只管内容。 */
@@ -166,7 +167,8 @@ export function ItemBody({
                   if (summaryEvidence.length > 0) toggleQuotes("summary");
                 }}
               >
-                <b className="text-ink-muted">[sum]</b> {summaryElement.text}
+                <b className="text-ink-muted">[sum]</b>{" "}
+                <MediaText text={summaryElement.text} mediaMap={detail.media} />
                 {summaryEvidence.length > 0 && (
                   <span className="text-xs text-accent"> · 证据({summaryEvidence.length})</span>
                 )}
@@ -207,7 +209,8 @@ export function ItemBody({
                     if (evidence.length > 0) toggleQuotes(el.label);
                   }}
                 >
-                  <b className="text-ink-muted">[{el.label}]</b> {el.text}
+                  <b className="text-ink-muted">[{el.label}]</b>{" "}
+                  <MediaText text={el.text} mediaMap={detail.media} />
                   {(evidence.length > 0 || !isReader) && (
                     <span
                       className={
@@ -313,7 +316,12 @@ export function ItemBody({
       </div>
 
       {quote !== null && (
-        <QuoteOverlay rawInput={quote.raw} quote={quote.text} onClose={() => setQuote(null)} />
+        <QuoteOverlay
+          rawInput={quote.raw}
+          quote={quote.text}
+          mediaMap={detail.media}
+          onClose={() => setQuote(null)}
+        />
       )}
     </div>
   );
@@ -366,7 +374,7 @@ function Quotes({
             key={ev.id}
             className="mt-1 border-l-2 border-line pl-2 text-xs text-ink-muted"
           >
-            {frag?.content ?? "（片段缺失）"}
+            <MediaText text={frag?.content ?? "（片段缺失）"} mediaMap={detail.media} />
             {frag !== undefined && (
               <span>
                 （批次 {frag.rawInputId.slice(0, 6)}

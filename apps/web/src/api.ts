@@ -23,6 +23,7 @@ import type {
   UncertainInput,
   UsageRange,
   UsageSummary,
+  MediaUploadResponse,
 } from "@summarizing/shared";
 
 /** 类型化 API 客户端：web 只跟这些函数打交道。 */
@@ -171,6 +172,15 @@ export const api = {
   /** Token 用量（010）：活动栏「用量」仪表盘（三个总数互不重叠；cachedTokens 为 null = 服务商未提供）。 */
   usage: (range: UsageRange): Promise<UsageSummary> =>
     req(`/api/usage?range=${range}`).then((r) => to<UsageSummary>(r)),
+
+  /** 上传图片（009）：原始字节 + Content-Type；返回 `/api/media/<sha256>` 供正文占位。
+   *  服务端会做 MIME/魔数校验、>2 MiB 压缩、内容寻址去重——失败一律 reject 人话错误。 */
+  uploadMedia: (file: File): Promise<MediaUploadResponse> =>
+    req("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    }).then((r) => to<MediaUploadResponse>(r)),
 
   /** 通知页（007）：kind=notice 的独立查看入口。 */
   notices: (): Promise<NoticeView> => req("/api/notices").then((r) => to<NoticeView>(r)),

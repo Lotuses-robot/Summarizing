@@ -2,17 +2,21 @@ import { useEffect, useRef } from "react";
 import { sourceIdentityLabel, type RawInput } from "@summarizing/shared";
 import { pushEscLayer } from "../../lib/escLayer";
 import { fmtFullTime } from "../../lib/time";
+import { MediaText } from "./MediaText";
 
 /** 引文悬浮窗（05§三 ㉜）：显示所属批次完整原文并高亮引文那句；点遮罩 / Esc 关闭。
  *  高亮用 indexOf 精确定位，定位不到（引文与原文有空白差异）就整段平铺不高亮——如实展示不编造。
- *  quote 为空串 = 非引文入口（从来源区的批次行进来，无特定待高亮句）→ 整段平铺。 */
+ *  quote 为空串 = 非引文入口（从来源区的批次行进来，无特定待高亮句）→ 整段平铺。
+ *  mediaMap = 原文里的图片占位 → 本地媒体（009：原链接过期也能看图；未命中按来源回退）。 */
 export function QuoteOverlay({
   rawInput,
   quote,
+  mediaMap,
   onClose,
 }: {
   rawInput: RawInput;
   quote: string;
+  mediaMap: Record<string, { id: string; mime: string; sizeBytes: number; expiresAt: string }>;
   onClose: () => void;
 }) {
   // Esc 分层退出：挂载期间注册本层（05§六）；onClose 走 ref——重渲染不换层位
@@ -39,19 +43,22 @@ export function QuoteOverlay({
           </button>
         </div>
         {/* whitespace-pre-wrap 保留原文换行；fit-text 让无空格长 URL 也在框内断行（不横向溢出） */}
-        <p className="fit-text max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+        <div className="fit-text max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
           {idx >= 0 ? (
             <>
-              {rawInput.content.slice(0, idx)}
+              <MediaText text={rawInput.content.slice(0, idx)} mediaMap={mediaMap} />
               <mark className="bg-accent-soft text-inherit">
-                {rawInput.content.slice(idx, idx + quote.length)}
+                <MediaText
+                  text={rawInput.content.slice(idx, idx + quote.length)}
+                  mediaMap={mediaMap}
+                />
               </mark>
-              {rawInput.content.slice(idx + quote.length)}
+              <MediaText text={rawInput.content.slice(idx + quote.length)} mediaMap={mediaMap} />
             </>
           ) : (
-            rawInput.content
+            <MediaText text={rawInput.content} mediaMap={mediaMap} />
           )}
-        </p>
+        </div>
       </div>
     </div>
   );

@@ -875,3 +875,7 @@ export const AuthOkSchema = z.object({
   username: z.string(),
 });
 export type AuthOk = z.infer<typeof AuthOkSchema>;
+
+// ───────────────────────── 图片占位解析（009：前后端共用纯字符串逻辑）─────────────────────────
+
+export { extractImageUrls, mediaIdFromUrl, textCitesMedia } from "./mediaPlaceholders";

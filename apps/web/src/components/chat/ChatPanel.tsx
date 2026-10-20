@@ -1,8 +1,15 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Locate, X } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
+import { ImagePlus, Locate, X } from "lucide-react";
 import {
   CHAT_HISTORY_ITEM_MAX_CHARS,
   CHAT_HISTORY_MAX_ITEMS,
+  errText,
   type ChatHistoryItem,
   type ChatResponse,
 } from "@summarizing/shared";
@@ -10,6 +17,7 @@ import { api } from "../../api";
 import { cn } from "../../lib/cn";
 import { pushEscLayer } from "../../lib/escLayer";
 import { Markdown } from "../../lib/markdown";
+import { MediaText } from "../board/MediaText";
 import { isNearBottom } from "../../lib/scrollAnchor";
 
 type Msg = {
@@ -40,6 +48,15 @@ export function ChatPanel({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // 非 null = @ 模式（值 = @ 后文本）
   const [mentionHighlight, setMentionHighlight] = useState(0);
   const [busy, setBusy] = useState(false);
+  // 待发送的图片（009）：只做**本地预览**（object URL），点发送才真上传——
+  // 避免「选了又没发」留下孤儿文件。remoteUrl 上传后才填。
+  const [image, setImage] = useState<{
+    previewUrl: string;
+    remoteUrl: string | null;
+    name: string;
+  } | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -128,18 +145,65 @@ export function ChatPanel({
     setMentions((cur) => cur.filter((m) => m.id !== id));
   };
 
+  /** 上传中的图片（009）：先上传拿 url，再让调用方发消息。失败抛人话错误——send 转成可见提示。 */
+  const uploadImage = async (file: File): Promise<string> => {
+    const res = await api.uploadMedia(file);
+    return res.url;
+  };
+
+  /** 选一张图（009）：只建本地预览 + 立即上传（这样「发送」不必等网络）。
+   *  上传失败 → 预览保留、错误可见 —— 消息不会因此丢掉。 */
+  const pickImage = (file: File | undefined | null): void => {
+    if (file === undefined || file === null) return;
+    setImageError(null);
+    // 换一张：先撤旧预览的 object URL（不然泄漏到页面关闭）
+    if (image !== null) URL.revokeObjectURL(image.previewUrl);
+    const previewUrl = URL.createObjectURL(file);
+    setImage({ previewUrl, remoteUrl: null, name: file.name });
+    void uploadImage(file)
+      .then((url) =>
+        setImage((cur) => (cur?.previewUrl === previewUrl ? { ...cur, remoteUrl: url } : cur)),
+      )
+      .catch((err: unknown) => {
+        setImageError(errText(err));
+        setImage((cur) => (cur?.previewUrl === previewUrl ? null : cur));
+        URL.revokeObjectURL(previewUrl);
+      });
+  };
+
+  /** 粘贴图片（009）：剪贴板里优先取图片项；没有则不当图片处理。 */
+  const onPaste = (e: ReactClipboardEvent<HTMLTextAreaElement>): void => {
+    const file = [...(e.clipboardData?.files ?? [])][0];
+    if (file === undefined) return;
+    e.preventDefault(); // 阻止把文件名粘进输入框
+    pickImage(file);
+  };
+
+  /** 移除待发送图（009）：撤预览，不动已上传的服务端文件（按 TTL 自然过期）。 */
+  const dropImage = (): void => {
+    if (image !== null) URL.revokeObjectURL(image.previewUrl);
+    setImage(null);
+    setImageError(null);
+  };
+
   /** 发送：history = 本条之前的轮次（不含本条，剔除本地占位，截断策略与共享常量一致）；
-   *  mentions 随请求上传；回复后无条件刷看板（延迟双刷等异步消化浮出）。 */
+   *  mentions 随请求上传；**有图片时先上传、成功后消息才发出**（009——上传失败不丢消息，
+   *  预览保留可重试）。回复后无条件刷看板（延迟双刷等异步消化浮出）。 */
   const send = () => {
     const message = draft.trim();
     if (message === "" || busy) return;
+    // 图还没上传完 → 等它（按钮已 disabled，这里是 race 兜底）
+    if (image !== null && image.remoteUrl === null) return;
+    // 占位单独一行拼在用户文字后——原文逐字、agent0 与渲染侧都能认（009 FR-015）
+    const body = image === null ? message : `${message}\n\n[图片](${image.remoteUrl})`;
     setBusy(true);
-    setMsgs((m) => [...m, { role: "user", text: message }]);
+    setMsgs((m) => [...m, { role: "user", text: body }]);
     stickRef.current = true; // 发送是用户主动作——无条件回到最新（specs/001 FR-001，哪怕之前上翻）
     // 同步快照滚底（不赖 effect）：发送后迟到的惯性 scroll 事件会把 stick 翻回 false 并跳过 effect（四轮评审竞态）
     const logEl = logRef.current;
     if (logEl !== null) logEl.scrollTop = logEl.scrollHeight;
     setDraft("");
+    setImage(null); // 预览撤销（object URL 随之释放）
     const savedMentions = mentions;
     setMentions([]);
     const history: ChatHistoryItem[] = msgs
@@ -150,7 +214,7 @@ export function ChatPanel({
         content: m.text.slice(0, CHAT_HISTORY_ITEM_MAX_CHARS),
       }));
     api
-      .chat(message, history, mentions.slice(0, 8))
+      .chat(body, history, mentions.slice(0, 8))
       .then((res) => {
         setMsgs((m) => [...m, { role: "front", text: res.reply, res }]);
         onActivity();
@@ -233,7 +297,7 @@ export function ChatPanel({
               {/* 前台回复渲染 Markdown 子集（2026-09-30 插播）；用户气泡纯文本 + 换行保真
                   （用户粘贴的星号就是星号，不做 markdown 解释） */}
               {m.role === "user" ? (
-                <span className="whitespace-pre-wrap">{m.text}</span>
+                <MediaText text={m.text} />
               ) : (
                 <div className="mt-0.5">
                   <Markdown text={m.text} />
@@ -284,12 +348,39 @@ export function ChatPanel({
           </div>
         )}
         <div className="relative">
+          {image !== null && (
+            <div className="mb-1.5 flex items-center gap-2 rounded-md border border-line bg-canvas p-1.5">
+              <img
+                src={image.previewUrl}
+                alt="待发送的图片"
+                className="h-12 w-12 shrink-0 rounded object-cover"
+              />
+              <div className="min-w-0 flex-1 text-xs text-ink-muted">
+                <div className="truncate">{image.name}</div>
+                <div>{image.remoteUrl === null ? "上传中…" : "已就绪"}</div>
+              </div>
+              <button
+                type="button"
+                className="btn shrink-0"
+                onClick={dropImage}
+                aria-label="移除待发送的图片"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
+          {imageError !== null && (
+            <p role="alert" className="mb-1.5 text-xs text-danger">
+              图片上传失败：{imageError}
+            </p>
+          )}
           <textarea
             ref={inputRef}
             className="input resize-none"
             value={draft}
             onChange={(e) => onInputChange(e.target.value)}
             onKeyDown={onInputKeyDown}
+            onPaste={onPaste}
             placeholder="问一句，@ 提及事项，或直接丢信息…（Enter 发送，Shift+Enter 换行）"
             rows={3}
           />
@@ -311,8 +402,33 @@ export function ChatPanel({
             </ul>
           )}
         </div>
-        <div className="mt-1 flex justify-end">
-          <button className="btn btn-accent" disabled={busy || draft.trim() === ""} onClick={send}>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          {/* 选择图片（009）：真实 file input 隐藏，点按钮触发 */}
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff"
+              className="hidden"
+              onChange={(e) => {
+                pickImage(e.target.files?.[0]);
+                e.target.value = ""; // 清掉，便于再次选同一张
+              }}
+            />
+            <button
+              type="button"
+              className="btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="选一张图片随消息发出（也可直接粘贴）"
+            >
+              <ImagePlus size={14} /> 图片
+            </button>
+          </div>
+          <button
+            className="btn btn-accent"
+            disabled={busy || draft.trim() === "" || (image !== null && image.remoteUrl === null)}
+            onClick={send}
+          >
             发送
           </button>
         </div>
