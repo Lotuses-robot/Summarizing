@@ -115,6 +115,26 @@ function ensureSchema(sqlite: Database.Database): void {
       item_id TEXT PRIMARY KEY,
       viewed_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS llm_usage (
+      id TEXT PRIMARY KEY,
+      at TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL,
+      completion_tokens INTEGER NOT NULL,
+      cached_tokens INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS llm_usage_at_idx ON llm_usage (at);
+    CREATE TABLE IF NOT EXISTS media (
+      id TEXT PRIMARY KEY,
+      mime TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      origin_url TEXT
+    );
+    CREATE INDEX IF NOT EXISTS media_expires_idx ON media (expires_at);
+    CREATE INDEX IF NOT EXISTS media_origin_idx ON media (origin_url);
   `);
 
   // ── 信源阶段迁移（D-84）——幂等，跑在老库上无害 ──

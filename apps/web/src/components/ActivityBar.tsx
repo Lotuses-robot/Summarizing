@@ -1,4 +1,5 @@
 import {
+  ChartColumn,
   Info,
   Inbox,
   KeyRound,
@@ -24,6 +25,7 @@ export function ActivityBar({
   onShowUncertain,
   onShowPipeline,
   onShowTrash,
+  onOpenUsage,
   onOpenAccount,
   onOpenSettings,
   onOpenAbout,
@@ -39,6 +41,8 @@ export function ActivityBar({
   onShowUncertain: () => void;
   onShowPipeline: () => void;
   onShowTrash: () => void;
+  /** 用量仪表盘（010）：左下角独立入口——与账户/设置/关于同组。 */
+  onOpenUsage: () => void;
   /** 账户弹层（用户名/改密/接入地址/退出——006）。 */
   onOpenAccount: () => void;
   onOpenSettings: () => void;
@@ -108,9 +112,16 @@ export function ActivityBar({
         <Trash2 size={18} />
       </button>
       <button
+        title="用量：这段时间花掉了多少 token"
+        onClick={onOpenUsage}
+        className="mt-auto flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+      >
+        <ChartColumn size={18} />
+      </button>
+      <button
         title="账户"
         onClick={onOpenAccount}
-        className="mt-auto flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <KeyRound size={18} />
       </button>

@@ -433,6 +433,34 @@ export type SearchItemsResult = z.infer<typeof SearchItemsResultSchema>;
 export const GetItemArgsSchema = z.object({ id: z.string() });
 export type GetItemArgs = z.infer<typeof GetItemArgsSchema>;
 
+// ───────────────────────── 图片媒体（009：上传 + 信源图片缓存）─────────────────────────
+
+/** 一张缓存图片的公开引用：id = sha256（内容寻址）；url = `/api/media/<id>`。
+ *  expiresAt 是该图当前留存到期时刻（TTL 由入库大小与 agent0 读取/引用情况决定）。 */
+export const MediaRefSchema = z.object({
+  id: z.string().min(1),
+  mime: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  expiresAt: z.string(),
+});
+export type MediaRef = z.infer<typeof MediaRefSchema>;
+
+/** 原文占位 URL → 本地媒体引用（详情接口随带，前端一次拿全、不做 N+1）。
+ *  key 是原文里 `[图片](url)` 的 url 原文（上传图 = `/api/media/<id>`，信源图 = 原始链接）。 */
+export const MediaMapSchema = z.record(z.string(), MediaRefSchema);
+export type MediaMap = z.infer<typeof MediaMapSchema>;
+
+/** 上传响应：前端拿到 id 后把 `[图片](/api/media/<id>)` 放进消息正文。
+ *  animationCompressed = 动图被降帧/丢帧压缩过（界面据此提示，不静默）。 */
+export const MediaUploadResponseSchema = z.object({
+  id: z.string().min(1),
+  url: z.string().min(1),
+  mime: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  animationCompressed: z.boolean(),
+});
+export type MediaUploadResponse = z.infer<typeof MediaUploadResponseSchema>;
+
 export const GetItemResultSchema = z.object({
   item: ItemSchema,
   evidence: z.array(EvidenceSourceSchema),
@@ -440,6 +468,8 @@ export const GetItemResultSchema = z.object({
   versions: z.array(ItemVersionSchema),
   // 引文悬浮窗（05§三）数据链：fragments 引用到的批次原文，按批次 id 索引（天然去重）
   rawInputs: z.record(z.string(), RawInputSchema),
+  // 009：本事项文本/引文里出现的图片占位 → 本地媒体（过期或未缓存的 url 不在表里）
+  media: MediaMapSchema,
 });
 export type GetItemResult = z.infer<typeof GetItemResultSchema>;
 
@@ -603,6 +633,26 @@ export type ChatHistoryResponse = z.infer<typeof ChatHistoryResponseSchema>;
 /** 用户手动操作（详情页按钮）的请求体。 */
 export const ConfirmBodySchema = z.object({ note: z.string().optional() });
 export type ConfirmBody = z.infer<typeof ConfirmBodySchema>;
+
+// ───────────────────────── Token 用量（010）─────────────────────────
+
+/** 用量统计范围：今日 / 近 7 天 / 近 30 天（按北京墙钟的日历日）。 */
+export const UsageRangeSchema = z.enum(["today", "7d", "30d"]);
+export type UsageRange = z.infer<typeof UsageRangeSchema>;
+
+/** 用量聚合（010）：三个维度**互不重叠**——`inputTokens + cachedTokens + completionTokens = 总消耗`。
+ *  `inputTokens` 是**未命中**部分（prompt_tokens 含缓存的 token，不减会与缓存命中重复计数）。
+ *  `cachedTokens` 为 null ⇔ 区间内所有调用都没返回缓存字段（服务商不提供）——与「命中 0」不同义。 */
+export const UsageSummarySchema = z.object({
+  range: UsageRangeSchema,
+  /** 未命中输入 token = Σ(promptTokens − 缓存命中数)。 */
+  inputTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  cachedTokens: z.number().int().nonnegative().nullable(),
+  /** 区间内的调用次数——区分「零调用」与「调用了但零用量」（空态文案不同）。 */
+  callCount: z.number().int().nonnegative(),
+});
+export type UsageSummary = z.infer<typeof UsageSummarySchema>;
 
 // ───────────────────────── 设置面板（05§五，D-81）─────────────────────────
 

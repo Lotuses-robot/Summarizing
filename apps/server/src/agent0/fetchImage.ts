@@ -4,11 +4,12 @@ import dns from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import { errText } from "@summarizing/shared";
+import { matchesMagic } from "../shared/imageBytes";
 
 // 多模态取图执行层（2026-10-13）：agent0 遇到正文里的 `[图片](url)` 占位时，用它取回图片实际查看。
 // 只读、无凭据、无用户上下文（Q27b 同款安全设计）——防 SSRF 五道闸：
 // ① 协议只许 http/https、端口只许 80/443；② 主机名**禁 IP 字面量**（含带方括号的 IPv6），
-//    云元数据 169.254.169.254 / 100.100.100.200 都在后一道黑名单内；
+//    云元数据 169.254.169.254 / 100.100.100.100 都在后一道黑名单内；
 // ③ 域名解析出的**每个 IP** 都过 BlockList（私网/回环/链路本地/保留段/多播/文档段）；
 // ④ **连接钉死在 ③ 已核验的 IP 上**（自定义 lookup，不再让传输层二次解析域名）——
 //    堵住「校验用一个解析结果、连接用另一个结果」的 DNS 重绑定 TOCTOU（2026-10-14 审查修复）；
@@ -180,29 +181,6 @@ const pinnedNetworkGet: ImageTransport = (url, ips, signal) =>
     req.on("error", (err) => reject(err));
     req.end();
   });
-
-/** MIME → 该类型文件头应匹配的判据（防「content-type 谎报 image 却是别的字节」）。 */
-function matchesMagic(mime: string, b: Uint8Array): boolean {
-  /** 头几字节逐一比对（缺字节时不匹配——Uint8Array 越界读为 undefined）。 */
-  const at = (...bytes: number[]): boolean => bytes.every((x, i) => b[i] === x);
-  switch (mime) {
-    case "image/jpeg":
-      return at(0xff, 0xd8, 0xff);
-    case "image/png":
-      return at(0x89, 0x50, 0x4e, 0x47);
-    case "image/gif":
-      return at(0x47, 0x49, 0x46, 0x38); // GIF8
-    case "image/bmp":
-      return at(0x42, 0x4d); // BM
-    case "image/webp":
-      // RIFF....WEBP
-      return at(0x52, 0x49, 0x46, 0x46) && b[8] === 0x57 && b[9] === 0x45;
-    case "image/tiff":
-      return at(0x49, 0x49, 0x2a) || at(0x4d, 0x4d, 0x00);
-    default:
-      return false;
-  }
-}
 
 /** 取回一张图片并编码为 data URL（多模态工具 fetch_image 的执行体）。
  *  任何失败都归一成 { ok:false, reason }——回喂给模型（它可继续纯文本消化），绝不抛出中断消化。 */

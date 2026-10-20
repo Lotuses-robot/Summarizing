@@ -22,6 +22,7 @@ import { PipelineView } from "./components/pipeline/PipelineView";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { SettingsModal } from "./components/settings/SettingsModal";
 import { UserModal } from "./components/UserModal";
+import { UsageModal } from "./components/UsageModal";
 import {
   AboutModal,
   lastSeenVersion,
@@ -110,6 +111,8 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  // 用量仪表盘（010）：活动栏左下角独立入口（不进设置——设置=声明式偏好，这里只是看数字）。
+  const [usageOpen, setUsageOpen] = useState(false);
   // 关于弹层（2026-10-13）：活动栏 ⓘ 手动打开；发版后登录也自动弹一次「这版更新了什么」。
   // upgradeFrom：自动弹时记下"上次看过的版本"（头部渲染「旧 → 新」）；手动打开为 null。
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -401,6 +404,7 @@ export default function App() {
           setView("trash");
           loadTrash();
         }}
+        onOpenUsage={() => setUsageOpen(true)}
         onOpenAccount={() => setAccountOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenAbout={() => {
@@ -525,6 +529,7 @@ export default function App() {
       )}
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <UsageModal open={usageOpen} onClose={() => setUsageOpen(false)} />
       <UserModal
         open={accountOpen}
         onClose={() => setAccountOpen(false)}

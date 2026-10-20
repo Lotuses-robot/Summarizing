@@ -17,6 +17,7 @@ import { describeSweep, sweepUncertainLibrary } from "../agent0/sweep";
 import { kickDigest } from "../agent0/digest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { ChatMsg, LlmClient, ToolCall, ToolDef } from "../shared/llm";
+import { recordUsage } from "../shared/usage";
 
 // 前台 buddy（D-78）：有连续上下文的多轮对话 agent——像聊天一样答问、收信息、留痕。
 // 红线：只读 + 只能调工具，写权永远在执行器；拿不准宁可误录入（D-14）；全留痕。
@@ -205,6 +206,7 @@ async function converse(
       messages,
       tools: FRONT_TOOL_DEFS,
     });
+    recordUsage(db, "chat", modelTag, turn.usage);
     if (turn.toolCalls.length > 0) {
       messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
       for (const call of turn.toolCalls) {

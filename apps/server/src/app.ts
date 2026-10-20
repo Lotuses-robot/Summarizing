@@ -19,6 +19,8 @@ import { registerPipelineRoutes } from "./routes/pipeline";
 import { registerSourceRoutes } from "./routes/sources";
 import { registerSettingsRoutes } from "./routes/settings";
 import { registerUncertainRoutes } from "./routes/uncertain";
+import { registerUsageRoutes } from "./routes/usage";
+import { registerMediaRoutes } from "./routes/media";
 import type { SpaceHub } from "./spaces";
 
 // 装配 HTTP 应用（006 多用户重构）：
@@ -97,11 +99,15 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
 
   // 基础安全头（006 安全审视）：nosniff / Referrer-Policy: same-origin（防邀请码经 referrer 出站）/
   // 禁嵌框；API 响应 no-store（防共享设备浏览器缓存残留）。CSP 留批次 3（需对 Vite 产物实测）。
+  // ⚠️ /api/media/ 排除在 no-store 外（009）：图片是内容寻址的静态字节，private+immutable
+  //    让浏览器长期缓存、不反复打服务端；这里的钩子在 onSend 跑，晚于路由设的头，故必须让步。
   app.addHook("onSend", async (req, reply, payload) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "same-origin");
     reply.header("X-Frame-Options", "DENY");
-    if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
+    if (req.url.startsWith("/api/") && !req.url.startsWith("/api/media/")) {
+      reply.header("Cache-Control", "no-store");
+    }
     return payload;
   });
 
@@ -111,6 +117,18 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
 
   // ── 受保护面（封装作用域：preHandler 一次挂全；路由只读 req.space）──
   void app.register(async (scope) => {
+    // 图片上传的原始字节体（009）：只挂 image/* 这一族。
+    // ⚠️ 绝不 addContentTypeParser("*")——Fastify 的 parser 按 content-type 层级注册，
+    //    通配会把本作用域**所有**路由的 body 解析都吞掉（/api/ingest、/api/chat 收到
+    //    undefined → 400 或更糟的静默变形）。image/* 默认不被 Fastify 解析，挂它不挤占谁。
+    // 客户端可能给 application/octet-stream——那种情况走 Fastify 默认 415，路由层可见报错。
+    scope.addContentTypeParser(/^image\//, (_req, payload, done) => {
+      const chunks: Buffer[] = [];
+      payload.on("data", (c: Buffer) => chunks.push(c));
+      payload.on("end", () => done(null, Buffer.concat(chunks)));
+      payload.on("error", done);
+    });
+
     scope.addHook(
       "preHandler",
       makeSessionAuth({
@@ -188,6 +206,8 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
     registerSourceRoutes(scope);
     registerUncertainRoutes(scope);
     registerTrashRoutes(scope);
+    registerUsageRoutes(scope);
+    registerMediaRoutes(scope);
   });
 
   return app;

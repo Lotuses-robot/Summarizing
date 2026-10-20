@@ -177,6 +177,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowUncertain={() => {}}
         onShowPipeline={() => {}}
         onShowTrash={() => {}}
+        onOpenUsage={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={() => {}}
         onOpenAbout={() => {}}
@@ -193,6 +194,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowUncertain={() => {}}
         onShowPipeline={() => {}}
         onShowTrash={() => {}}
+        onOpenUsage={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={() => {}}
         onOpenAbout={() => {}}
@@ -217,6 +219,7 @@ describe("ActivityBar 存疑库入口（D-89）", () => {
         onShowUncertain={onShowUncertain}
         onShowPipeline={onShowPipeline}
         onShowTrash={() => {}}
+        onOpenUsage={() => {}}
         onOpenAccount={() => {}}
         onOpenSettings={onOpenSettings}
         onOpenAbout={onOpenAbout}

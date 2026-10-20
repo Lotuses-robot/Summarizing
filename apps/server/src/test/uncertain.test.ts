@@ -347,7 +347,7 @@ describe("resolve 原子前置与清扫互斥（二轮评审 A2/A5）", () => {
       modelTag: "test-model",
       chat: async () => {
         await gate;
-        return { content: '{"changes":[]}', toolCalls: [] };
+        return { content: '{"changes":[]}', toolCalls: [], usage: null };
       },
     };
     const p1 = sweepUncertainLibrary(db, slowLlm, "test-model", "test");

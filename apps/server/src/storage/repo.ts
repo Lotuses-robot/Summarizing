@@ -27,6 +27,7 @@ import {
   type UncertainInput,
 } from "@summarizing/shared";
 import { nowWallClock, wallClockFromDate } from "../shared/time";
+import { extractImageUrls, mediaIdFromUrl } from "../shared/mediaPlaceholders";
 import type { DbOrTx } from "./db";
 import * as s from "./schema";
 
@@ -610,6 +611,175 @@ export function listRecentChatTurns(
     .reverse(); // 倒序取最新 N 条后再反转成时间升序
 }
 
+// ── LLM 用量（010：活动栏左下角「用量」仪表盘）──
+
+/** 追加一行调用用量（只记**成功**调用；失败无 usage 可记，由流水留痕）。 */
+export function insertLlmUsage(
+  db: DbOrTx,
+  args: {
+    actor: "agent0" | "chat";
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    cachedTokens: number | null;
+  },
+): void {
+  db.insert(s.llmUsage)
+    .values({
+      id: newId(),
+      at: nowWallClock(),
+      actor: args.actor,
+      model: args.model,
+      promptTokens: args.promptTokens,
+      completionTokens: args.completionTokens,
+      cachedTokens: args.cachedTokens,
+    })
+    .run();
+}
+
+/** 聚合 since（含）之后的用量（010）：三个维度互不重叠，相加 = 区间总消耗。
+ *  `cachedTokens` 全 NULL → null（服务商未提供）；只要有一行有值就按非 NULL 相加——
+ *  命中 0 是真实数据。跨行相减可能为负（服务商返回怪异）时夹到 0，不传播怪值给界面。 */
+export function sumLlmUsage(
+  db: DbOrTx,
+  since: string,
+): {
+  inputTokens: number;
+  completionTokens: number;
+  cachedTokens: number | null;
+  callCount: number;
+} {
+  const rows = db
+    .select({
+      promptTokens: s.llmUsage.promptTokens,
+      completionTokens: s.llmUsage.completionTokens,
+      cachedTokens: s.llmUsage.cachedTokens,
+    })
+    .from(s.llmUsage)
+    .where(sql`${s.llmUsage.at} >= ${since}`)
+    .all();
+  let promptTokens = 0;
+  let completionTokens = 0;
+  let cachedTokens: number | null = null;
+  for (const r of rows) {
+    promptTokens += r.promptTokens;
+    completionTokens += r.completionTokens;
+    if (r.cachedTokens !== null) cachedTokens = (cachedTokens ?? 0) + r.cachedTokens;
+  }
+  return {
+    inputTokens: Math.max(0, promptTokens - (cachedTokens ?? 0)),
+    completionTokens,
+    cachedTokens,
+    callCount: rows.length,
+  };
+}
+
+// ── 图片媒体（009：上传 + 信源图片缓存）──
+
+/** 一条媒体行的公开形状（shared MediaRef）。 */
+export type MediaRefRow = { id: string; mime: string; sizeBytes: number; expiresAt: string };
+
+/** 插入或复用一张缓存图（内容寻址，天然去重）。
+ *  **同一 sha256 已存在 → 复用，不重复落盘**；到期时间取较晚的一个（新上传的说明仍有人要）。
+ *  返回新插入 or 命中复用的行。 */
+export function insertMedia(
+  db: DbOrTx,
+  args: {
+    id: string;
+    mime: string;
+    sizeBytes: number;
+    createdAt: string;
+    expiresAt: string;
+    originUrl: string | null;
+  },
+): MediaRefRow {
+  const existing = db.select().from(s.media).where(eq(s.media.id, args.id)).get();
+  if (existing !== undefined) {
+    if (args.expiresAt > existing.expiresAt) {
+      db.update(s.media).set({ expiresAt: args.expiresAt }).where(eq(s.media.id, args.id)).run();
+      return {
+        id: existing.id,
+        mime: existing.mime,
+        sizeBytes: existing.sizeBytes,
+        expiresAt: args.expiresAt,
+      };
+    }
+    return {
+      id: existing.id,
+      mime: existing.mime,
+      sizeBytes: existing.sizeBytes,
+      expiresAt: existing.expiresAt,
+    };
+  }
+  db.insert(s.media).values(args).run();
+  return { id: args.id, mime: args.mime, sizeBytes: args.sizeBytes, expiresAt: args.expiresAt };
+}
+
+/** 按 sha256 取一行（读接口的归属校验 + fetch_image 本地命中）。 */
+export function getMedia(db: DbOrTx, id: string): MediaRefRow | null {
+  const row = db.select().from(s.media).where(eq(s.media.id, id)).get();
+  if (row === undefined) return null;
+  return { id: row.id, mime: row.mime, sizeBytes: row.sizeBytes, expiresAt: row.expiresAt };
+}
+
+/** 按原始 URL 取一行（信源图片占位反查 + 进站去重）。 */
+function getMediaByOriginUrl(db: DbOrTx, originUrl: string): MediaRefRow | null {
+  const row = db.select().from(s.media).where(eq(s.media.originUrl, originUrl)).get();
+  if (row === undefined) return null;
+  return { id: row.id, mime: row.mime, sizeBytes: row.sizeBytes, expiresAt: row.expiresAt };
+}
+
+/** 列出若干 sha256 的媒体行（详情接口一次查全）。 */
+function getMediaByIds(db: DbOrTx, ids: string[]): MediaRefRow[] {
+  if (ids.length === 0) return [];
+  const rows = db.select().from(s.media).where(inArray(s.media.id, ids)).all();
+  return rows.map((r) => ({
+    id: r.id,
+    mime: r.mime,
+    sizeBytes: r.sizeBytes,
+    expiresAt: r.expiresAt,
+  }));
+}
+
+/** 抬到较晚的到期时间——只在 next 更晚时写（引用判定；日期只增不减，防后一次引用反向缩短）。 */
+export function bumpMediaExpiry(db: DbOrTx, id: string, next: string): boolean {
+  const cur = db
+    .select({ expiresAt: s.media.expiresAt })
+    .from(s.media)
+    .where(eq(s.media.id, id))
+    .get();
+  if (cur === undefined || next <= cur.expiresAt) return false; // 行已删 / 不更晚 → 不动
+  db.update(s.media).set({ expiresAt: next }).where(eq(s.media.id, id)).run();
+  return true;
+}
+
+/** 提前到期时间——只在 next 更早时写（读过未引用；只提前、不延后）。 */
+export function shortenMediaExpiry(db: DbOrTx, id: string, next: string): boolean {
+  const cur = db
+    .select({ expiresAt: s.media.expiresAt })
+    .from(s.media)
+    .where(eq(s.media.id, id))
+    .get();
+  if (cur === undefined || next >= cur.expiresAt) return false; // 行已删（清理器或回收站）→ 忽略
+  db.update(s.media).set({ expiresAt: next }).where(eq(s.media.id, id)).run();
+  return true;
+}
+
+/** 已过期的媒体行（清理器扫描；文件路径由调用方按 id + mime 拼）。 */
+export function listExpiredMedia(db: DbOrTx, now: string): MediaRefRow[] {
+  return db
+    .select()
+    .from(s.media)
+    .where(sql`${s.media.expiresAt} <= ${now}`)
+    .all()
+    .map((r) => ({ id: r.id, mime: r.mime, sizeBytes: r.sizeBytes, expiresAt: r.expiresAt }));
+}
+
+/** 删一行（清理器）。 */
+export function deleteMediaRow(db: DbOrTx, id: string): void {
+  db.delete(s.media).where(eq(s.media.id, id)).run();
+}
+
 // ── 存疑信息库（D-85：信息层池子；不生成事项、不挂候选）──
 
 /** 入库一条（agent0 park_uncertain）：信源快照与批次引用由调用方从当批带入。 */
@@ -697,8 +867,9 @@ export function resolveUncertainInput(
 
 // ── 聚合读（get_event 工具 / 事项详情页共用，01§4.14）──
 
-/** 聚合读：事项+证据+片段+版本史+批次原文——get_item 工具与详情展开体共用（01§4.14）；
- *  rawInputs = fragments 引用到的批次原文（引文悬浮窗，05§三），按批次 id 索引。 */
+/** 聚合读：事项+证据+片段+版本史+批次原文+媒体映射——get_item 工具与详情展开体共用（01§4.14）；
+ *  rawInputs = fragments 引用到的批次原文（引文悬浮窗，05§三），按批次 id 索引；
+ *  media（009）= 本事项文本/引文里出现的图片占位 → 本地媒体（过期或未缓存的 url 不进表）。 */
 export function getItemFull(db: DbOrTx, id: string) {
   const item = deriveItem(db, id);
   if (!item) return null;
@@ -714,7 +885,45 @@ export function getItemFull(db: DbOrTx, id: string) {
       rawInputs[frag.rawInputId] = raw;
     }
   }
-  return { item, evidence, fragments, versions, rawInputs };
+  return {
+    item,
+    evidence,
+    fragments,
+    versions,
+    rawInputs,
+    media: mediaMapOf(db, rawInputs, fragments),
+  };
+}
+
+/** 图片占位 → 本地媒体（009）：扫批次原文与引文片段里的 `[图片](url)`，
+ *  本地占位按 sha256 命中、信源占位按 originUrl 反查。一次查全，前端不做 N+1。 */
+function mediaMapOf(
+  db: DbOrTx,
+  rawInputs: Record<string, RawInput>,
+  fragments: Fragment[],
+): Record<string, MediaRefRow> {
+  const urls = new Set<string>();
+  for (const raw of Object.values(rawInputs)) {
+    for (const u of extractImageUrls(raw.content)) urls.add(u);
+  }
+  for (const frag of fragments) {
+    for (const u of extractImageUrls(frag.content)) urls.add(u);
+  }
+  if (urls.size === 0) return {};
+  const localIds: string[] = [];
+  const originUrls: string[] = [];
+  for (const u of urls) {
+    const localId = mediaIdFromUrl(u);
+    if (localId !== null) localIds.push(localId);
+    else originUrls.push(u);
+  }
+  const out: Record<string, MediaRefRow> = {};
+  for (const row of getMediaByIds(db, localIds)) out[`/api/media/${row.id}`] = row;
+  for (const u of originUrls) {
+    const row = getMediaByOriginUrl(db, u);
+    if (row !== null) out[u] = row;
+  }
+  return out;
 }
 
 /** 回收站保留天数（007，OQ-6）：固定 15 天，首版不做设置项。 */

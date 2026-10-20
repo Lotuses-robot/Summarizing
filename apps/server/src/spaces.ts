@@ -10,6 +10,7 @@ import {
 import { readStoredAi } from "./storage/repo";
 import { makeOpenAiLlm, makeUnconfiguredLlm, type TaggedLlm } from "./shared/llm";
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
+import { makeMediaDir } from "./routes/media";
 import { sweepOrphanPending } from "./agent0/digest";
 import { errText } from "@summarizing/shared";
 import { withTimeout } from "./shared/timeout";
@@ -33,6 +34,8 @@ export interface Space {
   sourceStates: Map<string, SourceState>;
   /** 本空间的 webhook 处理器（适配器装配期登记；core 网关按令牌分发到这）。 */
   webhookRoutes: WebhookRoute[];
+  /** 本账户的图片媒体目录 `data/media/<uid>/`（009；装配期 mkdir，上传/清理都走它）。 */
+  mediaDir: string;
   /** 关停：各信源 stop + 清理表反向撤销（逐项隔离）。 */
   stop(): Promise<void>;
 }
@@ -91,6 +94,7 @@ async function assembleSpace(
       tools: makeAgentTools(db),
       sourceStates,
       webhookRoutes,
+      mediaDir: makeMediaDir(dataRoot, account.uid),
       stop: () => assembly.stop(),
     };
   } catch (err) {

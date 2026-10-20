@@ -79,6 +79,7 @@ function makeDetail(overrides: Partial<GetItemResult> = {}): GetItemResult {
         digestState: "digested",
       },
     },
+    media: {},
     ...overrides,
   };
 }

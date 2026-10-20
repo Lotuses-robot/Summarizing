@@ -1,10 +1,10 @@
-import type { TaggedLlm, ChatMsg, ToolCall, ToolDef } from "../../shared/llm";
+import type { TaggedLlm, ChatMsg, ToolCall, ToolDef, LlmUsage } from "../../shared/llm";
 
 // 测试专用 fake LLM（digest.test.ts / chat.test.ts 共用）：
 // 按脚本逐轮回放；队列空 = 模拟 LLM 调用失败。
 // 默认 modelTag 与测试文件的 MODEL 常量一致——审计署名（agent0:test-model）断言零扰动。
 
-export type Turn = { content: string | null; toolCalls?: ToolCall[] };
+export type Turn = { content: string | null; toolCalls?: ToolCall[]; usage?: LlmUsage | null };
 export type ChatArgs = { system: string; messages: ChatMsg[]; tools: ToolDef[] };
 
 export class FakeLlm implements TaggedLlm {
@@ -27,7 +27,8 @@ export class FakeLlm implements TaggedLlm {
     this.chats.push(structuredClone(args));
     const turn = this.queue.shift();
     if (!turn) throw new Error("FakeLlm 队列已空（模拟 LLM 调用失败）");
-    return { content: turn.content, toolCalls: turn.toolCalls ?? [] };
+    // usage 缺省 null = 服务商未提供（010 的诚实口径）——既有用例零扰动
+    return { content: turn.content, toolCalls: turn.toolCalls ?? [], usage: turn.usage ?? null };
   }
 }
 

@@ -21,6 +21,8 @@ import type {
   SourceSummary,
   TrashView,
   UncertainInput,
+  UsageRange,
+  UsageSummary,
 } from "@summarizing/shared";
 
 /** 类型化 API 客户端：web 只跟这些函数打交道。 */
@@ -165,6 +167,10 @@ export const api = {
   // ── 数据 ──
 
   board: (): Promise<BoardView> => req("/api/board").then((r) => to<BoardView>(r)),
+
+  /** Token 用量（010）：活动栏「用量」仪表盘（三个总数互不重叠；cachedTokens 为 null = 服务商未提供）。 */
+  usage: (range: UsageRange): Promise<UsageSummary> =>
+    req(`/api/usage?range=${range}`).then((r) => to<UsageSummary>(r)),
 
   /** 通知页（007）：kind=notice 的独立查看入口。 */
   notices: (): Promise<NoticeView> => req("/api/notices").then((r) => to<NoticeView>(r)),

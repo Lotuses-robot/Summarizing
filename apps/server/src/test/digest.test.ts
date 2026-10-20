@@ -942,6 +942,7 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
         if (calls.length === 1) {
           return {
             content: null,
+            usage: null,
             toolCalls: [
               {
                 id: "t1",
@@ -954,10 +955,11 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
         if (calls.length === 3) {
           return {
             content: null,
+            usage: null,
             toolCalls: [{ id: "t2", name: "search_items", argsJson: '{"query":"x"}' }],
           };
         }
-        return { content: '{"changes":[]}', toolCalls: [] };
+        return { content: '{"changes":[]}', toolCalls: [], usage: null };
       },
     };
     const raw = seedRaw(db);

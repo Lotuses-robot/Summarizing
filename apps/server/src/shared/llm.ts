@@ -1,10 +1,18 @@
 import OpenAI from "openai";
+import { z } from "zod";
 import type { AiSettings } from "@summarizing/shared";
 
 // OpenAI 兼容协议（D-55）：baseURL 指向具体服务商，代码不感知是谁。
 // LlmClient 是接口：生产用 makeOpenAiLlm，测试注入 fake（digest.test.ts）。
 
 export type ToolCall = { id: string; name: string; argsJson: string };
+
+/** 一次调用的 token 用量（010）。cachedTokens = null ⇔ 服务商没给缓存字段——与「命中 0」不同义。 */
+export type LlmUsage = {
+  promptTokens: number;
+  completionTokens: number;
+  cachedTokens: number | null;
+};
 
 /** 用户消息的内容块（多模态）：文本 + 图片（data URL 或直链）——OpenAI 兼容协议的通用子集。
  *  图片走 user 消息而非 tool 消息：协议的 tool 结果只能放文本（fetch_image 的注入路径，digest.ts）。 */
@@ -27,7 +35,7 @@ export interface LlmClient {
     system: string;
     messages: ChatMsg[];
     tools: ToolDef[];
-  }): Promise<{ content: string | null; toolCalls: ToolCall[] }>;
+  }): Promise<{ content: string | null; toolCalls: ToolCall[]; usage: LlmUsage | null }>;
 }
 
 /** 带模型标识的 LLM 客户端：热切换后路由逐请求取 llmRef.current，modelTag 进 agent0: 署名永不说谎。 */
@@ -79,7 +87,7 @@ export function makeOpenAiLlm(
           },
         ];
       });
-      return { content: msg?.content ?? null, toolCalls };
+      return { content: msg?.content ?? null, toolCalls, usage: parseUsage(res.usage) };
     },
   };
 }
@@ -93,6 +101,36 @@ export function makeUnconfiguredLlm(): TaggedLlm {
       throw new Error("尚未配置 AI 接入——去 设置 → AI 填 Base URL / 模型 / Key");
     },
   };
+}
+
+/** 服务商返回的 usage 的**运行时**形状（zod 解析，不用类型断言——见 CLAUDE.md 类型绕过禁令）。
+ *  OpenAI 标准字段 + DeepSeek 等的兼容字段 `prompt_cache_hit_tokens` 都在内。
+ *  0 是合法值；负数/小数/字符串由 zod 判失败 → 整条 usage 作废（统计要真数，不猜）。 */
+const RawUsageSchema = z.object({
+  prompt_tokens: z.number().int().nonnegative(),
+  completion_tokens: z.number().int().nonnegative(),
+  prompt_cache_hit_tokens: z.number().int().nonnegative().optional(),
+  prompt_tokens_details: z
+    .object({ cached_tokens: z.number().int().nonnegative().optional() })
+    .optional(),
+});
+
+/** 从服务商返回的 usage 里取三件事（010）：输入 / 输出 / 缓存命中。
+ *  缺失或形状不符 → null（= 未提供）并 stderr 留痕——界面照实说「服务商未提供」，不拿 0 冒充。
+ *  缓存命中优先 OpenAI 标准字段 `prompt_tokens_details.cached_tokens`，兼容 `prompt_cache_hit_tokens`。 */
+function parseUsage(raw: unknown): LlmUsage | null {
+  if (raw === undefined || raw === null) return null;
+  const parsed = RawUsageSchema.safeParse(raw);
+  if (!parsed.success) {
+    process.stderr.write(
+      `[llm] usage 形状不可用，按未提供处理：${JSON.stringify(raw).slice(0, 200)}\n`,
+    );
+    return null;
+  }
+  const { prompt_tokens, completion_tokens, prompt_tokens_details, prompt_cache_hit_tokens } =
+    parsed.data;
+  const cachedTokens = prompt_tokens_details?.cached_tokens ?? prompt_cache_hit_tokens ?? null;
+  return { promptTokens: prompt_tokens, completionTokens: completion_tokens, cachedTokens };
 }
 
 /** 内部消息格式 → OpenAI SDK 消息格式（含工具调用的双向转换；多模态内容块逐块重建，

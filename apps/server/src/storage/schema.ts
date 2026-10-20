@@ -1,4 +1,4 @@
-import { index, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // 表结构与 packages/shared 的 zod schema 一一对应（00-数据契约）。
 // kb 表不建——知识库 S3 才落地（D-53），不写没有调用者的东西。
@@ -115,6 +115,40 @@ export const chatTurns = sqliteTable(
     at: text("at").notNull(),
   },
   (t) => [index("chat_turns_at_idx").on(t.at)],
+);
+
+// 图片媒体缓存（009）：文件在 data/media/<uid>/<sha256>.<ext>，本表只存元数据与生命周期。
+// expires_at 是**唯一**生命周期字段（用户 2026-10-20 定「只要一个 expiredate」）：
+//   入库 → 基础留存（大小反向 7–30 天）；读过未被引用 → 缩短到 3 天；被证据引用 → 抬到 90 天。
+// origin_url 供原文占位反查（上传图的占位就是 /api/media/<id>，直接按主键命中，此列为 null）。
+export const media = sqliteTable(
+  "media",
+  {
+    id: text("id").primaryKey(), // sha256（内容寻址，天然去重）
+    mime: text("mime").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    originUrl: text("origin_url"), // 信源图片的原始 URL；上传图为 null
+  },
+  (t) => [index("media_expires_idx").on(t.expiresAt), index("media_origin_idx").on(t.originUrl)],
+);
+
+// LLM 用量（010）：每次**成功**调用一行——活动栏左下角「用量」仪表盘据此聚合。
+// 三列都是**服务商原始值**（prompt_tokens 含缓存部分）；「未命中输入」在聚合时算（shared UsageSummary）。
+// cached_tokens 只在服务商返回时写；NULL = 未提供（不许用 0 冒充）。
+export const llmUsage = sqliteTable(
+  "llm_usage",
+  {
+    id: text("id").primaryKey(),
+    at: text("at").notNull(), // 北京墙钟（字符串序 = 时间序，范围查询直接比前缀）
+    actor: text("actor").notNull(), // agent0（消化）| chat（前台）
+    model: text("model").notNull(),
+    promptTokens: integer("prompt_tokens").notNull(),
+    completionTokens: integer("completion_tokens").notNull(),
+    cachedTokens: integer("cached_tokens"),
+  },
+  (t) => [index("llm_usage_at_idx").on(t.at)],
 );
 
 // 仅承载「批次级」流水（消化完成/失败/围栏放弃/落笔动作/agent0 轨迹）——

@@ -7,6 +7,7 @@ import {
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient } from "../shared/llm";
+import { recordUsage } from "../shared/usage";
 import { resolveUncertainWellFormed, parseChangeList } from "../executor/fence";
 import { executeChanges } from "../executor/executor";
 
@@ -98,6 +99,7 @@ async function runSweep(
     try {
       const messages: ChatMsg[] = [{ role: "user", content: sweepBrief(entry) }];
       const turn = await llm.chat({ system: SWEEP_SYSTEM_PROMPT, messages, tools: [] });
+      recordUsage(db, "agent0", modelTag, turn.usage);
       // 解析走与 digest 同一份容错路径（parseModelJson：剥围栏/截取/校验）——不再有第三份实现
       const parsed = parseChangeList(turn.content ?? "");
       if (parsed === null) continue; // 解析失败：跳过（不清扫即保留，保守）

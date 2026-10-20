@@ -10,8 +10,10 @@ import { nowWallClock } from "../shared/time";
 
 /** 当前 schema 版本（**代码常量，唯一出处**）。改表结构时 +1：新结构写进 ensureSchema 的幂等 DDL
  *  （db.ts / registry.ts 各自主体），存量变换同样写在 ensureSchema 里（先例：migrateByToProvenance）。
- *  v2（007）：取消归档状态——存量 archived 快照迁移为 done（FR-018）。 */
-export const SCHEMA_VERSION = 2;
+ *  v2（007）：取消归档状态——存量 archived 快照迁移为 done（FR-018）。
+ *  v3（010）：新增 llm_usage（token 用量）——纯建表，无存量变换。
+ *  v4（009）：新增 media（图片缓存生命周期）——纯建表，无存量变换。 */
+export const SCHEMA_VERSION = 4;
 
 /** 备份保留份数（超过按时间清最旧——防无限堆积）。 */
 const BACKUP_KEEP = 5;

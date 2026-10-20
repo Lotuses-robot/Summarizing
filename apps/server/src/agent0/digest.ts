@@ -14,7 +14,8 @@ import {
 } from "@summarizing/shared";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
-import type { ChatMsg, LlmClient, ToolCall } from "../shared/llm";
+import type { ChatMsg, LlmClient, ToolCall, LlmUsage } from "../shared/llm";
+import { recordUsage } from "../shared/usage";
 import { describeRejections, parseChangeList, runFence } from "../executor/fence";
 import { buildDigestPrompt } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
@@ -83,7 +84,7 @@ export async function digestRawInput(
       // 拒收项报错回给 agent0，可修正清单再提交一次（01§4.10④）。
       // 修正轮本身失败（如网关抖动）不得拖垮已通过围栏的项——降级为「放弃拒收项并留痕」。
       // 修复调用失败本身也记 stderr（九轮评审：网关故障 ≠ 模型不修复，须可分辨）。
-      const repaired = await requestRepair(llm, db, rejected).catch((err) => {
+      const repaired = await requestRepair(llm, db, modelTag, rejected).catch((err) => {
         bestEffortLog(`[digest] 修复轮调用失败（raw=${raw.id}）：${errText(err)}`);
         return null;
       });
@@ -491,14 +492,19 @@ async function chatWithImageFallback(
     messages,
     tools: TOOL_DEFS,
   };
-  if (!hasImage(messages)) return { ...(await llm.chat(args)), degraded: false };
+  /** 一次成功调用的用量落行（010；失败无 usage 可记——asset 分支不进这里）。 */
+  const counted = <T extends { usage: LlmUsage | null }>(turn: T): T => {
+    recordUsage(db, "agent0", modelTag, turn.usage);
+    return turn;
+  };
+  if (!hasImage(messages)) return { ...counted(await llm.chat(args)), degraded: false };
   try {
-    return { ...(await llm.chat(args)), degraded: false };
+    return { ...counted(await llm.chat(args)), degraded: false };
   } catch (err) {
     const msg = errText(err);
     // 先跑剥图重试，**成功后才留痕**——若重试也抛（429/5xx 等），本批整体 failed，
     // 不应留下「已剥图重试、本批不再注入图片」的假痕（审查 2026-10-14）
-    const retried = await llm.chat({ ...args, messages: stripImages(messages) });
+    const retried = counted(await llm.chat({ ...args, messages: stripImages(messages) }));
     appendPipelineEventBestEffort(
       db,
       raw.id,
@@ -517,6 +523,7 @@ async function chatWithImageFallback(
 async function requestRepair(
   llm: LlmClient,
   db: Db,
+  modelTag: string,
   rejected: { item: ChangeList["changes"][number]; reason: string }[],
 ): Promise<ChangeList | null> {
   const res = await llm.chat({
@@ -529,6 +536,7 @@ async function requestRepair(
       },
     ],
   });
+  recordUsage(db, "agent0", modelTag, res.usage);
   return parseChangeList(res.content ?? "");
 }
 
