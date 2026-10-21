@@ -118,6 +118,19 @@ cpSync(
   path.join(bs3dst, "prebuilds/win32-x64.node"),
 );
 
+// sharp 精简拷贝（009 起图片压缩用）：本体（package.json + dist/，JS 全在 dist）+ 本平台预编译包
+// （win32-x64 自带 libvips DLL，≈19MB）+ 三个运行时小依赖。install/ 与 src/ 只在构建 native 时才用，不进包。
+const sharpSrc = path.join(root, "node_modules/sharp");
+const sharpDst = path.join(out, "node_modules/sharp");
+mkPath(sharpDst);
+cpSync(path.join(sharpSrc, "package.json"), path.join(sharpDst, "package.json"));
+cpSync(path.join(sharpSrc, "dist"), path.join(sharpDst, "dist"), { recursive: true });
+for (const dep of ["@img/sharp-win32-x64", "semver", "detect-libc", "@img/colour"]) {
+  cpSync(path.join(root, "node_modules", dep), path.join(out, "node_modules", dep), {
+    recursive: true,
+  });
+}
+
 // 运行时与杂项
 mkPath(path.join(out, "node"));
 cpSync(process.execPath, path.join(out, "node/node.exe")); // 内置 Node（免安装）

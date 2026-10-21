@@ -1,5 +1,5 @@
 // 服务端单文件打包单出处：esbuild 把 server 入口与 admin CLI 各打成自包含 .mjs，
-// 只外挂 better-sqlite3（原生模块，运行时从 node_modules 加载）。build-release（便携包）与
+// 只外挂原生模块（better-sqlite3 / sharp，运行时从 node_modules 加载）。build-release（便携包）与
 // Dockerfile 共用——避免「入口清单 / --external / require 垫片」在两条产线上各写一份而静默漂移。
 // 用法：node scripts/build-server.mjs <outDir>
 import { mkdirSync } from "node:fs";
@@ -36,7 +36,7 @@ for (const [entry, outName] of ENTRIES) {
     format: "esm",
     target: "node22",
     outfile: path.join(distDir, outName),
-    external: ["better-sqlite3"],
+    external: ["better-sqlite3", "sharp"],
     logLevel: "warning",
     banner: { js: REQUIRE_SHIM },
   });

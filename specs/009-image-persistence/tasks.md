@@ -56,11 +56,11 @@
 
 ### 实现
 
-- [ ] T110 [S1] `apps/server/package.json` 加 `sharp`；`scripts/build-server.mjs` external 加 `"sharp"`；`Dockerfile` runtime 与 `scripts/build-release.mjs` 拷贝 sharp + 平台包 + 三个小依赖（`semver` / `detect-libc` / `@img/colour`）
+- [X] T110 [S1] `apps/server/package.json` 加 `sharp`；`scripts/build-server.mjs` external 加 `"sharp"`；`Dockerfile` runtime 与 `scripts/build-release.mjs` 拷贝 sharp + 平台包 + 三个小依赖（`semver` / `detect-libc` / `@img/colour`）
 - [X] T111 [S1] `packages/shared/src/index.ts`：`MediaRefSchema` / `MediaMapSchema` / `MediaUploadResponseSchema`（含 `animationCompressed: boolean`——动图被降帧/转单帧时 true，前端据此提示）；`GetItemResultSchema` 增 `media`
 - [X] T112 [S1] `apps/server/src/storage/schema.ts`：`media` 表（id/mime/sizeBytes/createdAt/expiresAt/originUrl + 两个索引）
 - [X] T113 [S1] `apps/server/src/storage/db.ts`：ensureSchema 建表 DDL；`migrate.ts` `SCHEMA_VERSION` **3 → 4**（010 已占 3）
-- [X] T114 [S1] `apps/server/src/storage/repo.ts`：`insertMedia` / `getMedia` / `getMediaByOriginUrl` / `updateMediaExpiry` / `listExpiredMedia` / `deleteMediaRow`（幂等插入：同 sha256 重复上传直接复用）
+- [X] T114 [S1] `apps/server/src/storage/repo.ts`：`insertMedia` / `getMedia` / `getMediaByOriginUrl` / `resolveMediaId` / `bumpMediaExpiry` / `shortenMediaExpiry` / `listExpiredMedia` / `deleteMediaRow`（幂等插入：同 sha256 重复上传直接复用）
 - [X] T115 [S1] 新 `apps/server/src/shared/imageBytes.ts`：`ALLOWED_IMAGE_MIME` / `matchesMagic` / `sniffImageMime` / `mediaExt`（从 `agent0/fetchImage.ts` 抽出，原处改 import——单一出处）
 - [X] T116 [S1] 新 `apps/server/src/shared/mediaTtl.ts`：`MEDIA_COMPRESS_THRESHOLD` / `MEDIA_TARGET_BYTES` / `MEDIA_MAX_INPUT_BYTES` / `MEDIA_MAX_PIXELS` / `CITED_TTL_DAYS = 90` / `baseMediaTtlMs` / `addDaysWallClock` / `initialMediaExpiry` / `uncitedMediaExpiry` / `citedMediaExpiry`
 - [X] T117 [S1] 新 `apps/server/src/shared/mediaPlaceholders.ts`：`extractImageUrls` / `mediaIdFromUrl` / `textCitesMedia`
@@ -147,10 +147,10 @@
 
 ## 收尾：文档与发布检查
 
-- [ ] T501 [P] docs/00 数据契约：`media` 表与接口形状
-- [ ] T502 [P] docs/01 规格：图片缓存新节（生命周期唯一字段 expiresAt、三档留存：基础 7–30 天 / 读过未引用 3 天 / **引用 90 天**、压缩与上限、动图压缩）
-- [ ] T503 [P] docs/02 台账：D-110（图片持久化立项与决策；含放弃项：不做对象存储/不做媒体映射表）
-- [ ] T504 [P] docs/03 开放问题、docs/04 验收：登记与结案
-- [ ] T505 [P] README「之后的计划」删除「图片持久化」；`CHANGELOG.md` v0.5.0 段落
-- [ ] T506 便携包构建（sharp 进包）+ Docker 构建验证；`npm run check` + `check:dead`
-- [ ] T507 全仓 grep 复核：旧文案「图片只在处理时临时读取，不落库」等表述逐条更新（01§4.10/README/关于页）
+- [X] T501 [P] docs/00 数据契约：`media` 表与接口形状
+- [X] T502 [P] docs/01 规格：图片缓存新节（生命周期唯一字段 expiresAt、三档留存：基础 7–30 天 / 读过未引用 3 天 / **引用 90 天**、压缩与上限、动图压缩）
+- [X] T503 [P] docs/02 台账：D-111（图片持久化立项与决策；含放弃项：不做对象存储/不做媒体映射表）
+- [X] T504 [P] docs/03 开放问题、docs/04 验收：登记与结案
+- [X] T505 [P] README「之后的计划」删除「图片持久化」；`CHANGELOG.md` v0.5.0 段落
+- [X] T506 便携包构建（sharp 进包）+ Docker 构建验证；`npm run check` + `check:dead`（便携包已构建 + 真实入口验证：上传 2.85MB→1.75MB、读回一致/响应头/落盘；**镜像构建未跑**——本机 Docker 守护不可用，COPY 源路径已按 linux/glibc 包布局逐项核对）
+- [X] T507 全仓 grep 复核：旧文案「图片只在处理时临时读取，不落库」等表述逐条更新（01§4.10/README/关于页）

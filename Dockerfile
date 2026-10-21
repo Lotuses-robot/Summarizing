@@ -23,12 +23,21 @@ FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# 运行时依赖：只有 better-sqlite3（服务端 esbuild bundle 只外挂它）——从构建阶段取精简副本
-# （package.json + lib + 本平台预编译，≈2MB）。其余生产依赖/web 工作区依赖（react 等）运行时都加载不到，
-# 整棵 npm 生产树（含 42MB react）不进镜像（便携包同款做法，见 build-release.mjs）。
+# 运行时依赖：原生模块（服务端 esbuild bundle 只外挂它们）——从构建阶段取精简副本。
+# better-sqlite3：package.json + lib + 本平台预编译（≈2MB）
+# sharp（009 图片压缩）：package.json + dist（JS 全在 dist）+ linux-x64 预编译与 libvips
+#   + 三个运行时小依赖（semver / detect-libc / @img/colour）
+# 其余生产依赖/web 工作区依赖（react 等）运行时都加载不到，整棵 npm 生产树不进镜像（便携包同款做法）。
 COPY --from=build /app/node_modules/better-sqlite3/package.json ./node_modules/better-sqlite3/
 COPY --from=build /app/node_modules/better-sqlite3/lib ./node_modules/better-sqlite3/lib
 COPY --from=build /app/node_modules/better-sqlite3/prebuilds/linux-x64.node ./node_modules/better-sqlite3/prebuilds/
+COPY --from=build /app/node_modules/sharp/package.json ./node_modules/sharp/
+COPY --from=build /app/node_modules/sharp/dist ./node_modules/sharp/dist
+COPY --from=build /app/node_modules/@img/sharp-linux-x64 ./node_modules/@img/sharp-linux-x64
+COPY --from=build /app/node_modules/@img/sharp-libvips-linux-x64 ./node_modules/@img/sharp-libvips-linux-x64
+COPY --from=build /app/node_modules/semver ./node_modules/semver
+COPY --from=build /app/node_modules/detect-libc ./node_modules/detect-libc
+COPY --from=build /app/node_modules/@img/colour ./node_modules/@img/colour
 
 # 从构建阶段取产物：服务端单文件 + 前端静态
 COPY --from=build /app/apps/server/dist ./apps/server/dist

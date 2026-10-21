@@ -49,13 +49,15 @@ export function ChatPanel({
   const [mentionHighlight, setMentionHighlight] = useState(0);
   const [busy, setBusy] = useState(false);
   // 待发送的图片（009）：只做**本地预览**（object URL），点发送才真上传——
-  // 避免「选了又没发」留下孤儿文件。remoteUrl 上传后才填。
+  // 避免「选了又没发」在服务端留下孤儿文件。
   const [image, setImage] = useState<{
     previewUrl: string;
-    remoteUrl: string | null;
+    file: File;
     name: string;
   } | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  // 动图被压缩的提示（009：不静默——保存下来的动画可能比原图短）
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -145,30 +147,14 @@ export function ChatPanel({
     setMentions((cur) => cur.filter((m) => m.id !== id));
   };
 
-  /** 上传中的图片（009）：先上传拿 url，再让调用方发消息。失败抛人话错误——send 转成可见提示。 */
-  const uploadImage = async (file: File): Promise<string> => {
-    const res = await api.uploadMedia(file);
-    return res.url;
-  };
-
-  /** 选一张图（009）：只建本地预览 + 立即上传（这样「发送」不必等网络）。
-   *  上传失败 → 预览保留、错误可见 —— 消息不会因此丢掉。 */
+  /** 选一张图（009）：只建本地预览 + 记住文件——**点发送才上传**（选了又没发 = 服务端零痕迹）。 */
   const pickImage = (file: File | undefined | null): void => {
     if (file === undefined || file === null) return;
     setImageError(null);
+    setImageNotice(null);
     // 换一张：先撤旧预览的 object URL（不然泄漏到页面关闭）
     if (image !== null) URL.revokeObjectURL(image.previewUrl);
-    const previewUrl = URL.createObjectURL(file);
-    setImage({ previewUrl, remoteUrl: null, name: file.name });
-    void uploadImage(file)
-      .then((url) =>
-        setImage((cur) => (cur?.previewUrl === previewUrl ? { ...cur, remoteUrl: url } : cur)),
-      )
-      .catch((err: unknown) => {
-        setImageError(errText(err));
-        setImage((cur) => (cur?.previewUrl === previewUrl ? null : cur));
-        URL.revokeObjectURL(previewUrl);
-      });
+    setImage({ previewUrl: URL.createObjectURL(file), file, name: file.name });
   };
 
   /** 粘贴图片（009）：剪贴板里优先取图片项；没有则不当图片处理。 */
@@ -179,31 +165,53 @@ export function ChatPanel({
     pickImage(file);
   };
 
-  /** 移除待发送图（009）：撤预览，不动已上传的服务端文件（按 TTL 自然过期）。 */
+  /** 移除待发送图（009）：撤预览；从未上传过，服务端无痕迹。 */
   const dropImage = (): void => {
     if (image !== null) URL.revokeObjectURL(image.previewUrl);
     setImage(null);
     setImageError(null);
+    setImageNotice(null);
   };
 
-  /** 发送：history = 本条之前的轮次（不含本条，剔除本地占位，截断策略与共享常量一致）；
-   *  mentions 随请求上传；**有图片时先上传、成功后消息才发出**（009——上传失败不丢消息，
-   *  预览保留可重试）。回复后无条件刷看板（延迟双刷等异步消化浮出）。 */
+  /** 上传待发送的图（009）——**发送时才调**，返回服务端 url 与「动图被压缩」标记。 */
+  const uploadImage = async (file: File) => api.uploadMedia(file);
+
+  /** 发送入口：有图先上传，成功才发消息（009）。只有图没有字也允许发。 */
   const send = () => {
     const message = draft.trim();
-    if (message === "" || busy) return;
-    // 图还没上传完 → 等它（按钮已 disabled，这里是 race 兜底）
-    if (image !== null && image.remoteUrl === null) return;
-    // 占位单独一行拼在用户文字后——原文逐字、agent0 与渲染侧都能认（009 FR-015）
-    const body = image === null ? message : `${message}\n\n[图片](${image.remoteUrl})`;
+    if ((message === "" && image === null) || busy) return;
+    void submit(message);
+  };
+
+  /** 发送执行体：上传 → 拼占位 → 落消息 → 调前台。
+   *  上传失败消息**不发**、预览保留可重试（不丢用户写好的字）。
+   *  history = 本条之前的轮次（不含本条，剔除本地占位，截断策略与共享常量一致）；
+   *  mentions 随请求上传；回复后无条件刷看板（延迟双刷等异步消化浮出）。 */
+  const submit = async (message: string): Promise<void> => {
     setBusy(true);
+    let placeholder = "";
+    if (image !== null) {
+      setImageError(null);
+      try {
+        const up = await uploadImage(image.file);
+        // 占位单独一行拼在用户文字后——原文逐字、agent0 与渲染侧都能认（009 FR-015）
+        placeholder = message === "" ? `[图片](${up.url})` : `\n\n[图片](${up.url})`;
+        if (up.animationCompressed) setImageNotice("动图已压缩（保存的动画可能比原图短）");
+      } catch (err) {
+        setImageError(errText(err));
+        setBusy(false);
+        return; // 消息不发；文字与预览都还在
+      }
+    }
+    const body = `${message}${placeholder}`;
     setMsgs((m) => [...m, { role: "user", text: body }]);
     stickRef.current = true; // 发送是用户主动作——无条件回到最新（specs/001 FR-001，哪怕之前上翻）
     // 同步快照滚底（不赖 effect）：发送后迟到的惯性 scroll 事件会把 stick 翻回 false 并跳过 effect（四轮评审竞态）
     const logEl = logRef.current;
     if (logEl !== null) logEl.scrollTop = logEl.scrollHeight;
     setDraft("");
-    setImage(null); // 预览撤销（object URL 随之释放）
+    if (image !== null) URL.revokeObjectURL(image.previewUrl);
+    setImage(null);
     const savedMentions = mentions;
     setMentions([]);
     const history: ChatHistoryItem[] = msgs
@@ -357,7 +365,7 @@ export function ChatPanel({
               />
               <div className="min-w-0 flex-1 text-xs text-ink-muted">
                 <div className="truncate">{image.name}</div>
-                <div>{image.remoteUrl === null ? "上传中…" : "已就绪"}</div>
+                <div>待发送</div>
               </div>
               <button
                 type="button"
@@ -374,6 +382,7 @@ export function ChatPanel({
               图片上传失败：{imageError}
             </p>
           )}
+          {imageNotice !== null && <p className="mb-1.5 text-xs text-ink-muted">{imageNotice}</p>}
           <textarea
             ref={inputRef}
             className="input resize-none"
@@ -426,7 +435,7 @@ export function ChatPanel({
           </div>
           <button
             className="btn btn-accent"
-            disabled={busy || draft.trim() === "" || (image !== null && image.remoteUrl === null)}
+            disabled={busy || (draft.trim() === "" && image === null)}
             onClick={send}
           >
             发送

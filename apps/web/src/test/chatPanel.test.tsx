@@ -300,3 +300,104 @@ describe("ChatPanel 滚动锚定（specs/001-chat-scroll-anchor）", () => {
     expect(log.scrollTop).toBe(2400); // 恢复跟随
   });
 });
+
+describe("对话贴图（009）：本地预览、点发送才上传", () => {
+  /** 一张假图片（内容不重要——服务端在真入口校验，这里只走前端流程）。 */
+  function imageFile(): File {
+    return new File([new Uint8Array([1, 2, 3])], "a.png", { type: "image/png" });
+  }
+
+  /** fetch 替身：/api/media 上传、/api/chat 对话、/api/chat/history 回填；记录调用与请求体。 */
+  function stubUpload(opts: { failUpload?: boolean; animationCompressed?: boolean } = {}) {
+    const calls: string[] = [];
+    const chatBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = fetchUrl(input);
+        calls.push(`${init?.method ?? "GET"} ${url}`);
+        if (url.includes("/api/chat/history")) return Promise.resolve(jsonResponse({ turns: [] }));
+        if (url.includes("/api/media")) {
+          if (opts.failUpload === true) {
+            return Promise.resolve(jsonResponse({ error: "不是支持的图片格式（image/png）" }, 400));
+          }
+          return Promise.resolve(
+            jsonResponse({
+              id: "m1",
+              url: "/api/media/m1",
+              mime: "image/png",
+              sizeBytes: 3,
+              animationCompressed: opts.animationCompressed ?? false,
+            }),
+          );
+        }
+        if (typeof init?.body === "string") chatBodies.push(JSON.parse(init.body));
+        return Promise.resolve(jsonResponse({ reply: "好的", actions: [], references: [] }));
+      }),
+    );
+    return { calls, chatBodies };
+  }
+
+  /** 渲染面板并选中一张图（file input 是隐藏的真实 input）。 */
+  function pickImage(): void {
+    const input = document.querySelector('input[type="file"]');
+    if (input === null) throw new Error("文件选择框缺失");
+    fireEvent.change(input, { target: { files: [imageFile()] } });
+  }
+
+  /** 渲染一块对话面板（各用例共用的最小 props）。 */
+  function renderPanel() {
+    render(
+      <ChatPanel items={[]} onActivity={() => {}} onRequestFocus={() => {}} onClose={() => {}} />,
+    );
+  }
+
+  it("选图只做本地预览（此时不上传）；点发送才上传，正文含占位", async () => {
+    const { calls, chatBodies } = stubUpload();
+    renderPanel();
+    pickImage();
+    expect(calls.some((c) => c.includes("/api/media"))).toBe(false); // 选了没发 = 服务端零痕迹
+    expect(screen.getByAltText("待发送的图片")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "看图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(calls.some((c) => c === "POST /api/media")).toBe(true));
+    await waitFor(() => expect(chatBodies).toHaveLength(1));
+    expect(chatBodies[0]).toMatchObject({ message: "看图\n\n[图片](/api/media/m1)" });
+    // 用户气泡里渲染成图（对话气泡不传 map，浏览器自带 cookie 请求）
+    await waitFor(() =>
+      expect(screen.getByAltText("图片")).toHaveAttribute("src", "/api/media/m1"),
+    );
+  });
+
+  it("只有图、没有文字也能发（正文就是占位）", async () => {
+    const { chatBodies } = stubUpload();
+    renderPanel();
+    pickImage();
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(chatBodies).toHaveLength(1));
+    expect(chatBodies[0]).toMatchObject({ message: "[图片](/api/media/m1)" });
+  });
+
+  it("上传失败 → 消息不发、错误可见、预览保留可重试", async () => {
+    const { calls, chatBodies } = stubUpload({ failUpload: true });
+    renderPanel();
+    pickImage();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "看图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("图片上传失败"));
+    expect(chatBodies).toHaveLength(0); // 前台没收到任何消息
+    expect(calls.some((c) => c.includes("/api/chat") && !c.includes("history"))).toBe(false);
+    expect(screen.getByAltText("待发送的图片")).toBeInTheDocument(); // 预览还在
+  });
+
+  it("动图被服务端压缩 → 界面明说（不静默）", async () => {
+    stubUpload({ animationCompressed: true });
+    renderPanel();
+    pickImage();
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText(/动图已压缩/)).toBeInTheDocument());
+  });
+});
