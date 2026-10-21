@@ -15,6 +15,12 @@ describe("AboutModal 组件渲染", () => {
     expect(screen.getByText("→")).toBeInTheDocument();
   });
 
+  it("头部图标 = 应用图标（与 favicon / PWA 同一份 /favicon.svg）", () => {
+    const { container } = render(<AboutModal open onClose={() => {}} />);
+    const img = container.querySelector("img");
+    expect(img).toHaveAttribute("src", "/favicon.svg");
+  });
+
   it("回滚（seen 比当前新）不画倒序箭头——退化为纯当前版", () => {
     render(<AboutModal open onClose={() => {}} showUpgradeFrom="v99.0.0" />);
     expect(screen.queryByText("→")).not.toBeInTheDocument();

@@ -1,5 +1,4 @@
 import { useEffect, useRef } from "react";
-import { BookMarked } from "lucide-react";
 import changelogRaw from "../../../../CHANGELOG.md?raw";
 import { Markdown } from "../lib/markdown";
 import { parseChangelog } from "../lib/changelog";
@@ -128,11 +127,15 @@ export function AboutModal({
         className="flex max-h-[80vh] w-[min(540px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 头部（大仓库 README 风）：点阵底纹+主题光晕 → 超大图标（accent 圆盘）→ 超大标题 → 基座 chips */}
+        {/* 头部（大仓库 README 风）：点阵底纹+主题光晕 → 超大图标（应用图标，与 favicon/PWA 同一份）→ 超大标题 → 基座 chips */}
         <header className="about-hero relative flex flex-col items-center px-6 pb-6 pt-9 text-center">
-          <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-soft text-accent shadow-sm ring-1 ring-accent/25">
-            <BookMarked size={34} strokeWidth={1.5} />
-          </div>
+          <img
+            src="/favicon.svg"
+            alt=""
+            width={64}
+            height={64}
+            className="relative h-16 w-16 shadow-sm"
+          />
           <h2 className="relative mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
           <p className="relative mt-2 text-sm text-ink-muted">
             个人信息中枢 · 把碎片拼成完整的事项
