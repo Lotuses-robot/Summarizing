@@ -781,6 +781,10 @@ describe("进站缓存的重试（009：只对瞬态错误重试，最多 3 次�
     await cacheIngestImages(db, dir, raw.id);
     expect(downloadStub).toHaveBeenCalledTimes(2);
     expect(repo.getMediaByOriginUrl(db, "https://pic.invalid/retry-ok.png")).not.toBeNull();
+    // 流水里能看到「开始缓存 / 完成」（用户可见的进站流程）
+    const actions = repo.listPipelineEvents(db, raw.id).map((e) => e.action);
+    expect(actions).toContain("media_cache");
+    expect(actions).toContain("media_cache_done");
   });
 
   it("非瞬态错误（HTTP 404）→ 不重试，只试一次", async () => {
@@ -797,5 +801,8 @@ describe("进站缓存的重试（009：只对瞬态错误重试，最多 3 次�
     await cacheIngestImages(db, dir, raw.id);
     expect(downloadStub).toHaveBeenCalledTimes(1);
     expect(repo.getMediaByOriginUrl(db, "https://pic.invalid/gone.png")).toBeNull();
+    expect(repo.listPipelineEvents(db, raw.id).map((e) => e.action)).toContain(
+      "media_cache_failed",
+    );
   });
 });

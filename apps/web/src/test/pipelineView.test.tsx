@@ -429,3 +429,70 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getByText(/还没有批次/)).toBeInTheDocument();
   });
 });
+
+describe("图片缓存进度（009：缓存中/成功/失败都看得见）", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("缓存中与缓存结果都出现在消化中状态卡里", async () => {
+    const run = {
+      id: "r-cache",
+      sourceType: "nc",
+      sourceLabel: "社团群",
+      receivedAt: "2026-09-28T11:00:00",
+      eventTime: null,
+      digestState: "digesting",
+      summary: null,
+      eventCount: 2,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/pipeline/runs/r-cache")) {
+          return Promise.resolve(
+            jsonResponse({
+              raw: {
+                id: "r-cache",
+                content: "看 [图片](https://qq.example/x.jpg) 这张",
+                sourceType: "nc",
+                sourceIdentity: { sourceLabel: "社团群" },
+                receivedAt: "2026-09-28T11:00:00",
+                eventTime: null,
+                digestState: "digesting",
+              },
+              events: [
+                {
+                  id: "c1",
+                  action: "media_cache",
+                  detail: "开始缓存本批图片（2 张）…",
+                  payload: null,
+                  at: "2026-09-28T11:00:01",
+                  by: { actor: "系统", model: null },
+                },
+                {
+                  id: "c2",
+                  action: "media_cache_failed",
+                  detail: "图片缓存：缓存 1 / 已有 0 / 失败 1（失败的图会回退为原链接）",
+                  payload: null,
+                  at: "2026-09-28T11:00:03",
+                  by: { actor: "系统", model: null },
+                },
+              ],
+            }),
+          );
+        }
+        if (url.includes("/api/pipeline/runs"))
+          return Promise.resolve(jsonResponse({ runs: [run] }));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<PipelineView />);
+    await waitFor(() => expect(screen.getByText(/开始缓存本批图片/)).toBeInTheDocument());
+    // 失败结果同样可见（降级不静默）
+    expect(screen.getByText(/图片缓存：缓存 1 \/ 已有 0 \/ 失败 1/)).toBeInTheDocument();
+  });
+});

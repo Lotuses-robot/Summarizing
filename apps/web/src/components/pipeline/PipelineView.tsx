@@ -39,6 +39,10 @@ function eventDot(action: string): string {
   if (action === "fence_reject") return "bg-amber-500";
   if (action === "digest_trace" || action === "repair_round") return "bg-sky-500";
   if (action === "image_degraded") return "bg-amber-500";
+  // 图片缓存（009）：开始=进行中（蓝），完成=绿；有失败=琥珀（降级不静默，但不是批次失败）
+  if (action === "media_cache") return "bg-sky-500";
+  if (action === "media_cache_done") return "bg-emerald-500";
+  if (action === "media_cache_failed") return "bg-amber-500";
   return "bg-zinc-400";
 }
 

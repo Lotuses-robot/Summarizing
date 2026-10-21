@@ -45,23 +45,51 @@ async function run(db: Db, mediaDir: string, rawInputId: string): Promise<void> 
   let cached = 0;
   let skipped = 0;
   let failed = 0;
-  // 简易并发：最多 MAX_CONCURRENT 个在飞，队列里逐个往外递
-  const queue = [...urls];
-  const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, async () => {
-    for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-      const outcome = await cacheOne(db, mediaDir, next);
-      if (outcome === "cached") cached += 1;
-      else if (outcome === "skipped") skipped += 1;
-      else failed += 1;
-    }
-  });
-  await Promise.all(workers);
+  // 流水可见（用户要求）：缓存是进站流程的一段，开始/结束都写一条——状态卡与时间线都看得到
+  appendCacheEvent(db, rawInputId, "media_cache", `开始缓存本批图片（${urls.length} 张）…`);
+  try {
+    // 简易并发：最多 MAX_CONCURRENT 个在飞，队列里逐个往外递
+    const queue = [...urls];
+    const workers = Array.from({ length: Math.min(MAX_CONCURRENT, queue.length) }, async () => {
+      for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+        const outcome = await cacheOne(db, mediaDir, next);
+        if (outcome === "cached") cached += 1;
+        else if (outcome === "skipped") skipped += 1;
+        else failed += 1;
+      }
+    });
+    await Promise.all(workers);
+  } finally {
+    // 结束事件一定写（异常中断也留下部分计数）——否则时间线会永远停在「缓存中」
+    appendCacheEvent(
+      db,
+      rawInputId,
+      failed > 0 ? "media_cache_failed" : "media_cache_done",
+      failed > 0
+        ? `图片缓存：缓存 ${cached} / 已有 ${skipped} / 失败 ${failed}（失败的图会回退为原链接）`
+        : `图片缓存完成：缓存 ${cached} / 已有 ${skipped}`,
+    );
+  }
 
   // 一次汇总留痕（不静默：抓失败要看得见）
   if (cached + skipped + failed > 0) {
     process.stderr.write(
       `[media] 进站图片缓存（raw=${rawInputId}）：缓存 ${cached} / 已有 ${skipped} / 失败 ${failed}\n`,
     );
+  }
+}
+
+/** 写一条缓存流水（尽力而为：写失败只记 stderr——流水是可见性，不是缓存的前置条件）。 */
+function appendCacheEvent(db: Db, rawInputId: string, action: string, detail: string): void {
+  try {
+    repo.appendPipelineEvent(db, {
+      rawInputId,
+      action,
+      detail,
+      by: { actor: "系统", model: null },
+    });
+  } catch (err) {
+    process.stderr.write(`[media] 缓存流水写失败（${action}，尽力而为）：${errText(err)}\n`);
   }
 }
 
