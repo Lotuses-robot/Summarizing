@@ -92,11 +92,14 @@ export function makeOpenAiLlm(
   };
 }
 
+/** 「未配置」占位的模型标识：启动自动重试据此跳过（D-116）——这类失败重试也不会成功。 */
+export const UNCONFIGURED_MODEL_TAG = "未配置";
+
 /** 未配置占位客户端（006）：构造**不抛**——服务照常启动、界面可用（FR-009「未配置 = 明确提示」；
  *  多用户下未配 key 是常态而非异常）；真正发起调用时才报人话错（消化把批次标「未处理」）。 */
 export function makeUnconfiguredLlm(): TaggedLlm {
   return {
-    modelTag: "未配置",
+    modelTag: UNCONFIGURED_MODEL_TAG,
     async chat() {
       throw new Error("尚未配置 AI 接入——去 设置 → AI 填 Base URL / 模型 / Key");
     },

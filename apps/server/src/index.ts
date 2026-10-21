@@ -17,8 +17,8 @@ dotenv.config({
 const dataRoot = path.resolve(import.meta.dirname, "../../..", "data");
 mkdirSync(dataRoot, { recursive: true });
 
-// 系统库 + 空间集线器：装配 app（只装 core）→ 全量装配 active 账户的空间（含各库启动清扫）
-// → listen。停用账户不装配——重新启用后首请求懒装配（空间模块注释在案）。
+// 系统库 + 空间集线器：装配 app（只装 core）→ 全量装配 active 账户的空间（含各库启动清扫
+// 与被打断批次的自动重试，D-116）→ listen。停用账户不装配——重新启用后首请求懒装配（空间模块注释在案）。
 const registry = makeRegistryDb(path.join(dataRoot, "system.db"));
 const hub = makeSpaceHub({ registry, dataRoot });
 

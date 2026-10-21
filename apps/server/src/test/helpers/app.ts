@@ -15,6 +15,7 @@ import { hashPassword } from "../../auth/password";
 import { issueSessionValue, SESSION_COOKIE } from "../../auth/session";
 import type { Db } from "../../storage/db";
 import type { SourceAdapter } from "../../sources/types";
+import type { TaggedLlm } from "../../shared/llm";
 import { FakeLlm } from "./fakeLlm";
 
 // 测试装配唯一出处（006 R9）：造**真**实例（registry + hub + app）与真账户（真签名 cookie）——
@@ -87,15 +88,25 @@ export interface TestAccount {
   inject(opts: InjectOptions): Promise<LightMyRequestResponse>;
 }
 
-/** 造一个测试实例（见文件头注释）；`adapters` 缺省 = 生产注册表。 */
+/** 造一个测试实例（见文件头注释）；`adapters` 缺省 = 生产注册表。
+ *  `makeLlm` 用于让**空间装配期**就用上替身客户端（启动自动重试发生在装配里，D-116）——
+ *  缺省沿用生产路径（按本库设置构建，未配置则为占位客户端）。 */
 export async function makeTestRealm(
-  args: { adapters?: Array<() => SourceAdapter> } = {},
+  args: {
+    adapters?: Array<() => SourceAdapter>;
+    makeLlm?: (db: Db) => TaggedLlm;
+  } = {},
 ): Promise<TestRealm> {
   // 空间装配缺 env 时走「未配置占位」客户端（buildLlm，不抛）——无需环境修补；
   // 装配后由 addAccount 统一换成 FakeLlm，全程不发网络请求。
   const dir = mkdtempSync(path.join(os.tmpdir(), "summarizing-test-"));
   const registry = makeRegistryDb(path.join(dir, "system.db"));
-  const hub = makeSpaceHub({ registry, dataRoot: dir, adapters: args.adapters });
+  const hub = makeSpaceHub({
+    registry,
+    dataRoot: dir,
+    adapters: args.adapters,
+    makeLlm: args.makeLlm,
+  });
   const app = makeApp({ registry, hub });
   const secret = getSessionSecret(registry);
   const spaces: Space[] = [];
@@ -160,8 +171,13 @@ export async function makeTestRealm(
 
 /** 造一个已登录的测试账户（单账户用例的便捷口；底层 = makeTestRealm().addAccount）。 */
 export async function makeTestAccount(
-  args: { username?: string; llm?: FakeLlm; adapters?: Array<() => SourceAdapter> } = {},
+  args: {
+    username?: string;
+    llm?: FakeLlm;
+    adapters?: Array<() => SourceAdapter>;
+    makeLlm?: (db: Db) => TaggedLlm;
+  } = {},
 ): Promise<TestAccount> {
-  const realm = await makeTestRealm({ adapters: args.adapters });
+  const realm = await makeTestRealm({ adapters: args.adapters, makeLlm: args.makeLlm });
   return realm.addAccount(args);
 }

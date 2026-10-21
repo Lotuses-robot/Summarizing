@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
 import * as repo from "../storage/repo";
+import { UNCONFIGURED_MODEL_TAG } from "../shared/llm";
 
 // 设置面板服务端（05§五 / D-81；006 起经 makeTestAccount 打真实入口）：GET/PUT/DELETE ai + 备份。
 // 全程不联网：makeOpenAiLlm 只建客户端不发请求，热切换用「引用身份变化」断言。
@@ -39,7 +40,7 @@ describe("设置面板服务端（05§五 / D-81）", () => {
     expect(del.statusCode).toBe(200);
     expect(del.json<{ overridden: boolean }>().overridden).toBe(false);
     // 006：无 .env 可回——DELETE 即回「未配置」占位客户端（多用户每人自带 key）
-    expect(llmRef.current.modelTag).toBe("未配置");
+    expect(llmRef.current.modelTag).toBe(UNCONFIGURED_MODEL_TAG);
     expect(repo.getAppSetting(t.db, "ai")).toBeNull();
   });
 

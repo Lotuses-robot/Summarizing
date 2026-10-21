@@ -1,14 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
 import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
-import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
+import {
+  digestRawInput,
+  kickDigest,
+  retryInterruptedOnStartup,
+  sweepOrphanPending,
+} from "../agent0/digest";
 import type { FetchImageToolResult } from "../agent0/tools";
 import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
 import type { LlmClient } from "../shared/llm";
-import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
+import { makeUnconfiguredLlm, UNCONFIGURED_MODEL_TAG } from "../shared/llm";
+import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
 import { makeAgentTools } from "../agent0/tools";
 import { makeDb } from "../storage/db";
+import { makeSpaceHub } from "../spaces";
 import * as repo from "../storage/repo";
 import { nowWallClock } from "../shared/time";
 import { citedMediaExpiry, uncitedMediaExpiry } from "../shared/mediaTtl";
@@ -805,6 +812,135 @@ describe("agent0 检索工具：search_recent_raws（二轮评审 C：原零测�
   });
 });
 
+describe("启动自动重试被打断的批次（D-116）", () => {
+  it("清扫出的孤儿 → 自动重试发射（digesting + startup_retry 流水），最终 digested", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    const raw = seedRaw(db);
+    repo.setDigestState(db, raw.id, "digesting"); // 上次进程死在这里
+    const swept = sweepOrphanPending(db);
+
+    const started = retryInterruptedOnStartup(db, llm, makeAgentTools(db, ""), MODEL, swept, "");
+    expect(started).toBe(1);
+    expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digesting"); // kickDigest 发射即置
+    const actions = repo.listPipelineEvents(db, raw.id).map((e) => e.action);
+    expect(actions).toContain("startup_sweep");
+    expect(actions).toContain("startup_retry");
+    await vi.waitFor(() => {
+      expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digested");
+    });
+  });
+
+  it("已自动重试过一次的批次不再自动重来（防「重启即中断」无限循环），保持 failed 等手动重试", () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    const raw = seedRaw(db);
+    repo.setDigestState(db, raw.id, "digesting");
+    // 上次启动已经自动重试过（流水里已有 startup_retry），这次仍是孤儿
+    repo.appendPipelineEvent(db, {
+      rawInputId: raw.id,
+      action: "startup_retry",
+      detail: "上次自动重试过",
+      by: { actor: "系统", model: null },
+    });
+    const swept = sweepOrphanPending(db);
+
+    const started = retryInterruptedOnStartup(db, llm, makeAgentTools(db, ""), MODEL, swept, "");
+    expect(started).toBe(0);
+    expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
+    expect(llm.chats).toHaveLength(0); // 一次模型调用都没发
+  });
+
+  it("AI 未配置 → 不发射（重试必然立刻失败），批次仍是「未处理」留手动口", () => {
+    const db = makeDb(":memory:");
+    const llm = makeUnconfiguredLlm();
+    const raw = seedRaw(db);
+    repo.setDigestState(db, raw.id, "digesting");
+    const swept = sweepOrphanPending(db);
+
+    const started = retryInterruptedOnStartup(
+      db,
+      llm,
+      makeAgentTools(db, ""),
+      llm.modelTag,
+      swept,
+      "",
+    );
+    expect(llm.modelTag).toBe(UNCONFIGURED_MODEL_TAG);
+    expect(started).toBe(0);
+    expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
+    expect(repo.listPipelineEvents(db, raw.id).map((e) => e.action)).not.toContain("startup_retry");
+  });
+
+  it("没有被打断的批次 → 什么都不做", () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    const started = retryInterruptedOnStartup(db, llm, makeAgentTools(db, ""), MODEL, [], "");
+    expect(started).toBe(0);
+    expect(llm.chats).toHaveLength(0);
+  });
+
+  it("重启真实入口：空间重新装配时自动重试被打断的批次，历史 failed 不碰", async () => {
+    // 用注入的 makeLlm 让**装配期**就用替身客户端（自动重试发生在装配里）
+    const llm = new FakeLlm();
+    const realm = await makeTestRealm({ makeLlm: () => llm });
+    const t = await realm.addAccount({ llm });
+
+    /** 造一条指定状态的批次。 */
+    const seed = (state: RawInput["digestState"]): RawInput => {
+      const raw = repo.insertRawInput(t.db, {
+        content: `重启夹具-${state}`,
+        sourceType: "paste",
+        sourceIdentity: { sourceLabel: "s" },
+        receivedAt: "2026-10-21T10:00:00",
+        eventTime: null,
+      });
+      if (state !== "pending") repo.setDigestState(t.db, raw.id, state);
+      return raw;
+    };
+    const interrupted = seed("digesting"); // 上次进程死在消化途中
+    const staleFailed = seed("failed"); // 更早以前就失败的——不该被自动重试
+
+    // 「进程死掉」：关掉这次装配（信源 + 库句柄）
+    await realm.hub.closeAll();
+    t.db.$client.close();
+
+    // 重启：同一数据目录上的新 hub，装配期跑清扫 + 自动重试
+    llm.push({ content: '{"changes":[]}' }); // 只有被打断的那批消费这次模型调用
+    const hub2 = makeSpaceHub({
+      registry: realm.registry,
+      dataRoot: realm.dataRoot,
+      makeLlm: () => llm,
+    });
+    let space2: Awaited<ReturnType<typeof hub2.ensure>> | null = null;
+    try {
+      space2 = await hub2.ensure(t.space.uid);
+      const db2 = space2.db;
+      await vi.waitFor(
+        () => {
+          expect(repo.getRawInput(db2, interrupted.id)?.digestState).toBe("digested");
+        },
+        { timeout: 3000 },
+      );
+      expect(repo.listPipelineEvents(db2, interrupted.id).map((e) => e.action)).toEqual(
+        expect.arrayContaining(["startup_sweep", "startup_retry", "digest_done"]),
+      );
+      // 历史 failed 既不被重试、也不留清扫流水
+      expect(repo.getRawInput(db2, staleFailed.id)?.digestState).toBe("failed");
+      expect(repo.listPipelineEvents(db2, staleFailed.id)).toHaveLength(0);
+      expect(llm.chats).toHaveLength(1); // 只有被打断的那批发起了模型调用
+    } finally {
+      await hub2.closeAll();
+      try {
+        space2?.db.$client.close();
+      } catch {
+        // 已关——忽略
+      }
+    }
+  });
+});
+
 describe("流水数据层（specs/004）", () => {
   it("kickDigest 发射即置 digesting（同步确定性，FR-005）", () => {
     const db = makeDb(":memory:");
@@ -819,9 +955,11 @@ describe("流水数据层（specs/004）", () => {
     const db = makeDb(":memory:");
     const raw = seedRaw(db);
     repo.setDigestState(db, raw.id, "digesting");
-    sweepOrphanPending(db);
+    const swept = sweepOrphanPending(db);
     expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
     expect(repo.listPipelineEvents(db, raw.id)[0]?.action).toBe("startup_sweep");
+    // 返回值只含本次扫出的批次（启动自动重试据此限定范围，D-116）
+    expect(swept.map((r) => r.id)).toEqual([raw.id]);
   });
 
   it("digest_trace：两轮工具循环 → 恰两条 trace（round/tools/thought 落 payload，FR-006）", async () => {

@@ -15,6 +15,7 @@ import {
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient, ToolCall, LlmUsage } from "../shared/llm";
+import { UNCONFIGURED_MODEL_TAG } from "../shared/llm";
 import { recordUsage } from "../shared/usage";
 import { describeRejections, parseChangeList, runFence } from "../executor/fence";
 import { buildDigestPrompt } from "./prompt";
@@ -223,6 +224,64 @@ export async function digestRawInput(
 export type RetryResult =
   { ok: true; digestState: DigestState } | { ok: false; reason: "not_found" | "not_failed" };
 
+/** 启动自动重试（D-116）：只对**本次启动清扫扫出的**被打断批次调用——历史 failed 批次不碰，
+ *  不然每次重启都会把以前失败的全再烧一遍 token。逐条走 D-71 的唯一入口 `retryRawInput`
+ *  （failed→pending 原子跃迁 + kickDigest），不另开一条写入路径。
+ *  跳过条件：①AI 未配置（重试必然立刻失败，白留一批噪音流水）；②该批已自动重试过
+ *  （流水里有 startup_retry）——自动重试只救一次，反复「重启即中断」的批次（如每次都把进程耗死）
+ *  不再自动重来，退回可见的「未处理」+ 手动重试，避免重启循环。
+ *  单条失败只留痕，不拖垮其余与启动。返回实际发射的条数（测试与调用方核对「只重试了该重试的」）。 */
+export function retryInterruptedOnStartup(
+  db: Db,
+  llm: LlmClient,
+  tools: AgentTools,
+  modelTag: string,
+  interrupted: RawInput[],
+  mediaDir: string,
+): number {
+  if (interrupted.length === 0) return 0;
+  // 未配置时启动重试必然失败；留一条可见说明，不假装「重试过了」（跳过原因不静默）
+  if (modelTag === UNCONFIGURED_MODEL_TAG) {
+    bestEffortLog(
+      `[digest] 启动重试跳过（AI 尚未配置）：${interrupted.length} 个被中断的批次仍是「未处理」，配置后可手动重试`,
+    );
+    return 0;
+  }
+  let started = 0;
+  for (const raw of interrupted) {
+    try {
+      // 自动重试只救一次：已经自动重试过的批次不再自动重来（防「重启即中断」无限循环）
+      const alreadyRetried = repo
+        .listPipelineEvents(db, raw.id)
+        .some((e) => e.action === "startup_retry");
+      if (alreadyRetried) {
+        bestEffortLog(
+          `[digest] 启动重试跳过（raw=${raw.id}）：本批已自动重试过一次，仍停在「未处理」，请手动重试`,
+        );
+        continue;
+      }
+      const result = retryRawInput(db, llm, tools, modelTag, raw.id, mediaDir);
+      if (!result.ok) {
+        bestEffortLog(
+          `[digest] 启动重试未发射（raw=${raw.id}，${result.reason}）——批次状态在清扫后被改动过`,
+        );
+        continue;
+      }
+      started += 1;
+      repo.appendPipelineEvent(db, {
+        rawInputId: raw.id,
+        action: "startup_retry",
+        detail: "启动自动重试：上次进程在消化途中中断，重新开始本批消化",
+        by: { actor: "系统", model: null },
+      });
+    } catch (err) {
+      // 单条失败（跃迁或流水写失败）只留痕——其余批次照跑，启动不受影响
+      bestEffortLog(`[digest] 启动自动重试单条失败（raw=${raw.id}）：${errText(err)}`);
+    }
+  }
+  return started;
+}
+
 /** 重试一条失败批次（D-71）：failed→pending 原子跃迁后重走完整消化管线（异步，即返）。
  *  仅 failed 可重试——已消化重试会重复落库（变更非幂等）；pending/digesting 可能仍在途，防双跑。
  *  「失败批次可从头重跑」依赖执行器整批回滚语义——该论证放在这里：这次状态跃迁归本函数所有，
@@ -289,28 +348,33 @@ export function kickDigest(
 /** 启动清扫（L11 + specs/004 FR-005）：消化是进程内异步——进程死后 pending/digesting 永滞，
  *  而重启的这一刻不可能存在在途消化，所以「启动时仍是 pending/digesting」与「被中断的孤儿」
  *  严格等价，无需超时阈值。全部置为「未处理」：横幅可见、D-71 重试口可救（不可见不可救才是真丢失）。
+ *  **返回本次扫出的批次**（D-116）：启动自动重试只认这批——历史 failed 批次不在其中，不会被反复烧 token。
  *  ⚠️ 单实例硬前提（S2 评审）：双进程并发时新实例会把旧实例在途的批次误扫成 failed，
  *  随后重试即双消化——本地单用户部署下成立，勿多开。 */
-export function sweepOrphanPending(db: Db): void {
+export function sweepOrphanPending(db: Db): RawInput[] {
   const orphans = [
     ...repo.listRawInputsByState(db, "pending"),
     ...repo.listRawInputsByState(db, "digesting"),
   ];
+  /** 只收「已确实落成 failed」的批次——状态没写成功的那条仍困在原状态，重试口也不会收它。 */
+  const swept: RawInput[] = [];
   for (const raw of orphans) {
     // 逐条尽力而为：单条写失败不弃剩余孤儿、不炸启动（孤儿困在 pending/digesting =
     // 「不可见不可救 = 真丢失」——本函数存在的意义就是防它，八轮评审）
     try {
       repo.setDigestState(db, raw.id, "failed");
+      swept.push(raw);
       repo.appendPipelineEvent(db, {
         rawInputId: raw.id,
         action: "startup_sweep",
-        detail: "启动清扫：上次进程中断，本批未消化完——已标「未处理」，可重试",
+        detail: "启动清扫：上次进程中断，本批未消化完——已标「未处理」",
         by: { actor: "系统", model: null },
       });
     } catch (err) {
       bestEffortLog(`[digest] 启动清扫单条失败（raw=${raw.id}）：${errText(err)}`);
     }
   }
+  return swept;
 }
 
 /** 工具循环：让模型自由检索（它决定查什么、查几次），直到吐出合法变更清单或超轮数抛错。

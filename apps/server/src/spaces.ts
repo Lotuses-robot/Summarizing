@@ -12,7 +12,7 @@ import { makeOpenAiLlm, makeUnconfiguredLlm, type TaggedLlm } from "./shared/llm
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { makeMediaDir } from "./routes/media";
 import { startMediaSweeper } from "./application/media";
-import { sweepOrphanPending } from "./agent0/digest";
+import { retryInterruptedOnStartup, sweepOrphanPending } from "./agent0/digest";
 import { errText } from "@summarizing/shared";
 import { withTimeout } from "./shared/timeout";
 import { registerSources, type WebhookRoute } from "./sources/host";
@@ -66,22 +66,27 @@ function buildLlm(db: Db): TaggedLlm {
   }
 }
 
-/** 装配一个账户的空间：开库（含启动清扫）→ 建 llm 引用（只认本账户设置）→ 信源上岗并启动。
- *  `factories` 默认取生产注册表；测试注入替身适配器（不改生产路径）。 */
+/** 装配一个账户的空间：开库（含启动清扫 + 被打断批次的自动重试）→ 建 llm 引用（只认本账户设置）→ 信源上岗并启动。
+ *  `factories` 默认取生产注册表；测试注入替身适配器（不改生产路径）。
+ *  `makeLlm` 默认从本库设置构建真实客户端；测试注入 FakeLlm（启动自动重试也走它，不连网）。 */
 async function assembleSpace(
   account: AccountRow,
   dataRoot: string,
   factories: Array<() => SourceAdapter> = allSourceAdapters(),
+  makeLlm: (db: Db) => TaggedLlm = buildLlm,
 ): Promise<Space> {
   const db = makeDb(path.join(dataRoot, "users", `${account.uid}.db`));
   try {
-    sweepOrphanPending(db); // 上次中断的孤儿 pending 置「未处理」（与原单库启动清扫同语义，L11）
+    // 上次中断的孤儿 pending 置「未处理」（L11）；返回值 = 本次扫出的被打断批次，
+    // 装配完成后据此自动重试（D-116）——只认这批，历史 failed 不碰。
+    const interrupted = sweepOrphanPending(db);
 
-    const llmRef: { current: TaggedLlm } = { current: buildLlm(db) };
+    const llmRef: { current: TaggedLlm } = { current: makeLlm(db) };
 
     const sourceStates = new Map<string, SourceState>();
     const webhookRoutes: WebhookRoute[] = [];
     const mediaDir = makeMediaDir(dataRoot, account.uid);
+    const tools = makeAgentTools(db, mediaDir);
     const assembly = registerSources(
       { db, llmRef, sourceStates, webhookRoutes, mediaDir },
       factories.map((make) => make()),
@@ -91,12 +96,17 @@ async function assembleSpace(
     // 过期图片清理器（009）：启动即清一次 + 每小时一次；随空间关停撤掉
     const stopMediaSweep = startMediaSweeper(db, mediaDir);
 
+    // 启动自动重试（D-116）：只重试本次清扫扫出的被打断批次——fire-and-forget，不阻塞启动。
+    // 放在装配完成之后：llm/tools/媒体目录都已就绪，重试走的是与手动重试完全相同的管线。
+    const client = llmRef.current;
+    retryInterruptedOnStartup(db, client, tools, client.modelTag, interrupted, mediaDir);
+
     return {
       uid: account.uid,
       sourceToken: account.sourceToken,
       db,
       llmRef,
-      tools: makeAgentTools(db, mediaDir),
+      tools,
       sourceStates,
       webhookRoutes,
       mediaDir,
@@ -130,11 +140,13 @@ export interface SpaceHub {
   closeAll(): Promise<void>;
 }
 
-/** 造空间集线器（registry 读账户、dataRoot 定位用户库目录；adapters 缺省取生产注册表）。 */
+/** 造空间集线器（registry 读账户、dataRoot 定位用户库目录；adapters 缺省取生产注册表）。
+ *  `makeLlm` 缺省从各账户自己的设置构建；测试注入替身（启动自动重试也用它，不连网）。 */
 export function makeSpaceHub(args: {
   registry: RegistryDb;
   dataRoot: string;
   adapters?: Array<() => SourceAdapter>;
+  makeLlm?: (db: Db) => TaggedLlm;
 }): SpaceHub {
   const spaces = new Map<string, Space>();
   const pending = new Map<string, Promise<Space>>();
@@ -148,7 +160,7 @@ export function makeSpaceHub(args: {
     const p = (async (): Promise<Space> => {
       const account = getAccountByUid(args.registry, uid);
       if (account === undefined) throw new Error(`空间装配失败：账户不存在 uid=${uid}`);
-      const space = await assembleSpace(account, args.dataRoot, args.adapters);
+      const space = await assembleSpace(account, args.dataRoot, args.adapters, args.makeLlm);
       spaces.set(uid, space);
       return space;
     })().finally(() => pending.delete(uid));

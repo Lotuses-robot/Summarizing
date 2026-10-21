@@ -159,13 +159,15 @@ describe("孤儿清扫（L11）", () => {
     expect(repo.listPipelineEvents(db, b.id)[0]?.action).toBe("startup_sweep");
   });
 
-  it("digested / failed 不动", () => {
+  it("digested / failed 不动，且 stale 的 failed 不会出现在清扫返回值里（不触发自动重试）", () => {
     const db = makeDb(":memory:");
     seedWithState(db, "digested");
-    seedWithState(db, "failed");
-    sweepOrphanPending(db);
+    const staleFailed = seedWithState(db, "failed"); // 上次启动前就失败的——不是被打断的孤儿
+    const swept = sweepOrphanPending(db);
     expect(repo.listRawInputsByState(db, "digested")).toHaveLength(1);
     expect(repo.listRawInputsByState(db, "failed")).toHaveLength(1);
+    expect(swept.map((r) => r.id)).toEqual([]); // 历史 failed 不重试（D-116）
+    expect(repo.listPipelineEvents(db, staleFailed.id)).toHaveLength(0); // 也不留 startup_sweep
   });
 
   it("被扫批次走 D-71 重试口：failed→pending 跃迁成立", () => {

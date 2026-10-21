@@ -43,6 +43,8 @@ function eventDot(action: string): string {
   if (action === "media_cache") return "bg-sky-500";
   if (action === "media_cache_done") return "bg-emerald-500";
   if (action === "media_cache_failed") return "bg-amber-500";
+  // 启动自动重试（D-116）：与「手动重试」同色（蓝＝又在跑）——它与普通消化是同一件事
+  if (action === "startup_retry") return "bg-sky-500";
   return "bg-zinc-400";
 }
 
