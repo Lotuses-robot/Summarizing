@@ -13,11 +13,28 @@ function renderSection() {
   return render(<SourcesSection />);
 }
 
+/** 当前时刻往前 minutes 分钟的北京墙钟串（源活动时间戳用）。 */
+function beijingAgo(minutes: number): string {
+  const d = new Date(Date.now() + 8 * 60 * 60_000 - minutes * 60_000);
+  /** 两位数补零。 */
+  const p = (n: number): string => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  );
+}
+
 /** fetch 替身：按 URL/method 分流（列表 / 读值 / 写值）；记录写调用与读值次数。
  *  writeFail = 写操作拒绝（模拟后端故障——失败必须可见）。 */
 function stubApi(
   settings: Record<string, unknown>,
-  opts: { writeFail?: boolean; settingsSchema?: unknown[]; hookPath?: string | null } = {},
+  opts: {
+    writeFail?: boolean;
+    settingsSchema?: unknown[];
+    hookPath?: string | null;
+    lastEventAt?: string;
+    lastIngestAt?: string;
+  } = {},
 ): {
   writes: { url: string; method: string; body: unknown }[];
   readCount: () => number;
@@ -41,6 +58,8 @@ function stubApi(
               name: "nc",
               state: "error",
               lastError: "封批失败（群 123）",
+              lastEventAt: opts.lastEventAt,
+              lastIngestAt: opts.lastIngestAt,
               settings: opts.settingsSchema ?? [
                 {
                   key: "groups",
@@ -228,5 +247,28 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
     renderSection();
     await screen.findByText("nc");
     expect(screen.queryByText("接入地址")).not.toBeInTheDocument();
+  });
+
+  it("最近活动：显示「收到消息 / 成功入库」的相对时间（悬浮给精确时刻）", async () => {
+    stubApi({}, { lastEventAt: beijingAgo(5), lastIngestAt: beijingAgo(120) });
+    renderSection();
+    expect(await screen.findByText(/收到消息：/)).toBeInTheDocument();
+    expect(screen.getByText(/5 分钟前/)).toBeInTheDocument();
+    expect(screen.getByText(/2 小时前/)).toBeInTheDocument();
+  });
+
+  it("从未收到过：两处都写「从未」，不编造时间", async () => {
+    stubApi({});
+    renderSection();
+    await screen.findByText("nc");
+    expect(screen.getAllByText("从未").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("无 webhook 的源（hookPath=null）只显示「成功入库」，不显示「收到消息」", async () => {
+    stubApi({}, { hookPath: null, lastIngestAt: beijingAgo(1) });
+    renderSection();
+    await screen.findByText("nc");
+    expect(screen.queryByText(/收到消息：/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 分钟前|刚刚/)).toBeInTheDocument();
   });
 });

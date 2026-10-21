@@ -115,7 +115,7 @@ function makeSourceContext(
         );
         // 落地成功即恢复正常（reportError 置的 error 不能粘滞——「最近出错」语义要能翻篇）
         state.state = "ok";
-        state.lastOkAt = nowWallClock();
+        state.lastIngestAt = nowWallClock();
         return { ok: true, id: raw.id };
       } catch (err) {
         // 不抛（D-88）：信源要能感知「落地失败」，自己决定重试/丢弃；抛出去只会污染主进程
@@ -153,6 +153,7 @@ function makeSourceContext(
       const reason = errText(err);
       state.state = "error";
       state.lastError = reason;
+      state.lastErrorAt = nowWallClock();
       process.stderr.write(
         `[source:${name}] reportError${opts?.fatal === true ? "（致命）" : ""}：${reason}\n`,
       );
@@ -180,7 +181,11 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
   const kept: Array<{ adapter: SourceAdapter; state: SourceState }> = [];
   for (const adapter of adapters) {
     if (states.has(adapter.name)) continue; // 防重复（P7）
-    const state: SourceState = { state: "ok", lastOkAt: nowWallClock() };
+    // 最近进站时刻从库里恢复（重启后「最近活动」不从零开始）；最近出错不跨重启保留（那是本次运行的观测）
+    const state: SourceState = {
+      state: "ok",
+      lastIngestAt: repo.latestRawAtForSourceType(deps.db, adapter.name) ?? undefined,
+    };
     const cleanups: (() => void | Promise<void>)[] = [];
     const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state);
     adapter.register(
@@ -239,11 +244,12 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
           if (adapter.start === undefined) continue;
           state.state = "ok";
           state.lastError = undefined;
-          state.lastOkAt = nowWallClock();
+          state.lastErrorAt = undefined;
         } catch (err) {
           const reason = errText(err);
           state.state = "error";
           state.lastError = reason;
+          state.lastErrorAt = nowWallClock();
           process.stderr.write(`[source:${adapter.name}] 启动失败：${reason}\n`);
         }
       }

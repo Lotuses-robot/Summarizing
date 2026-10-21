@@ -14,8 +14,14 @@ export type SourceBatch = IngestRequest & { raw?: unknown };
  *  前端据它显示「某源最近出错」——信源不需要自己维护状态面板。 */
 export interface SourceState {
   state: "ok" | "error";
+  /** 最近一次错误的人话原因（`state=error` 时显示在设置卡上）。 */
   lastError?: string;
-  lastOkAt?: string;
+  /** 最近一次出错时刻（北京墙钟）——让「最近出错」能回答「多久以前」。 */
+  lastErrorAt?: string;
+  /** 最近一次命中该源 webhook 路由的请求时刻（仅 HTTP 源有）——源还在推，说明它活着。 */
+  lastEventAt?: string;
+  /** 最近一次成功进站时刻（所有源都有）——「最近活动」的主信号。 */
+  lastIngestAt?: string;
 }
 
 // 设置项声明（SettingField 及其 schema）住在 packages/shared——跨边界契约（D-52 / D-89 上移）：

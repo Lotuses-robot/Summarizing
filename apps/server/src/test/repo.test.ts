@@ -349,3 +349,33 @@ describe("版本史排序（同秒多版本）", () => {
     }
   });
 });
+
+describe("信源最近活动（009 的设置面补充）", () => {
+  it("latestRawAtForSourceType：取该来源最近一条批次的接收时刻；无记录 = null", () => {
+    const db = makeDb(":memory:");
+    expect(repo.latestRawAtForSourceType(db, "nc")).toBeNull();
+    repo.insertRawInput(db, {
+      content: "早的",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "群" },
+      receivedAt: "2026-10-01T09:00:00",
+      eventTime: null,
+    });
+    repo.insertRawInput(db, {
+      content: "晚的",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "群" },
+      receivedAt: "2026-10-02T09:00:00",
+      eventTime: null,
+    });
+    repo.insertRawInput(db, {
+      content: "别的源",
+      sourceType: "chat",
+      sourceIdentity: { sourceLabel: "用户对话" },
+      receivedAt: "2026-10-03T09:00:00",
+      eventTime: null,
+    });
+    expect(repo.latestRawAtForSourceType(db, "nc")).toBe("2026-10-02T09:00:00");
+    expect(repo.latestRawAtForSourceType(db, "chat")).toBe("2026-10-03T09:00:00");
+  });
+});

@@ -362,6 +362,16 @@ export function listRecentRawInputs(db: DbOrTx, daysBack: number): RawInput[] {
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
 }
 
+/** 某来源类型最近一次进站时刻（信源「最近活动」在重启后从库恢复，不从零开始）。无记录 = null。 */
+export function latestRawAtForSourceType(db: DbOrTx, sourceType: string): string | null {
+  const row = db
+    .select({ at: sql<string | null>`max(${s.rawInputs.receivedAt})` })
+    .from(s.rawInputs)
+    .where(eq(s.rawInputs.sourceType, sourceType))
+    .get();
+  return row?.at ?? null;
+}
+
 /** N 天前的北京墙钟串（与 receivedAt 同格式、同口径——供 SQL 字符串比较；单一出处 wallClockFromDate，
  *  勿手搓：手搓副本会按机器时区算，与 +08:00 的 receivedAt 偏 8 小时，D-97 走查逮出）。 */
 function wallClockDaysAgo(days: number): string {

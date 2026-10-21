@@ -59,7 +59,9 @@ export function registerSourceRoutes(app: FastifyInstance): void {
         name,
         state: states.get(name)?.state ?? "ok",
         lastError: states.get(name)?.lastError,
-        lastOkAt: states.get(name)?.lastOkAt,
+        lastErrorAt: states.get(name)?.lastErrorAt,
+        lastEventAt: states.get(name)?.lastEventAt,
+        lastIngestAt: states.get(name)?.lastIngestAt,
         settings: parseSchema(
           name,
           repo.getSourceSetting(req.space.db, name, repo.SOURCE_SCHEMA_KEY),

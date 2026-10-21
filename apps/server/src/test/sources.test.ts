@@ -419,6 +419,9 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
         name: z.string(),
         state: z.string(),
         lastError: z.string().optional(),
+        lastErrorAt: z.string().optional(),
+        lastEventAt: z.string().optional(),
+        lastIngestAt: z.string().optional(),
       })
       .array()
       .parse(list.json())
@@ -426,6 +429,10 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     if (!entry) throw new Error("GET /api/sources 缺 flappy");
     expect(entry.state).toBe("ok"); // ingest 成功翻篇
     expect(entry.lastError).toContain("抖了一下"); // 最近出错仍可查
+    // 「最近活动」（2026-10-21）：命中 webhook + 成功入库各有时间戳；出错也有时间戳
+    expect(entry.lastEventAt).toBeDefined();
+    expect(entry.lastIngestAt).toBeDefined();
+    expect(entry.lastErrorAt).toBeDefined();
   });
 });
 

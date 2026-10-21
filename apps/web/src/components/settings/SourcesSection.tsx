@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { SettingField, SourceSummary } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
+import { fmtAgo, fmtFullTime } from "../../lib/time";
 import { Card, Row, StatusSlot, useStatus } from "./primitives";
 /** 每源的一句话接入引导（**源自己的知识**——怎么写进 nc 的 WebUI；未知源不显示，
  *  将来源多了可由适配器声明下发。用户 2026-10-03：引导是每个源自己的事）。 */
@@ -13,6 +14,13 @@ const SOURCE_HINTS: Record<string, string> = {
 /** record 值判据：非 null、非数组的对象（键值地图形状）。 */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** 活动时刻的人话（悬浮显示精确时间）；从未有记录 → 「从未」。
+ *  给的是事实而不是判断：源安静多久、上次入库是什么时候，由用户自己看。 */
+function activityText(iso: string | undefined): ReactNode {
+  if (iso === undefined) return <span className="text-ink-muted">从未</span>;
+  return <span title={fmtFullTime(iso)}>{fmtAgo(iso) ?? iso}</span>;
 }
 
 /** 单字段输入（判别联合五型分支渲染——record 由调用方分流给 RecordEditor；前端不含信源专属知识，全按 schema 走）。
@@ -317,7 +325,15 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
           {stateChip}
         </span>
       }
-      desc={summary.state === "error" ? summary.lastError : undefined}
+      desc={
+        summary.state === "error"
+          ? `${summary.lastError ?? "未知错误"}${
+              summary.lastErrorAt === undefined
+                ? ""
+                : `（${fmtAgo(summary.lastErrorAt) ?? fmtFullTime(summary.lastErrorAt)}）`
+            }`
+          : undefined
+      }
     >
       {/* 接入地址 + 该源自己的引导（hookPath 由后端算好——URL 形状是源的知识，前端零拼接） */}
       {summary.hookPath !== null && (
@@ -333,6 +349,19 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
           </div>
         </Row>
       )}
+      {/* 最近活动（2026-10-21 用户要求）：用「多久以前」判断源是否还在推数据。
+          HTTP 源看「收到消息」（webhook 命中即算），所有源都有「成功入库」；从未有记录就说从未。 */}
+      <Row label="最近活动" description="判断这个源还在不在推数据">
+        <span className="text-sm">
+          {summary.hookPath !== null && (
+            <>
+              收到消息：{activityText(summary.lastEventAt)}
+              <span className="mx-2 text-ink-muted">·</span>
+            </>
+          )}
+          成功入库：{activityText(summary.lastIngestAt)}
+        </span>
+      </Row>
       {summary.settings.length === 0 ? (
         <Row label={<span className="text-ink-muted">这个信源没有可配置项</span>} />
       ) : readFailed ? (

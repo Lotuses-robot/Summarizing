@@ -762,7 +762,12 @@ export const SourceSummarySchema = z.object({
   name: z.string(),
   state: z.enum(["ok", "error"]),
   lastError: z.string().optional(),
-  lastOkAt: z.string().optional(),
+  /** 最近出错时刻（北京墙钟）——「最近出错」显示多久以前。 */
+  lastErrorAt: z.string().optional(),
+  /** 最近一次命中 webhook 路由的请求时刻（仅 HTTP 源有）。 */
+  lastEventAt: z.string().optional(),
+  /** 最近一次成功进站时刻——「最近活动」的主信号。 */
+  lastIngestAt: z.string().optional(),
   settings: z.array(SettingFieldSchema),
   hookPath: z.string().nullable(),
 });
