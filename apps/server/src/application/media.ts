@@ -106,7 +106,7 @@ async function compressImage(
   // 只乘一帧会放 2000 帧的图进来（首帧 1.44Mpx 过闸、实际解码 28.8 亿像素）
   const frameHeight = meta.pageHeight ?? height;
   if (width * frameHeight * frames > MEDIA_MAX_PIXELS) {
-    throw new Error("图片像素数超过上限（5000 万像素）");
+    throw new Error("图片像素数超过上限（2500 万像素）");
   }
 
   // ≤500 KiB：原样入库（不重编码——避免无谓的画质损失与耗时）

@@ -58,6 +58,8 @@ export function ChatPanel({
   const [imageError, setImageError] = useState<string | null>(null);
   // 动图被压缩的提示（009：不静默——保存下来的动画可能比原图短）
   const [imageNotice, setImageNotice] = useState<string | null>(null);
+  // 上传中（009：点发送才上传，网络那几秒要有可见反馈——否则只是按钮变灰）
+  const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -195,6 +197,7 @@ export function ChatPanel({
     let placeholder = "";
     if (sentImage !== null) {
       setImageError(null);
+      setSending(true);
       try {
         const up = await uploadImage(sentImage.file);
         // 占位单独一行拼在用户文字后——原文逐字、agent0 与渲染侧都能认（009 FR-015）
@@ -208,6 +211,8 @@ export function ChatPanel({
         setImageError(errText(err));
         setBusy(false);
         return; // 消息不发；文字与预览都还在
+      } finally {
+        setSending(false);
       }
     }
     const body = `${message}${placeholder}`;
@@ -371,12 +376,13 @@ export function ChatPanel({
               />
               <div className="min-w-0 flex-1 text-xs text-ink-muted">
                 <div className="truncate">{image.name}</div>
-                <div>待发送</div>
+                <div>{sending ? "上传中…" : "待发送"}</div>
               </div>
               <button
                 type="button"
                 className="btn shrink-0"
                 onClick={dropImage}
+                disabled={sending}
                 aria-label="移除待发送的图片"
               >
                 <X size={13} />
@@ -444,7 +450,7 @@ export function ChatPanel({
             disabled={busy || (draft.trim() === "" && image === null)}
             onClick={send}
           >
-            发送
+            {sending ? "上传中…" : "发送"}
           </button>
         </div>
       </div>

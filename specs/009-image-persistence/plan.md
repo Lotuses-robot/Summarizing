@@ -16,7 +16,7 @@
 **Testing**: Vitest（服务端真实入口：HTTP + 真实库；前端 happy-dom）
 **Target Platform**: Linux 容器（node:22-slim，glibc）+ Windows 便携包
 **Performance Goals**: 单图压缩 <2s（典型照片）；进站下载并发上限 2
-**Constraints**: 2C2G 服务器；压缩后 ≤500 KiB；输入 ≤20 MiB / 50MP
+**Constraints**: 2C2G 服务器；压缩后 ≤500 KiB；输入 ≤20 MiB / 25MP
 **Scale/Scope**: 个人中枢单账户；缓存量由 TTL 自然上限
 
 ## Constitution Check

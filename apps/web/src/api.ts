@@ -87,8 +87,10 @@ function issueMessages(v: unknown): string[] {
 /** 非 2xx 的错误文案（**全部端点共用**：校验类优先 issues 逐条消息；再取 message/error；非 JSON 兜底）。
  *  服务端校验失败返 `{error:"请求体不合法", issues:[zod 逐条中文]}——issues 才是「用户名至少 2 个字符」
  *  这类真话（A13：曾只取 error，用户永远看不到规则）。
- *  Fastify 自己的错误体是 `{statusCode, error:"Payload Too Large", message:"图片超过大小上限（20 MiB）"}`
- *  ——`error` 只是通用英文短语，`message` 才是人话，故 message 优先。 */
+ *  Fastify 自己的 4xx 错误体是 `{statusCode, error:"Payload Too Large", message:"图片超过大小上限（20 MiB）"}`
+ *  ——`error` 只是通用英文短语，`message` 才是人话，故 message 优先。
+ *  ⚠️ **5xx 的 message 是异常原文**（SQLITE 错误、文件路径都可能在里面）——一律不透传，
+ *     只回通用文案；细节在服务端日志里查。 */
 async function apiErrorText(res: Response): Promise<string> {
   try {
     const body: unknown = await res.json();
@@ -97,11 +99,13 @@ async function apiErrorText(res: Response): Promise<string> {
         const messages = issueMessages(body.issues);
         if (messages.length > 0) return messages.join("；");
       }
-      if ("message" in body && typeof body.message === "string" && body.message !== "") {
-        return body.message;
-      }
-      if ("error" in body && typeof body.error === "string") {
-        return body.error;
+      if (res.status < 500) {
+        if ("message" in body && typeof body.message === "string" && body.message !== "") {
+          return body.message;
+        }
+        if ("error" in body && typeof body.error === "string") {
+          return body.error;
+        }
       }
     }
   } catch {

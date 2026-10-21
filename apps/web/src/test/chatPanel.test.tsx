@@ -467,11 +467,14 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "看图" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(gate.release).not.toBeNull());
+    // 上传中要有可见反馈：预览状态与按钮都写「上传中…」
+    expect(screen.getAllByText("上传中…")).toHaveLength(2);
 
     // 上传还没回来：用户接着打下一句
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "看图还有一件事" } });
     gate.release?.();
 
     await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("看图还有一件事"));
+    expect(screen.queryByText("上传中…")).toBeNull();
   });
 });

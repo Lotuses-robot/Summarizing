@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 /** 造一个至少 size 字节的 JPEG。用**随机噪声**（JPEG 压不动噪点）堆体积，
- *  方块边长随目标字节线性放大——既够大又不越 50MP 像素闸。 */
+ *  方块边长随目标字节线性放大——既够大又不越 25MP 像素闸。 */
 async function jpegAtLeast(size: number): Promise<Buffer> {
   // 噪声 JPEG 约每 1 万像素产 1.2KB；反推边长（再留 1.6 倍余量）
   const targetPixels = (size / 1200) * 10_000 * 1.6;
@@ -70,7 +70,7 @@ async function jpegAtLeast(size: number): Promise<Buffer> {
     .jpeg({ quality: 60 })
     .toBuffer();
   if (buf.length < size) {
-    // 目标极大时再放大一轮（仍受 50MP 闸限制，测试目标 ≤3MiB 远够）
+    // 目标极大时再放大一轮（仍受 25MP 闸限制，测试目标 ≤3MiB 远够）
     return sharp(buf)
       .resize(Math.ceil(side * 1.2))
       .jpeg({ quality: 60 })
@@ -276,7 +276,7 @@ describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", (
 
   it("像素闸按总解码量算：多帧图只数首帧会被绕过", async () => {
     const db = makeDb(":memory:");
-    // 350×350 × 420 帧 = 5145 万像素（首帧只有 12 万）——超过 5000 万像素硬闸。
+    // 350×350 × 420 帧 = 5145 万像素（首帧只有 12 万）——超过 2500 万像素硬闸。
     // 每帧首像素不同，防止编码器把相同帧合并成一帧（合并了就不是多帧图了，测不到这条闸）
     const w = 350;
     const h = 350;
@@ -763,7 +763,7 @@ describe("重试与对话路径也缓存图片（009 修复：缓存挂在 kickD
   });
 });
 
-describe("进站缓存的重试（009：只对瞬态错误重试，最多 3 次）", () => {
+describe("进站缓存的重试（009：只对瞬态错误重试一次）", () => {
   it("瞬态错误（连接中断）→ 重试后成功", async () => {
     const db = makeDb(":memory:");
     const dir = tmpDir();
