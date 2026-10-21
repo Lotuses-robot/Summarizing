@@ -129,13 +129,7 @@ export function AboutModal({
       >
         {/* 头部（大仓库 README 风）：点阵底纹+主题光晕 → 超大图标（应用图标，与 favicon/PWA 同一份）→ 超大标题 → 基座 chips */}
         <header className="about-hero relative flex flex-col items-center px-6 pb-6 pt-9 text-center">
-          <img
-            src="/favicon.svg"
-            alt=""
-            width={64}
-            height={64}
-            className="relative h-16 w-16 shadow-sm"
-          />
+          <img src="/favicon.svg" alt="" width={64} height={64} className="relative h-16 w-16" />
           <h2 className="relative mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
           <p className="relative mt-2 text-sm text-ink-muted">
             个人信息中枢 · 把碎片拼成完整的事项
