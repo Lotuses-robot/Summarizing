@@ -1,8 +1,8 @@
 import {
   ChartColumn,
+  CircleUserRound,
   Info,
   Inbox,
-  KeyRound,
   LayoutDashboard,
   ScrollText,
   Settings,
@@ -123,7 +123,7 @@ export function ActivityBar({
         onClick={onOpenAccount}
         className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
-        <KeyRound size={18} />
+        <CircleUserRound size={18} />
       </button>
       <button
         title="设置"
