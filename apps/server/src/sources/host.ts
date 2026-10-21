@@ -44,6 +44,8 @@ export interface SpaceDeps {
   sourceStates: Map<string, SourceState>;
   /** webhook 处理器表（空间私有；core 网关先按令牌定空间、再按表分发）。 */
   webhookRoutes: WebhookRoute[];
+  /** 本账户的图片媒体目录（009：信源图片进站即缓存——QQ 链接小时级过期）。 */
+  mediaDir: string;
 }
 
 /** webhook 登记口：把适配器的 post/get/put/delete 收进本空间处理器表（附源名——网关按「源名+方法+路径」分发）。
@@ -109,6 +111,7 @@ function makeSourceContext(
           tools,
           { ...parsed, raw: batch.raw },
           `source:${name}`,
+          deps.mediaDir,
         );
         // 落地成功即恢复正常（reportError 置的 error 不能粘滞——「最近出错」语义要能翻篇）
         state.state = "ok";
@@ -169,7 +172,7 @@ export interface SourceAssembly {
  *  登记 webhook、把声明的 schema 落库 `__schema__`；返回 start/stop 句柄。
  *  重复名跳过（防注册表列重导致定时器/监听器叠加）。状态写进 `deps.sourceStates`（唯一通道）。 */
 export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): SourceAssembly {
-  const tools = makeAgentTools(deps.db);
+  const tools = makeAgentTools(deps.db, deps.mediaDir);
   const states = deps.sourceStates;
   const stops: Array<() => Promise<void>> = [];
   /** 实际上岗的（适配器, 状态）对——start 只遍历它（simplify：取代「重查 states + 不可达 undefined 分支」，

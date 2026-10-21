@@ -133,9 +133,10 @@ export async function handleChat(
   modelTag: string,
   message: string,
   history: ChatHistoryItem[],
+  mediaDir: string,
   mentions: { id: string; title: string }[] = [],
 ): Promise<ChatResult> {
-  const tools = makeAgentTools(db);
+  const tools = makeAgentTools(db, mediaDir);
   const state: ChatTurnState = { ingested: false, actions: [], refTitles: new Map() };
   // 持久化本轮用户消息（L16：刷新/换设备可回填）——落库即用户话已存，模型再挂也不丢这句
   repo.appendChatTurn(db, "user", message);

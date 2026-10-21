@@ -144,7 +144,7 @@ describe("存疑信息库（D-85）", () => {
       }),
     });
 
-    const result = await digestRawInput(db, llm, makeAgentTools(db), "test-model", raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), "test-model", raw);
     expect(result.state).toBe("digested"); // 拒收项被丢弃，批次仍消化
     expect(result.appliedCount).toBe(0); // 坏目标未落库
     // 消化留痕：围栏拒收（不静默）
@@ -176,7 +176,7 @@ describe("存疑信息库（D-85）", () => {
     });
     llm.push({ content: '{"changes":[]}' });
 
-    const result = await digestRawInput(db, llm, makeAgentTools(db), "test-model", raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), "test-model", raw);
     expect(result.state).toBe("digested");
     // 条目仍在 open（缺去向的 merged 被围栏拒）
     expect(repo.getUncertainInput(db, entry.id)?.status).toBe("open");

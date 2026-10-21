@@ -151,6 +151,7 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
         space.tools,
         parsed.data,
         "ingest-api",
+        space.mediaDir,
         (msg) => req.log.error(msg),
       );
       // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
@@ -180,6 +181,7 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
         client.modelTag,
         parsed.data.message,
         parsed.data.history,
+        req.space.mediaDir,
         parsed.data.mentions,
       );
     });

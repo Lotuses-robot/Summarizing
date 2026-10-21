@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
 import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
-import type { FetchImageResult } from "../agent0/fetchImage";
+import type { FetchImageToolResult } from "../agent0/tools";
 import { executeChanges } from "../executor/executor";
 import { FakeLlm, chatAt } from "./helpers/fakeLlm";
 import type { LlmClient } from "../shared/llm";
@@ -77,7 +77,7 @@ describe("agent0 消化管线", () => {
       }),
     });
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(2);
@@ -106,7 +106,7 @@ describe("agent0 消化管线", () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(0);
@@ -144,7 +144,7 @@ describe("agent0 消化管线", () => {
       }),
     });
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(1);
@@ -172,7 +172,7 @@ describe("agent0 消化管线", () => {
     llm.push({ content: JSON.stringify({ changes: [badItem] }) });
     llm.push({ content: JSON.stringify({ changes: [badItem] }) });
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(0);
@@ -186,7 +186,7 @@ describe("agent0 消化管线", () => {
     llm.push({ content: '{"changes":[{"action":"fly_to_moon"}]}' });
     llm.push({ content: '{"changes":[]}' });
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     const retryChat = chatAt(llm, 1);
@@ -206,7 +206,7 @@ describe("agent0 消化管线", () => {
       });
     }
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
     expect(result.state).toBe("failed");
     expect(repo.getRawInput(db, raw.id)?.digestState).toBe("failed");
     // 失败原因须是「超轮数」——否则常量上调时本用例会滑去覆盖别的失败路径而无声
@@ -222,7 +222,7 @@ describe("agent0 消化管线", () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm(); // 队列空 → chat 抛错，模拟网关挂掉
     const raw = seedRaw(db);
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("failed");
     expect(repo.getRawInput(db, raw.id)?.content).toBe(PASTE);
@@ -250,7 +250,7 @@ describe("agent0 消化管线", () => {
       }),
     });
     const rawSeed = seedRaw(db);
-    await digestRawInput(db, llmSeed, makeAgentTools(db), MODEL, rawSeed);
+    await digestRawInput(db, llmSeed, makeAgentTools(db, ""), MODEL, rawSeed);
     const existing = repo.deriveItems(db)[0];
     if (!existing) throw new Error("既有事项未创建");
     expect(itemDueDate(existing)).toBeNull();
@@ -294,7 +294,7 @@ describe("agent0 消化管线", () => {
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw2);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw2);
 
     expect(result.state).toBe("digested");
     const after = repo.deriveItem(db, existing.id);
@@ -392,7 +392,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
       receivedAt: "2026-09-27T10:00:00",
       eventTime: null,
     });
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw2);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw2);
 
     expect(result.state).toBe("digested");
     const after = repo.deriveItem(db, item.id);
@@ -440,7 +440,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     expect(repo.deriveItems(db)).toHaveLength(1); // 没有建新事项
@@ -486,7 +486,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
       receivedAt: "2026-09-26T10:00:00",
       eventTime: null,
     });
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     const after = repo.deriveItem(db, item.id);
@@ -516,7 +516,7 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     expect(result.appliedCount).toBe(0);
@@ -597,7 +597,7 @@ describe("信源阶段 AI 复原（D-85）：碎片入库存疑 → 后续批次
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
-    await digestRawInput(db, llmA, makeAgentTools(db), MODEL, rawA);
+    await digestRawInput(db, llmA, makeAgentTools(db, ""), MODEL, rawA);
     const parked = repo.listUncertainByStatus(db, "open");
     expect(parked).toHaveLength(1);
     const parkedId = parked[0]?.id;
@@ -643,7 +643,7 @@ describe("信源阶段 AI 复原（D-85）：碎片入库存疑 → 后续批次
       receivedAt: "2026-09-26T10:00:00",
       eventTime: null,
     });
-    const resultB = await digestRawInput(db, llmB, makeAgentTools(db), MODEL, rawB);
+    const resultB = await digestRawInput(db, llmB, makeAgentTools(db, ""), MODEL, rawB);
 
     expect(resultB.state).toBe("digested");
     expect(repo.deriveItems(db)).toHaveLength(1); // 事项已建
@@ -732,7 +732,7 @@ describe("矛盾决断（S-6 / D-85）：有据取舍留痕，判不了入库", 
       receivedAt: "2026-09-28T10:00:00",
       eventTime: null,
     });
-    const result = await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(result.state).toBe("digested");
     const after = repo.deriveItem(db, item.id);
@@ -765,7 +765,7 @@ describe("agent0 检索工具：search_recent_raws（二轮评审 C：原零测�
       receivedAt: "2026-09-01T10:00:00",
       eventTime: null,
     });
-    const tools = makeAgentTools(db);
+    const tools = makeAgentTools(db, "");
     // 用「当前时刻回溯」不好控——直接测 daysBack 极大（全回）与极大窗口外
     const all = await tools.searchRecentRaws(
       { daysBack: 90, sameSourceOnly: false },
@@ -793,7 +793,7 @@ describe("agent0 检索工具：search_recent_raws（二轮评审 C：原零测�
       receivedAt: "2026-09-26T10:00:00",
       eventTime: null,
     });
-    const tools = makeAgentTools(db);
+    const tools = makeAgentTools(db, "");
     const same = await tools.searchRecentRaws(
       { daysBack: 90, sameSourceOnly: true },
       { sourceIdentity: { sourceLabel: "群A" }, eventTime: null },
@@ -808,7 +808,7 @@ describe("流水数据层（specs/004）", () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
     const raw = seedRaw(db);
-    kickDigest(db, llm, makeAgentTools(db), MODEL, raw, "test");
+    kickDigest(db, llm, makeAgentTools(db, ""), MODEL, raw, "test");
     expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digesting");
   });
 
@@ -834,7 +834,7 @@ describe("流水数据层（specs/004）", () => {
     });
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
     const raw = seedRaw(db);
-    kickDigest(db, llm, makeAgentTools(db), MODEL, raw, "test");
+    kickDigest(db, llm, makeAgentTools(db, ""), MODEL, raw, "test");
     await vi.waitFor(
       () => {
         expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digested");
@@ -858,16 +858,16 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
   function toolsWithImage(
     db: ReturnType<typeof makeDb>,
     image: { dataUrl: string } | { reason: string },
-    fetchImageOverride?: () => Promise<FetchImageResult>,
+    fetchImageOverride?: () => Promise<FetchImageToolResult>,
   ) {
-    const base = makeAgentTools(db);
+    const base = makeAgentTools(db, "");
     return {
       ...base,
       fetchImage:
         fetchImageOverride ??
         (async () =>
           "dataUrl" in image
-            ? { ok: true as const, dataUrl: image.dataUrl }
+            ? { ok: true as const, dataUrl: image.dataUrl, mediaId: null }
             : { ok: false as const, reason: image.reason }),
     };
   }
@@ -1027,7 +1027,7 @@ describe("用户拒收规则进入提示词（D-107：真实消化链路）", ()
 
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     // 第 0 次调用就是 elicitation 轮——它的 system 必须含用户规则
     expect(chatAt(llm, 0).system).toContain("不要拼多多砍一刀类链接");
@@ -1039,7 +1039,7 @@ describe("用户拒收规则进入提示词（D-107：真实消化链路）", ()
     const raw = seedRaw(db);
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
 
     expect(chatAt(llm, 0).system).toContain("（用户未设置任何拒收规则）");
   });
@@ -1064,7 +1064,7 @@ describe("用户拒收规则进入提示词（D-107：真实消化链路）", ()
     });
     // 第 2 轮（修正轮）：给合法空清单
     llm.push({ content: '{"changes":[]}' });
-    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw).catch(() => {
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw).catch(() => {
       // 修正轮失败只降级留痕，不抛——这里不关心最终 state，只断言每轮 system 都带规则
     });
 
@@ -1086,7 +1086,7 @@ describe("record_note 批次留痕（2026-10-19 拒收复盘）", () => {
     });
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
-    await digestRawInput(db, llm, makeAgentTools(db), MODEL, raw);
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
     const brief = chatAt(llm, 0).messages[0]?.content ?? "";
     expect(brief).toContain(`批次 id：${raw.id}`);
   });

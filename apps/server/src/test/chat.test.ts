@@ -65,7 +65,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
       { role: "assistant", content: "你好呀，有什么要记要问的？" },
     ];
 
-    const result = await handleChat(db, llm, MODEL, "我最近有什么要交的？", history);
+    const result = await handleChat(db, llm, MODEL, "我最近有什么要交的？", history, "");
 
     expect(result.reply).toContain("第三次作业提交");
     // 工具轨迹进 result（人话，05§四）
@@ -97,7 +97,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: '{"changes":[]}' });
     llm.push({ content: "已记录，正在处理。" });
 
-    const result = await handleChat(db, llm, MODEL, "英语课下周三要交作文", []);
+    const result = await handleChat(db, llm, MODEL, "英语课下周三要交作文", [], "");
 
     expect(result.reply).toBe("已记录，正在处理。");
     expect(result.actions).toEqual([{ tool: "ingest", note: "已录入，消化中" }]);
@@ -121,7 +121,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: "收到，原话已录入——系统会跟前面那条合并处理。" });
     llm.push({ content: '{"changes":[]}' }); // 兜底 kickDigest 的消化清单
 
-    const result = await handleChat(db, llm, MODEL, "修改一下开会是十一点", []);
+    const result = await handleChat(db, llm, MODEL, "修改一下开会是十一点", [], "");
 
     expect(result.reply).toContain("已录入");
     // 兜底录入的轨迹对用户可见（不是暗改）
@@ -151,7 +151,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: "收到，原话已录入——系统会跟前面那条合并处理。" });
     llm.push({ content: '{"changes":[]}' }); // 兜底 kickDigest 的消化清单
 
-    const result = await handleChat(db, llm, MODEL, "修改一下开会是十一点", []);
+    const result = await handleChat(db, llm, MODEL, "修改一下开会是十一点", [], "");
 
     // 两条轨迹都在：查询照旧 + 兜底补录（对用户可见，不是暗改）
     expect(result.actions.map((a) => a.tool)).toEqual(["search_items", "ingest"]);
@@ -168,7 +168,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: "收到，已经记下来了。" });
     llm.push({ content: '{"changes":[]}' }); // 兜底 kickDigest 的消化清单
 
-    const result = await handleChat(db, llm, MODEL, "周三前交物理实验报告", []);
+    const result = await handleChat(db, llm, MODEL, "周三前交物理实验报告", [], "");
 
     expect(result.actions.map((a) => a.tool)).toEqual(["get_board", "ingest"]);
     expect(chatRaws(db)).toHaveLength(1);
@@ -183,7 +183,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     });
     llm.push({ content: "你好呀～有事随时说。" });
 
-    const result = await handleChat(db, llm, MODEL, "你好呀", []);
+    const result = await handleChat(db, llm, MODEL, "你好呀", [], "");
 
     expect(result.reply).toContain("你好");
     const raws = chatRaws(db);
@@ -205,7 +205,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     });
     llm.push({ content: "这是数据结构课的作业，10 月 1 日截止。" });
 
-    const result = await handleChat(db, llm, MODEL, "那条作业的详情是啥", []);
+    const result = await handleChat(db, llm, MODEL, "那条作业的详情是啥", [], "");
 
     expect(result.references).toEqual([{ id: itemId, title: "第三次作业提交" }]);
     expect(result.actions).toEqual([{ tool: "get_item", note: "看了「第三次作业提交」" }]);
@@ -217,14 +217,9 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     const llm = new FakeLlm();
     llm.push({ content: "这条我知道。" });
 
-    await handleChat(
-      db,
-      llm,
-      MODEL,
-      "帮我看看它的详情",
-      [],
-      [{ id: itemId, title: "第三次作业提交" }],
-    );
+    await handleChat(db, llm, MODEL, "帮我看看它的详情", [], "", [
+      { id: itemId, title: "第三次作业提交" },
+    ]);
 
     const first = chatAt(llm, 0);
     const last = first.messages.at(-1);
@@ -238,7 +233,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm(); // 队列空 → 首次 chat 抛错
 
-    const result = await handleChat(db, llm, MODEL, "英语课下周三交作文", []);
+    const result = await handleChat(db, llm, MODEL, "英语课下周三交作文", [], "");
 
     expect(result.reply).toBe("已记录，正在处理。");
     const raws = chatRaws(db);
@@ -255,7 +250,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     });
     // 不再补轮次 → converse 的下一次 chat 抛错（ingest 的消化也拿不到轮次，同样抛错）
 
-    const result = await handleChat(db, llm, MODEL, "社团纳新周五截止", []);
+    const result = await handleChat(db, llm, MODEL, "社团纳新周五截止", [], "");
 
     expect(result.reply).toBe("已记录，正在处理。处理结果稍后会在看板上出现。");
     expect(chatRaws(db)).toHaveLength(1); // 绝不出现第二条
@@ -271,7 +266,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
       });
     }
 
-    const result = await handleChat(db, llm, MODEL, "帮我看下数据结构的事", []);
+    const result = await handleChat(db, llm, MODEL, "帮我看下数据结构的事", [], "");
 
     expect(result.reply).toBe("已记录，正在处理。");
     const raws = chatRaws(db);
@@ -288,7 +283,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
       content: `m${i}`,
     }));
 
-    await handleChat(db, llm, MODEL, "最新消息", history);
+    await handleChat(db, llm, MODEL, "最新消息", history, "");
 
     const chat = chatAt(llm, 0);
     expect(chat.messages).toHaveLength(17); // 16 条历史 + 当前
@@ -302,7 +297,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: "   " }); // 空白回复 → 触发回喂
     llm.push({ content: "你好呀，有什么要记的？" });
 
-    const result = await handleChat(db, llm, MODEL, "在吗", []);
+    const result = await handleChat(db, llm, MODEL, "在吗", [], "");
 
     expect(result.reply).toBe("你好呀，有什么要记的？");
     const second = chatAt(llm, 1);
@@ -325,7 +320,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: '{"changes":[]}' }); // 被 ingest 触发的异步消化消费
     llm.push({ content: "已记录。" }); // 前台第二轮回复
 
-    const result = await handleChat(db, llm, MODEL, "第一件事的原话 第二件事的原话", []);
+    const result = await handleChat(db, llm, MODEL, "第一件事的原话 第二件事的原话", [], "");
 
     expect(result.reply).toBe("已记录。");
     expect(chatRaws(db)).toHaveLength(1); // 只录第一次
@@ -345,7 +340,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     llm.push({ content: null, toolCalls: [{ id: "t1", name: "fly_to_moon", argsJson: "{}" }] });
     llm.push({ content: "这个我做不了。" });
 
-    const result = await handleChat(db, llm, MODEL, "随便", []);
+    const result = await handleChat(db, llm, MODEL, "随便", [], "");
 
     expect(result.reply).toContain("做不了");
     const second = chatAt(llm, 1);
@@ -385,7 +380,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     });
     llm.push({ content: "已从存疑库移除。" });
 
-    const result = await handleChat(db, llm, MODEL, "把那条清掉", []);
+    const result = await handleChat(db, llm, MODEL, "把那条清掉", [], "");
 
     expect(result.reply).toContain("移除");
     // 库内状态已变
@@ -406,7 +401,7 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     });
     llm.push({ content: "没找到这条。" });
 
-    const result = await handleChat(db, llm, MODEL, "清掉它", []);
+    const result = await handleChat(db, llm, MODEL, "清掉它", [], "");
 
     const second = chatAt(llm, 1);
     const toolMsg = second.messages.find((m) => m.role === "tool");
@@ -605,7 +600,7 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
     });
     llm.push({ content: "已删除，进了回收站（可恢复）。" });
 
-    const result = await handleChat(db, llm, MODEL, "把那条删了", []);
+    const result = await handleChat(db, llm, MODEL, "把那条删了", [], "");
 
     expect(repo.deriveItem(db, id)?.status).toBe("trashed");
     expect(repo.deriveHistory(db, id).map((v) => v.action)).toEqual(["create_item", "trash_item"]);
@@ -623,7 +618,7 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
       toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
     });
     llm.push({ content: "已删除。" });
-    await handleChat(db, llm, MODEL, "把那条通知删了", []);
+    await handleChat(db, llm, MODEL, "把那条通知删了", [], "");
     expect(repo.deriveItem(db, id)?.status).toBe("trashed");
   });
 
@@ -636,7 +631,7 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
       toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
     });
     llm.push({ content: "删了。" });
-    await handleChat(db, llm, MODEL, "删了", []);
+    await handleChat(db, llm, MODEL, "删了", [], "");
     const before = repo.deriveHistory(db, id).length;
 
     const llm2 = new FakeLlm();
@@ -645,7 +640,7 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
       toolCalls: [{ id: "t1", name: "delete_item", argsJson: JSON.stringify({ id }) }],
     });
     llm2.push({ content: "本来就在回收站。" });
-    await handleChat(db, llm2, MODEL, "再删一次", []);
+    await handleChat(db, llm2, MODEL, "再删一次", [], "");
     expect(repo.deriveHistory(db, id)).toHaveLength(before); // 版本数不变
   });
 
@@ -657,7 +652,7 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
       toolCalls: [{ id: "t1", name: "delete_item", argsJson: '{"id":"nope"}' }],
     });
     llm.push({ content: "没找到那条。" });
-    const result = await handleChat(db, llm, MODEL, "删掉 nope", []);
+    const result = await handleChat(db, llm, MODEL, "删掉 nope", [], "");
     expect(result.reply).toContain("没找到");
     const toolMsg = chatAt(llm, 1).messages.find((m) => m.role === "tool");
     expect(toolMsg?.content).toContain('ok":false');
@@ -670,7 +665,7 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
     const llm = new FakeLlm();
     llm.push({ content: null, toolCalls: [{ id: "t1", name: "get_board", argsJson: "{}" }] });
     llm.push({ content: "有 1 条通知。" });
-    await handleChat(db, llm, MODEL, "有什么通知", []);
+    await handleChat(db, llm, MODEL, "有什么通知", [], "");
     const toolMsg = chatAt(llm, 1).messages.find((m) => m.role === "tool");
     expect(toolMsg?.content).toContain("课改到明理楼3楼");
     expect(toolMsg?.content).toContain('"kind":"notice"');

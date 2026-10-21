@@ -194,7 +194,7 @@ describe("成功调用落行（真实链路）", () => {
       content: "办完了",
       usage: { promptTokens: 400, completionTokens: 20, cachedTokens: null },
     });
-    await handleChat(db, llm, llm.modelTag, "看看", [], []);
+    await handleChat(db, llm, llm.modelTag, "看看", [], "", []);
     const sum = repo.sumLlmUsage(db, "1970-01-01T00:00:00");
     expect(sum.callCount).toBe(2); // 每轮一行
     expect(sum.inputTokens).toBe(450); // (200-150) + (400-0)

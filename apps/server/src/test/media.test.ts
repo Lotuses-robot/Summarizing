@@ -1,15 +1,19 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
+import { z } from "zod";
 import { extractImageUrls, mediaIdFromUrl, textCitesMedia } from "@summarizing/shared";
 import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
 import { executeChanges } from "../executor/executor";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { storeImageBytes, sweepExpiredMedia, mediaFilePath } from "../application/media";
+import { makeAgentTools } from "../agent0/tools";
+import { FakeLlm } from "./helpers/fakeLlm";
+import type * as downloaderModule from "../shared/imageDownloader";
 import {
   MEDIA_MAX_INPUT_BYTES,
   baseMediaTtlMs,
@@ -22,7 +26,15 @@ import { nowWallClock } from "../shared/time";
 // 图片持久化（009 刀 1）：后端底座——TTL 纯函数、占位解析、上传校验/压缩、读取隔离、清理器。
 // 全部走真实入口（真库 + 真 HTTP 经 makeTestAccount）；sharp 编解码真跑，不用 mock。
 
+/** 下载替身：取图用例按需给一张图（`*.invalid` 域名本就解析不了，命中本地时根本走不到这里）。 */
+const downloadStub = vi.hoisted(() => vi.fn());
+vi.mock("../shared/imageDownloader", async (importOriginal) => {
+  const actual = await importOriginal<typeof downloaderModule>();
+  return { ...actual, downloadImageBytes: downloadStub };
+});
+
 afterEach(cleanupAllTestAccounts);
+afterEach(() => downloadStub.mockReset());
 
 /** 临时媒体目录（每个用例一套；句柄关掉后随 afterEach 删）。 */
 const dirs: string[] = [];
@@ -437,5 +449,86 @@ describe("详情接口的 media 映射（009 刀 2；前端 MediaText 的唯一�
     const item = repo.deriveItems(db)[0];
     if (item === undefined) throw new Error("播种失败");
     expect(repo.getItemFull(db, item.id)?.media).toEqual({});
+  });
+});
+
+describe("进站缓存走真实入口（刀 3：路由必须把媒体目录传下去）", () => {
+  it("POST /api/ingest → 图片后台缓存落行，原文逐字不变", async () => {
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' }); // 零变更合法：本用例只看缓存，不看消化结果
+    const t = await makeTestAccount({ llm });
+    const original = "看这张 [图片](https://pic.invalid/ingest.png) 图";
+    downloadStub.mockResolvedValue({ bytes: await smallJpeg(), contentType: "image/jpeg" });
+
+    const res = await t.inject({
+      method: "POST",
+      url: "/api/ingest",
+      payload: { content: original, sourceType: "paste", sourceIdentity: { sourceLabel: "s" } },
+    });
+    expect(res.statusCode).toBe(202);
+
+    // 缓存是后台的（fire-and-forget）：轮询到行出现
+    await vi.waitFor(() =>
+      expect(repo.getMediaByOriginUrl(t.db, "https://pic.invalid/ingest.png")).not.toBeNull(),
+    );
+    const rawId = z.object({ id: z.string() }).parse(res.json()).id;
+    expect(repo.getRawInput(t.db, rawId)?.content).toBe(original);
+  });
+});
+
+describe("agent0 取图：本地优先 + 成功持久化（009 FR-008）", () => {
+  it("占位是本地媒体 → 读盘零网络，data URL 的 MIME 与库里一致", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const stored = await storeImageBytes(db, dir, await smallJpeg());
+    const result = await makeAgentTools(db, dir).fetchImage({ url: `/api/media/${stored.id}` });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mediaId).toBe(stored.id);
+    expect(result.dataUrl.startsWith(`data:${stored.mime};base64,`)).toBe(true);
+  });
+
+  it("原链接已缓存 → 读本地副本（域名不可解析也不打网）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const url = "https://pic.invalid/cached.png";
+    const stored = await storeImageBytes(db, dir, await smallJpeg(), { originUrl: url });
+    const result = await makeAgentTools(db, dir).fetchImage({ url });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mediaId).toBe(stored.id);
+  });
+
+  it("本地媒体已被清理 → ok:false（本地占位没有可回退的网络来源）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const stored = await storeImageBytes(db, dir, await smallJpeg());
+    repo.deleteMediaRow(db, stored.id);
+    const result = await makeAgentTools(db, dir).fetchImage({ url: `/api/media/${stored.id}` });
+    expect(result).toEqual({ ok: false, reason: "图片已过期或已被清理" });
+  });
+
+  it("下载成功 → 顺手持久化（originUrl 记原链接）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const url = "https://pic.invalid/fresh.png";
+    downloadStub.mockResolvedValueOnce({ bytes: await smallJpeg(), contentType: "image/jpeg" });
+    const result = await makeAgentTools(db, dir).fetchImage({ url });
+    if (!result.ok) throw new Error(`取图失败：${result.reason}`);
+    expect(result.mediaId).not.toBeNull();
+    expect(repo.getMediaByOriginUrl(db, url)?.id).toBe(result.mediaId);
+  });
+
+  it("持久化失败 → 图照样给模型看（mediaId=null，只留痕）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    // 媒体目录换成普通文件：落盘必失败（与清理器用例同一手法）
+    rmSync(dir, { recursive: true, force: true });
+    writeFileSync(dir, "not a directory");
+    downloadStub.mockResolvedValueOnce({ bytes: await smallJpeg(), contentType: "image/jpeg" });
+    const result = await makeAgentTools(db, dir).fetchImage({ url: "https://pic.invalid/x.png" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mediaId).toBeNull();
   });
 });

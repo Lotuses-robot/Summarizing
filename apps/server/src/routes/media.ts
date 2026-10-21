@@ -5,14 +5,15 @@ import { MediaUploadResponseSchema, errText } from "@summarizing/shared";
 import { eq } from "drizzle-orm";
 import { media as mediaTable } from "../storage/schema";
 import { readMediaBytes, storeImageBytes } from "../application/media";
+import { MEDIA_MAX_INPUT_BYTES } from "../shared/mediaTtl";
 
 // 媒体路由（009）：POST 上传（前台对话 + 信源图片的统一入口）、GET 按 sha256 读回。
 // 归属隔离靠**受保护作用域**：space 已定账户，media 表在该账户自己的库里——别人的 id 在本库
 // 查不到 → 404（与「不存在」同形，不泄露图片存在性；同 image 类端点的通行做法）。
 // 读取响应：private（不进共享缓存）+ immutable（内容寻址，字节永不改，重传零成本）。
 
-/** 上传 body 上限（与 shared 的 MEDIA_MAX_INPUT_BYTES 同值；这里由 Fastify 先截断）。 */
-const BODY_LIMIT = 20 * 1024 * 1024;
+/** 上传 body 上限：与本机收图的输入上限同值（多插一步总得有上限），由 Fastify 先截断。 */
+const BODY_LIMIT = MEDIA_MAX_INPUT_BYTES;
 
 /** 注册媒体路由（受保护面）。 */
 export function registerMediaRoutes(app: FastifyInstance): void {

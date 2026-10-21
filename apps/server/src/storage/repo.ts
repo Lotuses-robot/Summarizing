@@ -723,8 +723,8 @@ export function getMedia(db: DbOrTx, id: string): MediaRefRow | null {
   return { id: row.id, mime: row.mime, sizeBytes: row.sizeBytes, expiresAt: row.expiresAt };
 }
 
-/** 按原始 URL 取一行（信源图片占位反查 + 进站去重）。 */
-function getMediaByOriginUrl(db: DbOrTx, originUrl: string): MediaRefRow | null {
+/** 按原始 URL 取一行（信源图片占位反查 + 进站缓存去重）。 */
+export function getMediaByOriginUrl(db: DbOrTx, originUrl: string): MediaRefRow | null {
   const row = db.select().from(s.media).where(eq(s.media.originUrl, originUrl)).get();
   if (row === undefined) return null;
   return { id: row.id, mime: row.mime, sizeBytes: row.sizeBytes, expiresAt: row.expiresAt };

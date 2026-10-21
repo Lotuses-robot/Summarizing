@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SHUTDOWN_TIMEOUT_MS } from "../app";
 import { registerSources, START_TIMEOUT_MS, type SpaceDeps } from "../sources/host";
 import { closeSpacesWithTimeout, type Space, type SpaceHub } from "../spaces";
@@ -8,12 +11,20 @@ import * as repo from "../storage/repo";
 import type { SourceAdapter, SourceBatch, SourceContext, SourceRouter } from "../sources/types";
 import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { FakeLlm } from "./helpers/fakeLlm";
+import { makeMediaDir } from "../routes/media";
 
 // 信源底座（D-84/D-88；006 起按空间装配 + `/hook` 网关）：SourceContext 手段（ingest 返回值 /
 // 设置 KV / 日志 / 清理）+ 通用设置 HTTP 口。测试替身源经 **SourceRouter** 登记 webhook——
 // core 只交手段与场地（网关内的命名空间），信源自主运转。
 
 afterEach(cleanupAllTestAccounts);
+
+/** makeSpaceDeps 建的临时媒体目录（afterEach 统一删——免得 %TEMP% 攒垃圾）。 */
+const srcDirs: string[] = [];
+afterEach(() => {
+  for (const d of srcDirs) rmSync(d, { recursive: true, force: true });
+  srcDirs.length = 0;
+});
 
 /** 测试替身源：emit 路由直投 ctx.ingest；kv 路由读写 ctx 设置（core HTTP 口交叉可见）。
  *  006 起路由经 SourceRouter 登记（可达 = /hook/<令牌>/testsrc/...），不再认识 Fastify 实例。 */
@@ -66,11 +77,14 @@ function makeTestAdapter(): SourceAdapter & { emitted: SourceBatch[] } {
 
 /** 空间侧依赖（纯 host 层——不过 HTTP/账户；生命周期类用例用）。 */
 function makeSpaceDeps(llm: FakeLlm = new FakeLlm()): SpaceDeps {
+  const root = mkdtempSync(path.join(os.tmpdir(), "summarizing-src-"));
+  srcDirs.push(root);
   return {
     db: makeDb(":memory:"),
     llmRef: { current: llm },
     sourceStates: new Map(),
     webhookRoutes: [],
+    mediaDir: makeMediaDir(root, "u1"),
   };
 }
 

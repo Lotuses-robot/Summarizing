@@ -541,7 +541,7 @@ describe("回收站（007 US3）", () => {
     // 通知也建一条：search_items 覆盖 notice（OQ-9 前半）
     const notice = createItem(db, raw, { name: "留存的通知", kind: "notice" });
 
-    const tools = makeAgentTools(db);
+    const tools = makeAgentTools(db, "");
     // 关键词同时命中两者（都含"的"）——生产实现必须只回通知
     const hits = await tools.searchItems({ query: "的" });
     expect(hits.items.map((i) => i.id)).toEqual([notice.id]);

@@ -80,8 +80,9 @@ async function assembleSpace(
 
     const sourceStates = new Map<string, SourceState>();
     const webhookRoutes: WebhookRoute[] = [];
+    const mediaDir = makeMediaDir(dataRoot, account.uid);
     const assembly = registerSources(
-      { db, llmRef, sourceStates, webhookRoutes },
+      { db, llmRef, sourceStates, webhookRoutes, mediaDir },
       factories.map((make) => make()),
     );
     await assembly.start();
@@ -91,10 +92,10 @@ async function assembleSpace(
       sourceToken: account.sourceToken,
       db,
       llmRef,
-      tools: makeAgentTools(db),
+      tools: makeAgentTools(db, mediaDir),
       sourceStates,
       webhookRoutes,
-      mediaDir: makeMediaDir(dataRoot, account.uid),
+      mediaDir,
       stop: () => assembly.stop(),
     };
   } catch (err) {
