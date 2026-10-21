@@ -208,7 +208,6 @@ describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", (
     expect(r.sizeBytes).toBe(bytes.length);
     expect(r.mime).toBe("image/jpeg");
     expect(r.animationCompressed).toBe(false);
-    expect(r.alphaFlattened).toBe(false);
   });
 
   it(">500 KiB 的静图压到 ≤500 KiB（agent0 读取闸稳过）", async () => {
@@ -241,7 +240,7 @@ describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", (
     expect(r.animationCompressed).toBe(true); // 动画已经没了——必须说
   }, 60_000);
 
-  it("透明 PNG 压成 JPEG 时填白并报 alphaFlattened（不填白就是默认黑）", async () => {
+  it("透明 PNG 压成 JPEG 时填白（不填白就是默认黑）", async () => {
     const db = makeDb(":memory:");
     const dir = tmpDir();
     const w = 900;
@@ -263,7 +262,6 @@ describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", (
 
     const r = await storeImageBytes(db, dir, png);
     expect(r.mime).toBe("image/jpeg");
-    expect(r.alphaFlattened).toBe(true);
     // 透明区应为白（若没 flatten 会变成黑）
     const raw = await sharp(readFileSync(mediaFilePath(dir, r.id, r.mime)))
       .extract({ left: 10, top: 10, width: 1, height: 1 })

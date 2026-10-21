@@ -43,7 +43,6 @@ export function registerMediaRoutes(app: FastifyInstance): void {
         mime: stored.mime,
         sizeBytes: stored.sizeBytes,
         animationCompressed: stored.animationCompressed,
-        alphaFlattened: stored.alphaFlattened,
       });
     } catch (err) {
       return reply.code(400).send({ error: errText(err) });

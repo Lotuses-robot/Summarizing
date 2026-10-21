@@ -113,10 +113,10 @@ QQ 群消息里的图片（原文占位 `[图片](url)`）在进站时由服务�
 
 ### Functional Requirements
 
-- **FR-001**: 系统 MUST 提供 `POST /api/media`（认证；鉴权先于解析 body），接收原始图片字节，返回 `{ id, url, mime, sizeBytes, animationCompressed, alphaFlattened }`。
+- **FR-001**: 系统 MUST 提供 `POST /api/media`（认证；鉴权先于解析 body），接收原始图片字节，返回 `{ id, url, mime, sizeBytes, animationCompressed }`。
 - **FR-002**: 系统 MUST 校验 MIME + 魔数；只收 JPEG/PNG/WebP/GIF/BMP/TIFF；拒收 SVG。
 - **FR-003**: 单图输入上限 20 MiB；像素上限 25MP；超限拒收并可见报错。
-- **FR-004**: 存储前 >500 KiB 的图 MUST 被压缩到 500 KiB 以内（质量阶梯 → 降采样；动图先降帧/丢帧再按静图压缩）；压到最低档仍 >500 KiB 拒收。**任何降级都必须回报**：动图变短/变单帧 → `animationCompressed`；透明背景被填白 → `alphaFlattened`。
+- **FR-004**: 存储前 >500 KiB 的图 MUST 被压缩到 500 KiB 以内（质量阶梯 → 降采样；动图先降帧/丢帧再按静图压缩）；压到最低档仍 >500 KiB 拒收。**降级必须回报**：动图变短/变单帧 → `animationCompressed`（透明背景填白是存储侧固定行为，不回报——2026-10-21 用户定）。
 - **FR-005**: 文件 MUST 存于 `data/media/<uid>/<sha256>.<ext>`；用户库新增 `media` 表（id/mime/sizeBytes/createdAt/expiresAt/originUrl）。
 - **FR-006**: `GET /api/media/:id` MUST 要求登录并按账户库校验归属；响应 `Cache-Control: private`、`nosniff`；文件缺失 404。
 - **FR-007**: 进站（`ingestBatch`）后 MUST 扫描 `[图片](http…)` 并后台缓存（并发上限 2）；失败 stderr 留痕；原文字节不变。

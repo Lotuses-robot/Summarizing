@@ -31,10 +31,9 @@ export async function storeImageBytes(
   mime: string;
   sizeBytes: number;
   animationCompressed: boolean;
-  alphaFlattened: boolean;
 }> {
   const declared = resolveMime(bytes, opts.declaredMime);
-  const { data, mime, animationCompressed, alphaFlattened } = await compressImage(bytes, declared);
+  const { data, mime, animationCompressed } = await compressImage(bytes, declared);
 
   const id = crypto.createHash("sha256").update(data).digest("hex");
   const createdAt = nowWallClock();
@@ -71,7 +70,7 @@ export async function storeImageBytes(
     }
     throw err;
   }
-  return { id, mime, sizeBytes: data.length, animationCompressed, alphaFlattened };
+  return { id, mime, sizeBytes: data.length, animationCompressed };
 }
 
 /** 文件路径：`media/<uid>/<sha256>.<ext>`（内容寻址，字节永不改 → 可长期缓存）。 */
@@ -102,12 +101,11 @@ function resolveMime(bytes: Buffer, declared: string | undefined): string {
 }
 
 /** 压缩（>500 KiB 触发）：质量阶梯 → 降采样；动图先降帧。压到最低档仍 >500 KiB → 拒。
- *  两个降级标记都不许静默：`animationCompressed`（动图变成静图/被重编码）、
- *  `alphaFlattened`（透明背景被填白——JPEG 没有 alpha 通道）。 */
+ *  `animationCompressed`（动图变成静图/被重编码）必须如实报——不许静默。 */
 async function compressImage(
   bytes: Buffer,
   mime: string,
-): Promise<{ data: Buffer; mime: string; animationCompressed: boolean; alphaFlattened: boolean }> {
+): Promise<{ data: Buffer; mime: string; animationCompressed: boolean }> {
   const image = sharp(bytes, { failOn: "none" });
   const meta = await image.metadata().catch((err: unknown) => {
     throw new Error(`图片无法解析：${errText(err)}`);
@@ -126,7 +124,7 @@ async function compressImage(
 
   // ≤500 KiB：原样入库（不重编码——避免无谓的画质损失与耗时）
   if (bytes.length <= MEDIA_TARGET_BYTES) {
-    return { data: bytes, mime, animationCompressed: false, alphaFlattened: false };
+    return { data: bytes, mime, animationCompressed: false };
   }
 
   // 动图（GIF / 多帧 WebP）：先降帧，仍超则按静图档继续压。
@@ -138,12 +136,7 @@ async function compressImage(
       .toBuffer()
       .catch(() => null);
     if (animated !== null && animated.length <= MEDIA_TARGET_BYTES) {
-      return {
-        data: animated,
-        mime: "image/gif",
-        animationCompressed: true,
-        alphaFlattened: false,
-      };
+      return { data: animated, mime: "image/gif", animationCompressed: true };
     }
   }
 
@@ -153,7 +146,8 @@ async function compressImage(
   // 每档内质量从高到低，第一个 ≤目标的就返回（命中即止，不再糟蹋画质）。
   // 候选长边按源图实际长边去重（`withoutEnlargement` 下，源图比候选小时几档其实是同一个尺寸——
   // 不去重就会把同一套质量阶梯重复编码好几次）。
-  const flattenAlpha = meta.hasAlpha === true; // JPEG 无 alpha：透明区不填白就是默认黑
+  // 透明背景填白（JPEG 无 alpha：不填白透明区会变黑）——存储侧的固定行为，不对外报状态
+  const flattenAlpha = meta.hasAlpha === true;
   const longSide = Math.max(width, height);
   const edges = [...new Set([2560, 1920, 1280].map((e) => Math.min(e, longSide)))];
   for (const longEdge of edges) {
@@ -172,7 +166,6 @@ async function compressImage(
           mime: "image/jpeg",
           // 走到静图档的动图 = 动画没了（sharp 默认只取第一帧）——必须报 true，否则界面不提示
           animationCompressed: frames > 1,
-          alphaFlattened: flattenAlpha,
         };
       }
     }

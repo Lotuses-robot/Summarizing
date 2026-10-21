@@ -308,9 +308,7 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
   }
 
   /** fetch 替身：/api/media 上传、/api/chat 对话、/api/chat/history 回填；记录调用与请求体。 */
-  function stubUpload(
-    opts: { failUpload?: boolean; animationCompressed?: boolean; alphaFlattened?: boolean } = {},
-  ) {
+  function stubUpload(opts: { failUpload?: boolean; animationCompressed?: boolean } = {}) {
     const calls: string[] = [];
     const chatBodies: unknown[] = [];
     vi.stubGlobal(
@@ -340,7 +338,6 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
               mime: "image/png",
               sizeBytes: 3,
               animationCompressed: opts.animationCompressed ?? false,
-              alphaFlattened: opts.alphaFlattened ?? false,
             }),
           );
         }
@@ -425,14 +422,6 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
     await waitFor(() => expect(screen.queryByText(/动图已压缩/)).toBeNull(), { timeout: 3000 });
   });
 
-  it("透明背景被填白 → 界面明说（不静默）", async () => {
-    stubUpload({ alphaFlattened: true });
-    renderPanel();
-    pickImage();
-    fireEvent.click(screen.getByRole("button", { name: "发送" }));
-    await waitFor(() => expect(screen.getByText(/透明背景已填白/)).toBeInTheDocument());
-  });
-
   it("用户气泡换行保真（多行粘贴不被压成一行）", async () => {
     stubUpload();
     renderPanel();
@@ -462,7 +451,6 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
                   mime: "image/png",
                   sizeBytes: 3,
                   animationCompressed: false,
-                  alphaFlattened: false,
                 }),
               );
           });

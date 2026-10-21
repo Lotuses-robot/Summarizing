@@ -224,11 +224,8 @@ export function ChatPanel({
         const up = await uploadImage(sentImage.file);
         // 占位单独一行拼在用户文字后——原文逐字、agent0 与渲染侧都能认（009 FR-015）
         placeholder = message === "" ? `[图片](${up.url})` : `\n\n[图片](${up.url})`;
-        // 降级不静默：动画没了 / 透明背景被填白，都要在界面里说出来
-        const notes: string[] = [];
-        if (up.animationCompressed) notes.push("动图已压缩（保存的动画可能比原图短）");
-        if (up.alphaFlattened) notes.push("透明背景已填白");
-        if (notes.length > 0) showImageNotice(notes.join("；"));
+        // 降级不静默：动画没了要说（透明背景填白是存储侧固定行为，不再提示——用户 2026-10-21）
+        if (up.animationCompressed) showImageNotice("动图已压缩（保存的动画可能比原图短）");
       } catch (err) {
         setImageError(errText(err));
         setBusy(false);

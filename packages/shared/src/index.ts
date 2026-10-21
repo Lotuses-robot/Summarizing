@@ -451,15 +451,13 @@ export const MediaMapSchema = z.record(z.string(), MediaRefSchema);
 export type MediaMap = z.infer<typeof MediaMapSchema>;
 
 /** 上传响应：前端拿到 id 后把 `[图片](/api/media/<id>)` 放进消息正文。
- *  animationCompressed = 动图被降帧/丢帧压缩过（含「大动图被压成单帧静图」）；alphaFlattened =
- *  透明背景被填白（JPEG 无 alpha）——两者都是降级，界面据此提示，不静默。 */
+ *  animationCompressed = 动图被降帧/丢帧压缩过（含「大动图被压成单帧静图」）——界面据此提示，不静默。 */
 export const MediaUploadResponseSchema = z.object({
   id: z.string().min(1),
   url: z.string().min(1),
   mime: z.string().min(1),
   sizeBytes: z.number().int().nonnegative(),
   animationCompressed: z.boolean(),
-  alphaFlattened: z.boolean(),
 });
 export type MediaUploadResponse = z.infer<typeof MediaUploadResponseSchema>;
 
