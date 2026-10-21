@@ -321,7 +321,17 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
         if (url.includes("/api/chat/history")) return Promise.resolve(jsonResponse({ turns: [] }));
         if (url.includes("/api/media")) {
           if (opts.failUpload === true) {
-            return Promise.resolve(jsonResponse({ error: "图片超过大小上限（20 MiB）" }, 400));
+            // 与真实服务端一致：Fastify 的错误体是 {statusCode, error, message}
+            return Promise.resolve(
+              jsonResponse(
+                {
+                  statusCode: 413,
+                  error: "Payload Too Large",
+                  message: "图片超过大小上限（20 MiB）",
+                },
+                413,
+              ),
+            );
           }
           return Promise.resolve(
             jsonResponse({

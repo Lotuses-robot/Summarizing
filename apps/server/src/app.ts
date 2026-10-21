@@ -128,20 +128,26 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
       const chunks: Buffer[] = [];
       let total = 0;
       let settled = false;
-      /** 只回一次（超限 destroy 后还会来 error/close）：先到者定结果。 */
+      /** 只回一次（超限后流还可能在来数据）：先到者定结果。 */
       const finish = (err: Error | null, body?: Buffer): void => {
         if (settled) return;
         settled = true;
         done(err, body);
       };
       payload.on("data", (c: Buffer) => {
+        if (settled) {
+          // 已经判超限：不再攒字节（内存就此封顶），只把剩余流量读掉——好让 413 真能发回客户端。
+          // 客户端还在猛灌到两倍上限就断连：正常用户传 25 MB 能收到 413，恶意长流不会白占带宽。
+          total += c.byteLength;
+          if (total > MEDIA_MAX_INPUT_BYTES * 2) payload.destroy();
+          return;
+        }
         total += c.byteLength;
         if (total > MEDIA_MAX_INPUT_BYTES) {
           const err = Object.assign(
             new Error(`图片超过大小上限（${MEDIA_MAX_INPUT_BYTES / 1024 / 1024} MiB）`),
             { statusCode: 413 },
           );
-          payload.destroy();
           finish(err);
           return;
         }
