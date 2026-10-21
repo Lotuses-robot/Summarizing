@@ -3,6 +3,7 @@ import {
   applyTagChanges,
   ElementSchema,
   elementSubject,
+  extractImageUrls,
   itemName,
   provenanceLabel,
   type ChangeItem,
@@ -16,6 +17,7 @@ import type { Db, DbOrTx } from "../storage/db";
 import { runInTransaction } from "../storage/db";
 import * as repo from "../storage/repo";
 import { normalizeWallClock, nowWallClock } from "../shared/time";
+import { citedMediaExpiry } from "../shared/mediaTtl";
 
 /** 独占执行器（01§4.10⑤）：合格项逐条落库+Replay；返回每项的人话说明供消化留痕。
  *  整批包在一个事务里——任一项抛错则全部回滚，避免「部分落笔 + 状态谎报失败」（原文仍在，可重跑）。
@@ -29,7 +31,7 @@ export function executeChanges(
   items: ChangeItem[],
   by: Provenance,
   opts: { markDigested?: boolean } = {},
-): { details: string[] } {
+): { details: string[]; citedMediaIds: Set<string> } {
   const markDigested = opts.markDigested ?? true;
   // 必须用事务句柄 tx（不是外层 db），否则写入不走事务、回滚失效
   return runInTransaction(db, (tx) => {
@@ -39,7 +41,8 @@ export function executeChanges(
   });
 }
 
-/** 事务内的逐项落笔（由 executeChanges 包事务调用；传入的是事务句柄）。 */
+/** 事务内的逐项落笔（由 executeChanges 包事务调用；传入的是事务句柄）。
+ *  顺带收集本批证据引用到的媒体（009）：引用即把留存抬到 引用时刻 + 90 天。 */
 function applyChanges(
   tx: DbOrTx,
   raw: RawInput,
@@ -47,8 +50,12 @@ function applyChanges(
   by: Provenance,
 ): {
   details: string[];
+  citedMediaIds: Set<string>;
 } {
   const details: string[] = [];
+  const citedMediaIds = new Set<string>();
+  // 引用时刻由执行器现取（不是 raw.createdAt）——晚到的引用才有「救回被缩到 3 天的图」的意义
+  const citedAt = nowWallClock();
   for (const item of items) {
     switch (item.action) {
       case "create_item": {
@@ -68,7 +75,7 @@ function applyChanges(
           },
           by,
         });
-        attachElementEvidence(tx, raw, itemId, item.elements, by);
+        attachElementEvidence(tx, raw, itemId, item.elements, by, citedMediaIds);
         details.push(describe(elements, item.tags, item.doubtNote, kind));
         break;
       }
@@ -119,7 +126,7 @@ function applyChanges(
           },
           by,
         });
-        attachElementEvidence(tx, raw, current.id, item.elements, by);
+        attachElementEvidence(tx, raw, current.id, item.elements, by, citedMediaIds);
         const noun = (item.kind ?? current.kind) === "notice" ? "通知" : "事项";
         details.push(`更新${noun}「${itemName(elements)}」`);
         break;
@@ -267,7 +274,11 @@ function applyChanges(
       }
     }
   }
-  return { details };
+  // 引用即续命（009）：只增不减——同一图多次引用取最后一次，晚到的引用救得回被缩到 3 天的图
+  for (const mediaId of citedMediaIds) {
+    repo.bumpMediaExpiry(tx, mediaId, citedMediaExpiry(citedAt));
+  }
+  return { details, citedMediaIds };
 }
 
 /** 把变更清单的元素输入落成 Element（校验+规范化：dueDate 补本地午夜等）。 */
@@ -300,13 +311,15 @@ function upsertElements(current: Element[], sets: ElementInput[]): Element[] {
   return next;
 }
 
-/** create/update 事项的证据落地：每个元素的引文入片段池（去重），subject=元素:<label>（D-62）。 */
+/** create/update 事项的证据落地：每个元素的引文入片段池（去重），subject=元素:<label>（D-62）。
+ *  引文里出现的媒体占位同时记进 `cited`（009：证据引用 → 留存抬到 90 天）。 */
 function attachElementEvidence(
   db: Parameters<typeof repo.getOrCreateFragment>[0],
   raw: RawInput,
   itemId: string,
   inputs: { label: string; quotes: string[] }[],
   by: Provenance,
+  cited: Set<string>,
 ): void {
   for (const input of inputs) {
     for (const quote of input.quotes) {
@@ -319,6 +332,11 @@ function attachElementEvidence(
         pointer: `raw_input:${raw.id}`,
         by: provenanceLabel(by), // 证据署名仍以字符串承载（captured_by TEXT）；版本署名为结构化
       });
+      // 判据 = 引文字符串本身含该图占位（本地 /api/media/<id> 或已缓存的原链接）
+      for (const url of extractImageUrls(quote)) {
+        const mediaId = repo.resolveMediaId(db, url);
+        if (mediaId !== null) cited.add(mediaId);
+      }
     }
   }
 }

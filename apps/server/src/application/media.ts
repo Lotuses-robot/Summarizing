@@ -176,6 +176,26 @@ export function sweepExpiredMedia(
   return { removed: expired.length, files, bytes, missingFiles };
 }
 
+/** 清理节拍：每小时一次（个人中枢量级，够用且不打搅磁盘）。 */
+const SWEEP_INTERVAL_MS = 3_600_000;
+
+/** 上线清理器（009 FR-012）：装配空间时跑一次，此后每小时一次；返回停止函数（空间关停时调）。
+ *  `unref()`：定时器不阻止进程退出——Ctrl-C 不必等它。单次失败只留痕，绝不影响服务。 */
+export function startMediaSweeper(db: DbOrTx, mediaDir: string): () => void {
+  /** 清一次；失败只留痕（下个整点再试，绝不影响服务）。 */
+  const tick = (): void => {
+    try {
+      sweepExpiredMedia(db, mediaDir);
+    } catch (err) {
+      process.stderr.write(`[media] 过期清理失败（下次再试）：${errText(err)}\n`);
+    }
+  };
+  tick(); // 启动即清一次：停机期间到期的图不必再等一小时
+  const timer = setInterval(tick, SWEEP_INTERVAL_MS);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 /** 文件是否存在（用 statSync，比 existsSync 少一次竞态误判）。 */
 function existsFile(file: string): boolean {
   try {

@@ -20,6 +20,8 @@ import { describeRejections, parseChangeList, runFence } from "../executor/fence
 import { buildDigestPrompt } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
 import { executeChanges } from "../executor/executor";
+import { uncitedMediaExpiry } from "../shared/mediaTtl";
+import { nowWallClock } from "../shared/time";
 
 // 消化管线（01§4.10 全景）：
 // ① 入口 RawInput（已落档）→ ② 自由推理（工具循环，轮数上限 DIGEST_MAX_ROUNDS 在 shared）
@@ -65,7 +67,7 @@ export async function digestRawInput(
 ): Promise<DigestResult> {
   const by: Provenance = { actor: "agent0", model: modelTag };
   try {
-    const list = await elicitChangeList(db, llm, tools, modelTag, raw);
+    const { list, readMedia } = await elicitChangeList(db, llm, tools, modelTag, raw);
 
     const { accepted, rejected } = runFence(db, raw, list);
     // 拒收项留痕先于修复轮（十轮评审定案：先拒、后修，时序即因果）；写失败抛进外层 catch
@@ -159,7 +161,18 @@ export async function digestRawInput(
       }
     }
 
-    const { details } = executeChanges(db, raw, accepted, by);
+    const { details, citedMediaIds } = executeChanges(db, raw, accepted, by);
+
+    // 读过但没被证据引用的图只留 3 天（009；只提前不延后，原值更早则不动）。
+    // ⚠️ 尽力而为：此处变更已提交，这里再抛会把已消化的批次错标「未处理」→ 重试双落库（同 digest_done）。
+    for (const [mediaId, readAt] of readMedia) {
+      if (citedMediaIds.has(mediaId)) continue;
+      try {
+        repo.shortenMediaExpiry(db, mediaId, uncitedMediaExpiry(readAt));
+      } catch (err) {
+        bestEffortLog(`[media] 缩短未引用图片留存失败（${mediaId}）：${errText(err)}`);
+      }
+    }
 
     // 谓词与计数同源（details.length）——执行器会静默跳过空 elements 的项，
     // 按 accepted 计数会虚报「应用 N 项」（九轮评审）。
@@ -284,15 +297,17 @@ export function sweepOrphanPending(db: Db): void {
 
 /** 工具循环：让模型自由检索（它决定查什么、查几次），直到吐出合法变更清单或超轮数抛错。
  *  每个带工具调用的轮次落一条 digest_trace 流水（specs/004 FR-006）——用户将来在流水视图
- *  看到「先查了什么、后查了什么」；轨迹写失败只记 stderr，绝不拖垮消化。 */
+ *  看到「先查了什么、后查了什么」；轨迹写失败只记 stderr，绝不拖垮消化。
+ *  `readMedia` = 本批 agent0 实际看过的图（mediaId → 读取时刻），供读后留存判定（009）。 */
 async function elicitChangeList(
   db: Db,
   llm: LlmClient,
   tools: AgentTools,
   modelTag: string,
   raw: RawInput,
-): Promise<ChangeList> {
+): Promise<{ list: ChangeList; readMedia: Map<string, string> }> {
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
+  const readMedia = new Map<string, string>();
   let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
   let imageBudget = MAX_IMAGE_FETCHES; // 本批取图预算（防模型反复取图撑爆上下文/带宽）
   // 连续降级次数（成功一次即清零）。达 2 次才判定「这模型就是不能读图」——单次带图失败更可能是
@@ -362,6 +377,10 @@ async function elicitChangeList(
         const result = await runTool(tools, call.name, call.argsJson, ctx);
         messages.push({ role: "tool", toolCallId: call.id, content: result.text });
         if (result.image !== null) images.push(result.image);
+        // 看过就记（每张图只记第一次读取的时刻——留存只该从最早那眼算起）
+        if (result.mediaId !== null && !readMedia.has(result.mediaId)) {
+          readMedia.set(result.mediaId, nowWallClock());
+        }
       }
       // 取回的图作下一条 user 消息注入（OpenAI 协议 tool 结果只能放文本；图走 user 内容块）。
       // 降级后再不注入（否则模型仍收到图 = 白重试）。
@@ -374,7 +393,7 @@ async function elicitChangeList(
       continue;
     }
     const parsed = parseChangeList(turn.content ?? "");
-    if (parsed !== null) return parsed;
+    if (parsed !== null) return { list: parsed, readMedia };
     messages.push({
       role: "user",
       content: `你的上一条输出不是合法的变更清单 JSON。请严格按系统提示词【输出格式】的字段表重新输出：只输出一个 JSON 对象 {"changes":[...]}，不要任何其他文字。`,
@@ -384,10 +403,12 @@ async function elicitChangeList(
 }
 
 /** 工具调用结果：text 是回喂模型的 JSON 文本；image 非空 = 该工具取回一张图（data URL），
- *  由调用方注入下一条 user 消息（OpenAI 协议的 tool 结果只能放文本）。 */
+ *  由调用方注入下一条 user 消息（OpenAI 协议的 tool 结果只能放文本）。
+ *  mediaId = 取图落到的媒体（只有 fetch_image 有）；读后留存判定用（009）。 */
 interface ToolRun {
   text: string;
   image: string | null;
+  mediaId: string | null;
 }
 
 /** 执行一次工具调用并返回结果；工具报错回喂给模型自行调整，不中断循环。
@@ -405,16 +426,19 @@ async function runTool(
         return {
           text: JSON.stringify(await tools.searchItems(SearchItemsArgsSchema.parse(args))),
           image: null,
+          mediaId: null,
         };
       case "search_kb":
         return {
           text: JSON.stringify(await tools.searchKb(SearchKbArgsSchema.parse(args))),
           image: null,
+          mediaId: null,
         };
       case "get_item":
         return {
           text: JSON.stringify(await tools.getItem(GetItemArgsSchema.parse(args))),
           image: null,
+          mediaId: null,
         };
       case "search_recent_raws":
         return {
@@ -422,6 +446,7 @@ async function runTool(
             await tools.searchRecentRaws(SearchRecentRawsArgsSchema.parse(args), ctx),
           ),
           image: null,
+          mediaId: null,
         };
       case "search_uncertain":
         return {
@@ -429,6 +454,7 @@ async function runTool(
             await tools.searchUncertain(SearchUncertainArgsSchema.parse(args), ctx),
           ),
           image: null,
+          mediaId: null,
         };
       case "fetch_image": {
         const result = await tools.fetchImage(FetchImageArgsSchema.parse(args));
@@ -437,16 +463,17 @@ async function runTool(
           return {
             text: JSON.stringify({ ok: true, note: "图片已附在接下来的一条消息里" }),
             image: result.dataUrl,
+            mediaId: result.mediaId,
           };
         }
-        return { text: JSON.stringify(result), image: null };
+        return { text: JSON.stringify(result), image: null, mediaId: null };
       }
       default:
-        return { text: JSON.stringify({ error: `未知工具: ${name}` }), image: null };
+        return { text: JSON.stringify({ error: `未知工具: ${name}` }), image: null, mediaId: null };
     }
   } catch (err) {
     // 工具报错回给模型让它自己调整，而不是中断整个循环
-    return { text: JSON.stringify({ error: errText(err) }), image: null };
+    return { text: JSON.stringify({ error: errText(err) }), image: null, mediaId: null };
   }
 }
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import crypto from "node:crypto";
 import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
 import { digestRawInput, kickDigest, sweepOrphanPending } from "../agent0/digest";
 import type { FetchImageToolResult } from "../agent0/tools";
@@ -9,6 +10,8 @@ import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { makeAgentTools } from "../agent0/tools";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
+import { nowWallClock } from "../shared/time";
+import { citedMediaExpiry, uncitedMediaExpiry } from "../shared/mediaTtl";
 
 afterEach(async () => {
   await cleanupAllTestAccounts();
@@ -1089,5 +1092,110 @@ describe("record_note 批次留痕（2026-10-19 拒收复盘）", () => {
     await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
     const brief = chatAt(llm, 0).messages[0]?.content ?? "";
     expect(brief).toContain(`批次 id：${raw.id}`);
+  });
+});
+
+describe("读后留存联动（009 刀 4：读过未引用 3 天 / 被引用 90 天）", () => {
+  const IMG_URL = "https://qq.example/a.jpg";
+
+  /** 造一条带图片占位的原文（围栏要求引文逐字摘自原文）。 */
+  function seedImageRaw(db: ReturnType<typeof makeDb>): RawInput {
+    return repo.insertRawInput(db, {
+      content: `看 [图片](${IMG_URL}) 这张`,
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "班级群" },
+      receivedAt: "2026-10-20T10:00:00",
+      eventTime: null,
+    });
+  }
+
+  /** 落一行早已到期的媒体（64 位 hex id；本组不走文件 IO——取图由替身负责）。 */
+  function seedMedia(db: ReturnType<typeof makeDb>, expiresAt = "2020-01-02T00:00:00"): string {
+    const id = crypto.randomBytes(32).toString("hex");
+    repo.insertMedia(db, {
+      id,
+      mime: "image/jpeg",
+      sizeBytes: 1024,
+      createdAt: "2020-01-01T00:00:00",
+      expiresAt,
+      originUrl: IMG_URL,
+    });
+    return id;
+  }
+
+  /** 取图替身：回一张假图并报出 mediaId。 */
+  const fakeFetch = (mediaId: string) => async (): Promise<FetchImageToolResult> => ({
+    ok: true,
+    dataUrl: "data:image/jpeg;base64,AAAA",
+    mediaId,
+  });
+
+  /** 引用这张图的变更清单（引文逐字 + 多模态标签——围栏的两道硬要求）。 */
+  function citedChangeList(): string {
+    return JSON.stringify({
+      changes: [
+        {
+          action: "create_item",
+          elements: [{ label: "name", text: "看图", quotes: [`[图片](${IMG_URL})`] }],
+          tags: ["多模态/图片"],
+          doubtNote: null,
+        },
+      ],
+    });
+  }
+
+  it("读过但没被引用 → 缩到读取时刻 + 3 天", async () => {
+    const db = makeDb(":memory:");
+    const mediaId = seedMedia(db, "2099-01-01T00:00:00");
+    const raw = seedImageRaw(db);
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "fetch_image", argsJson: JSON.stringify({ url: IMG_URL }) }],
+    });
+    llm.push({ content: '{"changes":[]}' });
+    const tools = { ...makeAgentTools(db, ""), fetchImage: fakeFetch(mediaId) };
+
+    const before = uncitedMediaExpiry(nowWallClock());
+    await digestRawInput(db, llm, tools, MODEL, raw);
+    const after = uncitedMediaExpiry(nowWallClock());
+
+    const got = repo.getMedia(db, mediaId)?.expiresAt ?? "";
+    expect(got >= before && got <= after).toBe(true); // 3 天后，而不是原来的 2020 年
+  });
+
+  it("读过且被证据引用 → 抬到引用时刻 + 90 天（不再缩短）", async () => {
+    const db = makeDb(":memory:");
+    const mediaId = seedMedia(db);
+    const raw = seedImageRaw(db);
+    const llm = new FakeLlm();
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "fetch_image", argsJson: JSON.stringify({ url: IMG_URL }) }],
+    });
+    llm.push({ content: citedChangeList() });
+    const tools = { ...makeAgentTools(db, ""), fetchImage: fakeFetch(mediaId) };
+
+    const before = citedMediaExpiry(nowWallClock());
+    await digestRawInput(db, llm, tools, MODEL, raw);
+    const after = citedMediaExpiry(nowWallClock());
+
+    const got = repo.getMedia(db, mediaId)?.expiresAt ?? "";
+    expect(got >= before && got <= after).toBe(true); // 90 天后
+  });
+
+  it("没读过但被引用 → 同样抬到 90 天（引用判定不依赖读过）", async () => {
+    const db = makeDb(":memory:");
+    const mediaId = seedMedia(db);
+    const raw = seedImageRaw(db);
+    const llm = new FakeLlm();
+    llm.push({ content: citedChangeList() });
+
+    const before = citedMediaExpiry(nowWallClock());
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
+    const after = citedMediaExpiry(nowWallClock());
+
+    const got = repo.getMedia(db, mediaId)?.expiresAt ?? "";
+    expect(got >= before && got <= after).toBe(true);
   });
 });

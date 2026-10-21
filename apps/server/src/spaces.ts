@@ -11,6 +11,7 @@ import { readStoredAi } from "./storage/repo";
 import { makeOpenAiLlm, makeUnconfiguredLlm, type TaggedLlm } from "./shared/llm";
 import { makeAgentTools, type AgentTools } from "./agent0/tools";
 import { makeMediaDir } from "./routes/media";
+import { startMediaSweeper } from "./application/media";
 import { sweepOrphanPending } from "./agent0/digest";
 import { errText } from "@summarizing/shared";
 import { withTimeout } from "./shared/timeout";
@@ -87,6 +88,9 @@ async function assembleSpace(
     );
     await assembly.start();
 
+    // 过期图片清理器（009）：启动即清一次 + 每小时一次；随空间关停撤掉
+    const stopMediaSweep = startMediaSweeper(db, mediaDir);
+
     return {
       uid: account.uid,
       sourceToken: account.sourceToken,
@@ -96,7 +100,10 @@ async function assembleSpace(
       sourceStates,
       webhookRoutes,
       mediaDir,
-      stop: () => assembly.stop(),
+      stop: async () => {
+        stopMediaSweep();
+        await assembly.stop();
+      },
     };
   } catch (err) {
     // 半装机不留句柄（评审修复）：装配失败关库再抛——ensure 的调用方自会重试装配

@@ -10,7 +10,12 @@ import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helper
 import { executeChanges } from "../executor/executor";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
-import { storeImageBytes, sweepExpiredMedia, mediaFilePath } from "../application/media";
+import {
+  startMediaSweeper,
+  storeImageBytes,
+  sweepExpiredMedia,
+  mediaFilePath,
+} from "../application/media";
 import { makeAgentTools } from "../agent0/tools";
 import { FakeLlm } from "./helpers/fakeLlm";
 import type * as downloaderModule from "../shared/imageDownloader";
@@ -530,5 +535,97 @@ describe("agent0 取图：本地优先 + 成功持久化（009 FR-008）", () =>
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.mediaId).toBeNull();
+  });
+});
+
+describe("引用续命 + 每小时清理（009 刀 4）", () => {
+  /** 造一条原文（引文必须逐字摘自原文）。 */
+  function seedRaw(db: ReturnType<typeof makeDb>, content: string) {
+    return repo.insertRawInput(db, {
+      content,
+      sourceType: "paste",
+      sourceIdentity: { sourceLabel: "s" },
+      receivedAt: "2026-10-20T10:00:00",
+      eventTime: null,
+    });
+  }
+
+  /** 用 create_item 引用某张图（围栏的两道硬要求：引文逐字 + 多模态标签）。 */
+  function cite(db: ReturnType<typeof makeDb>, placeholder: string) {
+    return executeChanges(
+      db,
+      seedRaw(db, `看 ${placeholder} 这张`),
+      [
+        {
+          action: "create_item",
+          elements: [{ label: "name", text: "看图", quotes: [placeholder] }],
+          tags: ["多模态/图片"],
+          doubtNote: null,
+        },
+      ],
+      { actor: "agent0", model: "test" },
+    );
+  }
+
+  it("引文含该图占位 → 抬到引用时刻 + 90 天（已过期也能救回）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const stored = await storeImageBytes(db, dir, await smallJpeg());
+    // 先模拟「早就过期」/「被缩到很短」
+    db.$client
+      .prepare("UPDATE media SET expires_at=? WHERE id=?")
+      .run("2020-01-01T00:00:00", stored.id);
+    const placeholder = `[图片](/api/media/${stored.id})`;
+
+    const before = citedMediaExpiry(nowWallClock());
+    const { citedMediaIds } = cite(db, placeholder);
+    const after = citedMediaExpiry(nowWallClock());
+
+    expect(citedMediaIds.has(stored.id)).toBe(true);
+    const got = repo.getMedia(db, stored.id)?.expiresAt ?? "";
+    expect(got >= before && got <= after).toBe(true);
+  });
+
+  it("到期时间已更晚 → 引用不回退（日期只增不减）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const stored = await storeImageBytes(db, dir, await smallJpeg());
+    db.$client
+      .prepare("UPDATE media SET expires_at=? WHERE id=?")
+      .run("2099-01-01T00:00:00", stored.id);
+
+    cite(db, `[图片](/api/media/${stored.id})`);
+
+    expect(repo.getMedia(db, stored.id)?.expiresAt).toBe("2099-01-01T00:00:00");
+  });
+
+  it("清理器：启动即清一次 + 定时回调也清；停掉后不再跑", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    /** 造一张已到期的图（内容各不相同——否则 sha256 去重会复用同一行）。 */
+    const seedExpired = async (): Promise<string> => {
+      const stored = await storeImageBytes(db, dir, await smallJpeg());
+      db.$client
+        .prepare("UPDATE media SET expires_at=? WHERE id=?")
+        .run("2020-01-01T00:00:00", stored.id);
+      return stored.id;
+    };
+
+    const first = await seedExpired();
+    const spy = vi.spyOn(globalThis, "setInterval");
+    const stop = startMediaSweeper(db, dir);
+    expect(repo.getMedia(db, first)).toBeNull(); // 启动即清
+
+    const tick = spy.mock.calls[0]?.[0];
+    expect(typeof tick).toBe("function");
+    const second = await seedExpired();
+    tick?.();
+    expect(repo.getMedia(db, second)).toBeNull(); // 定时那次也清
+
+    stop();
+    spy.mockRestore();
+    const third = await seedExpired();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(repo.getMedia(db, third)).not.toBeNull(); // 停掉后不再清
   });
 });

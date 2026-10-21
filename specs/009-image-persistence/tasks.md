@@ -131,15 +131,15 @@
 
 ### Tests（先写并确认 FAIL）
 
-- [ ] T401 [P] [S4] `apps/server/src/test/media.test.ts`：引用抬升（`max(当前, 引用时刻 + 90 天)`）；晚到引用可救回被缩到 3 天的图；**同一图多次引用取最后一次**（日期只增不减）
-- [ ] T402 [P] [S4] `apps/server/src/test/media.test.ts`：读过未引用 → `min(原值, readAt+3d)`（**原值已 <3 天时不变**）；行已删则忽略
-- [ ] T403 [P] [S4] `apps/server/src/test/digest.test.ts`：digest 记录读取集合 → 结束后只对未引用项缩短
+- [X] T401 [P] [S4] `apps/server/src/test/media.test.ts`：引用抬升（`max(当前, 引用时刻 + 90 天)`）；晚到引用可救回被缩到 3 天的图；**同一图多次引用取最后一次**（日期只增不减）
+- [X] T402 [P] [S4] `apps/server/src/test/media.test.ts`：读过未引用 → `min(原值, readAt+3d)`（**原值已 <3 天时不变**）；行已删则忽略
+- [X] T403 [P] [S4] `apps/server/src/test/digest.test.ts`：digest 记录读取集合 → 结束后只对未引用项缩短
 
 ### 实现
 
-- [ ] T404 [S4] `apps/server/src/executor/executor.ts`：`attachElementEvidence` 写 quote 时用 `textCitesMedia` 判定 → 命中即 `updateMediaExpiry(max(当前, 引用时刻 + 90 天))`；`executeChanges` 返回 `citedMediaIds`。⚠️ **执行时刻由执行器取 `nowWallClock()`**（不是 `createdAt`）——晚到引用才有意义
-- [ ] T405 [S4] `apps/server/src/agent0/digest.ts`：`fetch_image` 成功时记录 media id（本批集合）；`executeChanges` 之后对「读过且不在 citedMediaIds」的项 `updateMediaExpiry(min(原值, readAt+3d))`；更新 0 行静默跳过
-- [ ] T406 [S4] `apps/server/src/index.ts`：清理器改为启动一次 + 每小时 `setInterval`（`unref()`，不阻止进程退出）；关停时 clear
+- [X] T404 [S4] `apps/server/src/executor/executor.ts`：`attachElementEvidence` 写 quote 时用 `textCitesMedia` 判定 → 命中即 `updateMediaExpiry(max(当前, 引用时刻 + 90 天))`；`executeChanges` 返回 `citedMediaIds`。⚠️ **执行时刻由执行器取 `nowWallClock()`**（不是 `createdAt`）——晚到引用才有意义
+- [X] T405 [S4] `apps/server/src/agent0/digest.ts`：`fetch_image` 成功时记录 media id（本批集合）；`executeChanges` 之后对「读过且不在 citedMediaIds」的项 `updateMediaExpiry(min(原值, readAt+3d))`；更新 0 行静默跳过
+- [X] T406 [S4] `apps/server/src/index.ts`：清理器改为启动一次 + 每小时 `setInterval`（`unref()`，不阻止进程退出）；关停时 clear
 
 **Checkpoint（commit 回滚点）**: `npm run check` 绿；TTL 全规则有断言。
 

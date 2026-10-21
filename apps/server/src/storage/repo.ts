@@ -730,6 +730,14 @@ export function getMediaByOriginUrl(db: DbOrTx, originUrl: string): MediaRefRow 
   return { id: row.id, mime: row.mime, sizeBytes: row.sizeBytes, expiresAt: row.expiresAt };
 }
 
+/** 占位 URL → 媒体 id（本地 `/api/media/<id>` 直取；外链按 originUrl 反查）。未缓存 = null。
+ *  判据单一出处：证据引用判定（执行器）与前端映射都按这一条认「这个占位指的是哪张图」。 */
+export function resolveMediaId(db: DbOrTx, url: string): string | null {
+  const localId = mediaIdFromUrl(url);
+  if (localId !== null) return getMedia(db, localId) === null ? null : localId;
+  return getMediaByOriginUrl(db, url)?.id ?? null;
+}
+
 /** 列出若干 sha256 的媒体行（详情接口一次查全）。 */
 function getMediaByIds(db: DbOrTx, ids: string[]): MediaRefRow[] {
   if (ids.length === 0) return [];
