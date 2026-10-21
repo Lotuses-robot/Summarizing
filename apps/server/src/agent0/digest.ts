@@ -248,6 +248,7 @@ export function retryRawInput(
  *  这里再兜一层防「兜底自身抛错」变 unhandled rejection；from 标记发射来源供排障。
  *  **图片进站缓存也挂在这里**（009）：所有进站路径（HTTP/信源/对话/兜底录入/重试）都必须经过本函数，
  *  放在这一处才不会「某条路悄悄不缓存」（曾只有 ingestBatch 调，重试与对话路径漏掉）。
+ *  **顺序是先缓存、后消化**：执行器写证据时要按占位查到 media 行，行没落库就抬不了 90 天。
  *  mediaDir 必填（同 ingestBatch 的理由）；无媒体目录的场景显式传空串。
  *  log 可选注入结构化日志器（HTTP 入口传 fastify 的 req.log 保留请求上下文），缺省写 stderr。
  *  返回 digesting 置位结果——"digesting"（成功）| "pending"（置位失败但照常发射，七轮评审降级）；
@@ -262,8 +263,6 @@ export function kickDigest(
   mediaDir: string,
   log?: (msg: string) => void,
 ): "digesting" | "pending" {
-  // 图片缓存与消化并行、互不阻塞（009）：抓图失败绝不影响回执与消化
-  if (mediaDir !== "") cacheIngestImages(db, mediaDir, raw.id);
   // 发射即置「消化中」——尽力而为：库异常时滞留 pending 照常发射（stderr 留痕；七轮评审），
   // 置位结果如实返回供回执（specs/004 八轮评审：不报与库不符的快照）。
   let bumped: "digesting" | "pending" = "pending";
@@ -273,9 +272,17 @@ export function kickDigest(
   } catch (stateErr) {
     bestEffortLog(`[digest] digesting 置位失败（raw=${raw.id}，尽力而为）：${errText(stateErr)}`);
   }
-  void digestRawInput(db, llm, tools, modelTag, raw).catch((err) =>
-    (log ?? bestEffortLog)(`[digest] 兜底泄漏（${from}）：${errText(err)}`),
-  );
+  /** 真正发射消化（缓存跑完之后）。 */
+  const fire = (): void => {
+    void digestRawInput(db, llm, tools, modelTag, raw).catch((err) =>
+      (log ?? bestEffortLog)(`[digest] 兜底泄漏（${from}）：${errText(err)}`),
+    );
+  };
+  // **先缓存、再消化**（009）：执行器写证据时按占位查 media 行，行还没落库就抬不了 90 天
+  // （慢下载必踩）。串行还省掉一次重复下载——缓存落地后 agent0 的 fetch_image 直接本地命中。
+  // 两者都在后台，进站回执照旧立即返回（信源等的是 202）。
+  if (mediaDir === "") fire();
+  else void cacheIngestImages(db, mediaDir, raw.id).then(fire);
   return bumped;
 }
 

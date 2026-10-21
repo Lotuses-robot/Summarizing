@@ -18,6 +18,7 @@ import {
 } from "../application/media";
 import { makeAgentTools } from "../agent0/tools";
 import { retryRawInput } from "../agent0/digest";
+import { cacheIngestImages } from "../application/mediaIngest";
 import { FakeLlm } from "./helpers/fakeLlm";
 import type * as downloaderModule from "../shared/imageDownloader";
 import {
@@ -759,5 +760,42 @@ describe("重试与对话路径也缓存图片（009 修复：缓存挂在 kickD
     await vi.waitFor(() =>
       expect(repo.getMediaByOriginUrl(db, "https://pic.invalid/retry.png")).not.toBeNull(),
     );
+  });
+});
+
+describe("进站缓存的重试（009：只对瞬态错误重试，最多 3 次）", () => {
+  it("瞬态错误（连接中断）→ 重试后成功", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const raw = repo.insertRawInput(db, {
+      content: "看 [图片](https://pic.invalid/retry-ok.png)",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "群" },
+      receivedAt: "2026-10-21T10:00:00",
+      eventTime: null,
+    });
+    const jpeg = await smallJpeg();
+    downloadStub
+      .mockRejectedValueOnce(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }))
+      .mockResolvedValueOnce({ bytes: jpeg, contentType: "image/jpeg" });
+    await cacheIngestImages(db, dir, raw.id);
+    expect(downloadStub).toHaveBeenCalledTimes(2);
+    expect(repo.getMediaByOriginUrl(db, "https://pic.invalid/retry-ok.png")).not.toBeNull();
+  });
+
+  it("非瞬态错误（HTTP 404）→ 不重试，只试一次", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const raw = repo.insertRawInput(db, {
+      content: "看 [图片](https://pic.invalid/gone.png)",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "群" },
+      receivedAt: "2026-10-21T10:00:00",
+      eventTime: null,
+    });
+    downloadStub.mockRejectedValueOnce(new Error("取图失败：HTTP 404"));
+    await cacheIngestImages(db, dir, raw.id);
+    expect(downloadStub).toHaveBeenCalledTimes(1);
+    expect(repo.getMediaByOriginUrl(db, "https://pic.invalid/gone.png")).toBeNull();
   });
 });

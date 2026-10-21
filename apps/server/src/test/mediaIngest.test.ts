@@ -45,8 +45,7 @@ describe("进站图片缓存", () => {
     });
     // 再造一条引用同一 URL 的批次 → 应直接跳过（库里已有 origin_url 行）
     const rawId = seedRaw(db, "看 [图片](https://pic.example/a.png) 这张");
-    cacheIngestImages(db, dir, rawId);
-    await new Promise((r) => setTimeout(r, 80));
+    await cacheIngestImages(db, dir, rawId);
     // 仍是那一行（没有重复插入）
     const row = repo.getMediaByOriginUrl(db, "https://pic.example/a.png");
     expect(row?.id).toBe(stored.id);
@@ -58,8 +57,7 @@ describe("进站图片缓存", () => {
     const original = "看 [图片](https://pic.example/a.png) 截止 10 月 1 日";
     const rawId = seedRaw(db, original);
     // 不下载成功也没关系——这里只断言原文不被缓存过程改写
-    cacheIngestImages(db, dir, rawId);
-    await new Promise((r) => setTimeout(r, 60));
+    await cacheIngestImages(db, dir, rawId);
     expect(repo.getRawInput(db, rawId)?.content).toBe(original);
   });
 
@@ -69,8 +67,7 @@ describe("进站图片缓存", () => {
     const bytes = await smallPng();
     const stored = await storeImageBytes(db, dir, bytes); // 无 originUrl = 上传图
     const rawId = seedRaw(db, `看 [图片](/api/media/${stored.id}) 这张`);
-    cacheIngestImages(db, dir, rawId);
-    await new Promise((r) => setTimeout(r, 60));
+    await cacheIngestImages(db, dir, rawId);
     // 没有多出任何行（[图片](/api/media/...) 不是 http 开头，被过滤）
     expect(db.$client.prepare("SELECT COUNT(*) c FROM media").get()).toEqual({ c: 1 });
   });
@@ -78,10 +75,9 @@ describe("进站图片缓存", () => {
   it("批次不存在 / 无图片占位 → 静默返回，不抛", async () => {
     const db = makeDb(":memory:");
     const dir = makeDir();
-    expect(() => cacheIngestImages(db, dir, "no-such-raw")).not.toThrow();
+    await expect(cacheIngestImages(db, dir, "no-such-raw")).resolves.toBeUndefined();
     const rawId = seedRaw(db, "纯文字，没有图");
-    expect(() => cacheIngestImages(db, dir, rawId)).not.toThrow();
-    await new Promise((r) => setTimeout(r, 40));
+    await expect(cacheIngestImages(db, dir, rawId)).resolves.toBeUndefined();
     expect(db.$client.prepare("SELECT COUNT(*) c FROM media").get()).toEqual({ c: 0 });
   });
 
