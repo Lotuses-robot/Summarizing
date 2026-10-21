@@ -392,9 +392,14 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     const holder: { ctx: SourceContext | null } = { ctx: null };
     const flappy: SourceAdapter = {
       name: "flappy",
+      activity: () => [
+        { key: "event", label: "收到" },
+        { key: "ingest", label: "入库" },
+      ],
       register(ctx, router) {
         holder.ctx = ctx;
         router.post("/emit", async (_req, reply) => {
+          ctx.markActivity("event"); // 适配器自己的观测口径（core 不再替它猜）
           const result = ctx.ingest({
             content: "恢复测试",
             sourceType: "flappy",
@@ -421,8 +426,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
         state: z.string(),
         lastError: z.string().optional(),
         lastErrorAt: z.string().optional(),
-        lastEventAt: z.string().optional(),
-        lastIngestAt: z.string().optional(),
+        activity: z.array(z.object({ label: z.string(), at: z.string().optional() })),
       })
       .array()
       .parse(list.json())
@@ -430,9 +434,9 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     if (!entry) throw new Error("GET /api/sources 缺 flappy");
     expect(entry.state).toBe("ok"); // ingest 成功翻篇
     expect(entry.lastError).toContain("抖了一下"); // 最近出错仍可查
-    // 「最近活动」（2026-10-21）：命中 webhook + 成功入库各有时间戳；出错也有时间戳
-    expect(entry.lastEventAt).toBeDefined();
-    expect(entry.lastIngestAt).toBeDefined();
+    // 「最近活动」（2026-10-21）：信号由适配器声明、顺序即声明顺序；两个时刻都已打点
+    expect(entry.activity.map((a) => a.label)).toEqual(["收到", "入库"]);
+    expect(entry.activity.every((a) => a.at !== undefined)).toBe(true);
     expect(entry.lastErrorAt).toBeDefined();
   });
 });

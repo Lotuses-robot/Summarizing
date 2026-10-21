@@ -32,9 +32,15 @@ function stubApi(
     writeFail?: boolean;
     settingsSchema?: unknown[];
     hookPath?: string | null;
-    lastEventAt?: string;
-    lastIngestAt?: string;
+    /** 「收到」信号的时刻（喂给默认 activity 声明）。 */
+    eventAt?: string;
+    /** 「入库」信号的时刻。 */
+    ingestAt?: string;
     state?: "ok" | "error";
+    /** 覆盖活动信号声明（默认模拟 nc：收到 + 入库）。 */
+    activity?: { label: string; at?: string }[];
+    /** 接入引导（适配器声明；默认模拟 nc 的引导文案）。 */
+    guide?: string;
   } = {},
 ): {
   writes: { url: string; method: string; body: unknown }[];
@@ -60,8 +66,13 @@ function stubApi(
               name: "nc",
               state,
               lastError: state === "error" ? "封批失败（群 123）" : undefined,
-              lastEventAt: opts.lastEventAt,
-              lastIngestAt: opts.lastIngestAt,
+              // 活动信号由适配器声明（2026-10-21）：前端只按 label 渲染，不认识含义。
+              // 未给时刻 = 该信号「从未发生」（JSON 里 at 缺席）。
+              activity: opts.activity ?? [
+                { label: "收到", at: opts.eventAt },
+                { label: "入库", at: opts.ingestAt },
+              ],
+              guide: opts.guide ?? "填进 nc 的网络配置 → HTTP 服务器",
               settings: opts.settingsSchema ?? [
                 {
                   key: "groups",
@@ -251,27 +262,40 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
     expect(screen.queryByText("接入地址")).not.toBeInTheDocument();
   });
 
-  it("卡头 chip 显示「收到 · 入库」相对时间（取代原「正常」）", async () => {
-    stubApi({}, { state: "ok", lastEventAt: beijingAgo(5), lastIngestAt: beijingAgo(120) });
+  it("卡头 chip 按适配器声明的顺序渲染「收到 · 入库」相对时间", async () => {
+    stubApi({}, { state: "ok", eventAt: beijingAgo(5), ingestAt: beijingAgo(120) });
     renderSection();
     expect(await screen.findByText("收到 5 分钟前 · 入库 2 小时前")).toBeInTheDocument();
   });
 
-  it("从未收到过：卡头写「从未收到 · 从未入库」，不编造时间", async () => {
+  it("从未有过活动：按声明逐个写「从未<label>」，不编造时间", async () => {
     stubApi({}, { state: "ok" });
     renderSection();
     expect(await screen.findByText("从未收到 · 从未入库")).toBeInTheDocument();
   });
 
-  it("无 webhook 的源（hookPath=null）：卡头只有「入库」", async () => {
-    stubApi({}, { state: "ok", hookPath: null, lastIngestAt: beijingAgo(1) });
+  it("无 webhook 的源：信号由适配器决定（这里只声明「入库」）", async () => {
+    stubApi({}, { state: "ok", hookPath: null, activity: [{ label: "入库", at: beijingAgo(1) }] });
     renderSection();
     expect(await screen.findByText(/^入库 (1 分钟前|刚刚)$/)).toBeInTheDocument();
     expect(screen.queryByText(/收到/)).not.toBeInTheDocument();
   });
 
+  it("适配器没声明任何活动信号 → 不渲染空 chip", async () => {
+    stubApi({}, { state: "ok", activity: [] });
+    renderSection();
+    await screen.findByText("nc");
+    expect(screen.queryByTitle(/：/)).not.toBeInTheDocument();
+  });
+
+  it("接入引导来自适配器（summary.guide），前端零硬编码", async () => {
+    stubApi({}, { state: "ok", guide: "把 webhook 指到本页地址" });
+    renderSection();
+    expect(await screen.findByText("把 webhook 指到本页地址")).toBeInTheDocument();
+  });
+
   it("出错态：卡头仍是「最近出错」，不显示活动时间", async () => {
-    stubApi({}, { state: "error", lastEventAt: beijingAgo(5), lastIngestAt: beijingAgo(120) });
+    stubApi({}, { state: "error", eventAt: beijingAgo(5), ingestAt: beijingAgo(120) });
     renderSection();
     expect(await screen.findByText("最近出错")).toBeInTheDocument();
     expect(screen.queryByText(/^收到 /)).not.toBeInTheDocument();

@@ -31,9 +31,6 @@ export interface WebhookRoute {
   /** 以 / 开头（如 "/event"）——实际可达 = `/hook/<账户令牌>/<源名><path>`。 */
   path: string;
   handler: SourceRouteHandler;
-  /** 给卡片文案用的动态段名（如 nc 的 ":group_id"）——**只用于展示**（前端把段名替换成实参值）；
-   *  网关匹配恒走字面 `path`（无参段）。缺席 = 无动态段。 */
-  pathHint?: string;
 }
 
 /** 空间侧依赖（装配一个账户的信源所需的一切；db/llmRef 都是**该空间**的）。 */
@@ -50,8 +47,7 @@ export interface SpaceDeps {
 
 /** webhook 登记口：把适配器的 post/get/put/delete 收进本空间处理器表（附源名——网关按「源名+方法+路径」分发）。
  *  路径在**登记处**校验形状（纯字面段、以 `/` 开头——types.ts 已记录参数段边界）：违规走 `reportError`
- *  响亮落地（与设置声明校验同姿势）——静默收下一个永不匹配的路径 = 线上「这个源收不到消息」而无任何日志。
- *  `opts.pathHint` 仅供卡片文案展示（网关匹配恒走字面 `path`）。 */
+ *  响亮落地（与设置声明校验同姿势）——静默收下一个永不匹配的路径 = 线上「这个源收不到消息」而无任何日志。 */
 function makeSourceRouter(
   routes: WebhookRoute[],
   source: string,
@@ -62,18 +58,12 @@ function makeSourceRouter(
   /** 造某方法的登记函数（源名/收集表/报错口在闭包）；违规路径不落表、走 reportInvalid 响亮落地。 */
   const record =
     (method: WebhookRoute["method"]) =>
-    (path: string, handler: WebhookRoute["handler"], opts?: { pathHint?: string }): void => {
+    (path: string, handler: WebhookRoute["handler"]): void => {
       if (!LEGAL_PATH.test(path)) {
         reportInvalid(`webhook 路径不合法（须为以 / 开头的纯字面段）：${path}`);
         return;
       }
-      routes.push({
-        source,
-        method,
-        path,
-        handler,
-        ...(opts?.pathHint === undefined ? {} : { pathHint: opts.pathHint }),
-      });
+      routes.push({ source, method, path, handler });
     };
   return {
     post: record("POST"),
@@ -92,6 +82,7 @@ function makeSourceContext(
   name: string,
   cleanups: (() => void | Promise<void>)[],
   state: SourceState,
+  declaredActivityKeys: ReadonlySet<string>,
 ): SourceContext {
   /** 统一日志前缀（信源不再自己写 stderr；core 一处收集/过滤）。 */
   const log =
@@ -115,7 +106,7 @@ function makeSourceContext(
         );
         // 落地成功即恢复正常（reportError 置的 error 不能粘滞——「最近出错」语义要能翻篇）
         state.state = "ok";
-        state.lastIngestAt = nowWallClock();
+        state.activity["ingest"] = nowWallClock(); // 保留键：成功落库是 core 自己的观测
         return { ok: true, id: raw.id };
       } catch (err) {
         // 不抛（D-88）：信源要能感知「落地失败」，自己决定重试/丢弃；抛出去只会污染主进程
@@ -158,6 +149,16 @@ function makeSourceContext(
         `[source:${name}] reportError${opts?.fatal === true ? "（致命）" : ""}：${reason}\n`,
       );
     },
+    markActivity(key: string): void {
+      // 只认声明过的键：拼错的 key 不会被悄悄种进状态（下次读不到、也无从排查）——留痕后丢弃
+      if (!declaredActivityKeys.has(key)) {
+        process.stderr.write(
+          `[source:${name}] 打点了未声明的活动信号 "${key}"（先在 activity() 里声明），已忽略\n`,
+        );
+        return;
+      }
+      state.activity[key] = nowWallClock();
+    },
   };
 }
 
@@ -181,13 +182,21 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
   const kept: Array<{ adapter: SourceAdapter; state: SourceState }> = [];
   for (const adapter of adapters) {
     if (states.has(adapter.name)) continue; // 防重复（P7）
-    // 最近进站时刻从库里恢复（重启后「最近活动」不从零开始）；最近出错不跨重启保留（那是本次运行的观测）
+    const signals = adapter.activity?.() ?? [];
+    const declaredKeys = new Set(signals.map((s) => s.key));
+    // 保留键 "ingest"：成功落库由 core 打点，重启后从库里恢复（「最近活动」不从零开始）。
+    // 其余信号是本次进程运行期的观测——重启重新起算（01§4.19 已写明范围）。
+    const restored = declaredKeys.has("ingest")
+      ? repo.latestRawAtForSourceType(deps.db, adapter.name)
+      : null;
     const state: SourceState = {
       state: "ok",
-      lastIngestAt: repo.latestRawAtForSourceType(deps.db, adapter.name) ?? undefined,
+      activity: restored === null ? {} : { ingest: restored },
+      signals,
+      ...(adapter.guide === undefined ? {} : { guide: adapter.guide() }),
     };
     const cleanups: (() => void | Promise<void>)[] = [];
-    const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state);
+    const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state, declaredKeys);
     adapter.register(
       ctx,
       makeSourceRouter(deps.webhookRoutes, adapter.name, (message) =>

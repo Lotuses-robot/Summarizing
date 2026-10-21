@@ -60,8 +60,12 @@ export function registerSourceRoutes(app: FastifyInstance): void {
         state: states.get(name)?.state ?? "ok",
         lastError: states.get(name)?.lastError,
         lastErrorAt: states.get(name)?.lastErrorAt,
-        lastEventAt: states.get(name)?.lastEventAt,
-        lastIngestAt: states.get(name)?.lastIngestAt,
+        // 活动信号：声明与时刻全部来自适配器，core 只搬运（D-115）
+        activity: (states.get(name)?.signals ?? []).map((s) => ({
+          label: s.label,
+          at: states.get(name)?.activity[s.key],
+        })),
+        guide: states.get(name)?.guide,
         settings: parseSchema(
           name,
           repo.getSourceSetting(req.space.db, name, repo.SOURCE_SCHEMA_KEY),

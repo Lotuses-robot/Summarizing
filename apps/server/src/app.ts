@@ -23,7 +23,6 @@ import { registerUsageRoutes } from "./routes/usage";
 import { registerMediaRoutes } from "./routes/media";
 import { registerDashboardRoutes } from "./routes/dashboard";
 import { MEDIA_MAX_INPUT_BYTES } from "./shared/mediaTtl";
-import { nowWallClock } from "./shared/time";
 import type { SpaceHub } from "./spaces";
 
 // 装配 HTTP 应用（006 多用户重构）：
@@ -73,9 +72,6 @@ function registerWebhookGateway(app: FastifyInstance, hub: SpaceHub): void {
         (r) => r.source === parsed.data.source && r.method === req.method && r.path === path,
       );
       if (route === undefined) return reply.code(404).send({ error: "Not Found" });
-      // 命中已登记路由 = 这个源在推数据（哪怕随后处理失败）——「最近活动」的主信号，仅 HTTP 源有
-      const sourceState = space.sourceStates.get(parsed.data.source);
-      if (sourceState !== undefined) sourceState.lastEventAt = nowWallClock();
       return route.handler(req, reply);
     },
   });

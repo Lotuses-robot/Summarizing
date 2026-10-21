@@ -18,10 +18,22 @@ export interface SourceState {
   lastError?: string;
   /** 最近一次出错时刻（北京墙钟）——让「最近出错」能回答「多久以前」。 */
   lastErrorAt?: string;
-  /** 最近一次命中该源 webhook 路由的请求时刻（仅 HTTP 源有）——源还在推，说明它活着。 */
-  lastEventAt?: string;
-  /** 最近一次成功进站时刻（所有源都有）——「最近活动」的主信号。 */
-  lastIngestAt?: string;
+  /** 活动信号时刻表：key → 北京墙钟。**键与含义由适配器 `activity()` 声明**——
+   *  core 只按声明取值与展示，不认识任何具体 key（D-115）。 */
+  activity: Record<string, string>;
+  /** 该源声明的活动信号（装配期从 `adapter.activity()` 抄一份，`GET /api/sources` 原样吐给前端）。 */
+  signals: ActivitySignal[];
+  /** 该源声明的接入引导（装配期从 `adapter.guide()` 抄；缺席 = 不显示引导行）。 */
+  guide?: string;
+}
+
+/** 「最近活动」信号声明（纯数据）：本源会在什么时候更新活动时刻。
+ *  - `key`：core 的存储键（适配器自定；保留键 `"ingest"` 由 core 在成功落库时自动打点、
+ *    并在重启时从库恢复——写进声明列表才会展示）。
+ *  - `label`：给人看的短名（如「收到」「入库」）；卡片按**声明顺序**展示。 */
+export interface ActivitySignal {
+  key: string;
+  label: string;
 }
 
 // 设置项声明（SettingField 及其 schema）住在 packages/shared——跨边界契约（D-52 / D-89 上移）：
@@ -52,6 +64,10 @@ export interface SourceContext {
   setInterval(fn: () => void, ms: number): void;
   /** 错误出口：无沙箱，信源不该靠抛污染主进程——报错给 core，core 记信源状态（D-88）。 */
   reportError(err: unknown, opts?: { fatal?: boolean }): void;
+  /** 打点一个活动信号（key 必须是 `activity()` 声明过的键；未声明的 key core 忽略并留痕）。
+   *  只记「这个 key 最近一次发生」的时刻——何时算发生，是适配器自己的知识
+   *  （nc 在 webhook 命中时打 `"event"`；保留键 `"ingest"` 由 core 在成功落库时自动打）。 */
+  markActivity(key: string): void;
 }
 
 /** 信源 handler 的请求类型：**无 `space`**（webhook 网关在受保护作用域之外）——读了直接编译错，
@@ -68,10 +84,10 @@ export type SourceRouteHandler = (req: SourceRouteRequest, reply: FastifyReply) 
  *  收窄理由：①Fastify listen 后不能再注册路由 → 运行中新账户必须走网关；②信源不得挂全局路由
  *  （多用户下=鉴权旁路，直接排除）。拉型源（SSE 等出站客户端）不用它——走 `start()`。 */
 export interface SourceRouter {
-  post(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
-  get(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
-  put(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
-  delete(path: string, handler: SourceRouteHandler, opts?: { pathHint?: string }): void;
+  post(path: string, handler: SourceRouteHandler): void;
+  get(path: string, handler: SourceRouteHandler): void;
+  put(path: string, handler: SourceRouteHandler): void;
+  delete(path: string, handler: SourceRouteHandler): void;
 }
 
 /** 信源适配器：一个源一个模块，注册表加一个**工厂**（每空间各造一份实例——私有态天然隔离）。 */
@@ -88,4 +104,12 @@ export interface SourceAdapter {
   stop?(): Promise<void>;
   /** 声明设置项（纯数据）。缺席 = 本信源无设置。core 落库 `__schema__` 并随 `GET /api/sources` 吐给前端。 */
   settings?(): SettingField[];
+  /** 接入引导（纯数据，可选）：告诉用户在**本信源自己的**那个系统里怎么把 webhook 指过来
+   *  （如 nc 的「网络配置 → HTTP 服务器 → 反向 WebSocket / HTTP 上报」）。缺席 = 不显示引导行。
+   *  ⚠️ 这是**源自己的知识**，写在适配器里——core 与前端只做展示，不解析内容（D-115）。 */
+  guide?(): string;
+  /** 声明「最近活动」信号（纯数据，可选）：本源会在哪些时机更新活动时刻、各叫什么。
+   *  只声明 key + 短名，**不声明「这些时刻怎么来的」**——打点由适配器自己调 `ctx.markActivity`，
+   *  core 不认识任何具体 key（保留键 `"ingest"` 由 core 在成功落库时自动打点并在重启时从库恢复）。 */
+  activity?(): ActivitySignal[];
 }

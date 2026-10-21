@@ -5,11 +5,6 @@ import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { fmtAgo, fmtFullTime } from "../../lib/time";
 import { Card, Row, StatusSlot, useStatus } from "./primitives";
-/** 每源的一句话接入引导（**源自己的知识**——怎么写进 nc 的 WebUI；未知源不显示，
- *  将来源多了可由适配器声明下发。用户 2026-10-03：引导是每个源自己的事）。 */
-const SOURCE_HINTS: Record<string, string> = {
-  nc: "填进 nc 的「网络配置 → HTTP 服务器 → 反向 WebSocket / HTTP 上报」，勾选「群消息」；再在下方白名单填群号。",
-};
 
 /** record 值判据：非 null、非数组的对象（键值地图形状）。 */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -27,23 +22,17 @@ function fullAt(iso: string | undefined): string {
   return iso === undefined ? "从未" : fmtFullTime(iso);
 }
 
-/** 卡头活动信号：HTTP 源「收到」在前（源还在推是更强的活信号），所有源都带「入库」。
- *  给的是事实而不是判断：安静多久由用户自己看。 */
+/** 卡头活动信号（2026-10-21 解耦）：**按适配器声明的顺序**渲染，core/前端都不认识具体信号——
+ *  「收到」「入库」是 nc 自己起的名字，加新源只改适配器。给的是事实，安静多久由用户自己看。 */
 function activityLabel(summary: SourceSummary): string {
-  const ingest =
-    summary.lastIngestAt === undefined ? "从未入库" : `入库 ${agoText(summary.lastIngestAt)}`;
-  if (summary.hookPath === null) return ingest;
-  const received =
-    summary.lastEventAt === undefined ? "从未收到" : `收到 ${agoText(summary.lastEventAt)}`;
-  return `${received} · ${ingest}`;
+  return summary.activity
+    .map((a) => (a.at === undefined ? `从未${a.label}` : `${a.label} ${agoText(a.at)}`))
+    .join(" · ");
 }
 
-/** 卡头活动信号的悬浮全文（精确时刻；无 webhook 的源没有「收到」一说）。 */
+/** 卡头活动信号的悬浮全文（精确时刻）。 */
 function activityTitle(summary: SourceSummary): string {
-  const parts: string[] = [];
-  if (summary.hookPath !== null) parts.push(`收到：${fullAt(summary.lastEventAt)}`);
-  parts.push(`入库：${fullAt(summary.lastIngestAt)}`);
-  return parts.join(" · ");
+  return summary.activity.map((a) => `${a.label}：${fullAt(a.at)}`).join(" · ");
 }
 
 /** 单字段输入（判别联合五型分支渲染——record 由调用方分流给 RecordEditor；前端不含信源专属知识，全按 schema 走）。
@@ -336,7 +325,7 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
       <span className="chip shrink-0 border-danger/50 text-danger" title={summary.lastError ?? ""}>
         最近出错
       </span>
-    ) : (
+    ) : summary.activity.length === 0 ? null : (
       <span className="chip shrink-0" title={activityTitle(summary)}>
         {activityLabel(summary)}
       </span>
@@ -360,9 +349,9 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
           : undefined
       }
     >
-      {/* 接入地址 + 该源自己的引导（hookPath 由后端算好——URL 形状是源的知识，前端零拼接） */}
+      {/* 接入地址 + 该源自己的引导（hookPath 与 guide 都由后端算好/由适配器声明——前端零拼接、零硬编码） */}
       {summary.hookPath !== null && (
-        <Row label="接入地址" description={SOURCE_HINTS[summary.name]} stacked>
+        <Row label="接入地址" description={summary.guide} stacked>
           <div className="flex flex-wrap items-center gap-2">
             <code className="min-w-0 break-all rounded-md border border-line bg-canvas px-2 py-1 text-xs">
               {window.location.origin}

@@ -1,4 +1,10 @@
-import type { SettingField, SourceAdapter, SourceContext, SourceRouter } from "../types";
+import type {
+  ActivitySignal,
+  SettingField,
+  SourceAdapter,
+  SourceContext,
+  SourceRouter,
+} from "../types";
 import { wallClockFromUnix } from "../../shared/time";
 import {
   assembleBatch,
@@ -189,6 +195,9 @@ export function makeNcAdapter(): SourceAdapter {
       // 快收：白名单过滤 → 规范化 → 入缓冲 → 204（nc 规范：无需响应体）
       // 卡片文案：动态段名（实测 nc 上报路径形如 /event），实际可达地址由 core 按账户令牌拼
       router.post("/event", async (req, reply) => {
+        // 推到门口就算「源还活着」——哪怕随后被白名单丢弃 / 形状不符（这是本源的观测口径，
+        // core 不认识；声明见下方 activity()）
+        ctx.markActivity("event");
         const parsed = NcEventSchema.safeParse(req.body);
         if (!parsed.success) return reply.code(204).send(); // 非消息/形状不符 → 静默丢
         const ev = parsed.data;
@@ -276,6 +285,19 @@ export function makeNcAdapter(): SourceAdapter {
           default: DEFAULT_WINDOW_MINUTES,
           description: "同一会话静默这么久就把这段时间的消息合并成一个批次",
         },
+      ];
+    },
+
+    guide(): string {
+      return "填进 nc 的「网络配置 → HTTP 服务器 → 反向 WebSocket / HTTP 上报」，勾选「群消息」；再在下方白名单填群号。";
+    },
+
+    activity(): ActivitySignal[] {
+      // 「收到」= 命中上报路径（本源的观测口径，见 register 里的 markActivity）；
+      // 「入库」= 保留键，由 core 在成功落库时打点、重启后从库恢复。
+      return [
+        { key: "event", label: "收到" },
+        { key: "ingest", label: "入库" },
       ];
     },
   };
