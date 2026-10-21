@@ -24,7 +24,7 @@
 ### 上传与校验
 
 - [X] T001 空 body / 零字节 / 截断图片（解码失败）/ content-type 与魔数不一致 / SVG / HEIC / 多帧图超限
-- [X] T002 边界：恰好 2 MiB、2 MiB+1、恰好 20 MiB、20 MiB+1、50MP、1×1 像素、EXIF 方向、**压到最低档仍 ≥2 MiB**
+- [X] T002 边界：恰好 500 KiB、500 KiB+1、恰好 20 MiB、20 MiB+1、50MP、1×1 像素、EXIF 方向、**压到最低档仍 >500 KiB**
 - [X] T003 重复内容（同 sha256 两次上传）/ 两个不同 URL 指向同一图片
 - [X] T004 未登录 / 他人账户 / 不存在 id / 非 hex id / 超长 id / 路径穿越字符 / 文件缺失但行在
 
@@ -43,14 +43,14 @@
 
 **Goal**: 通过 `POST /api/media` 上传 → 落盘 + 落行 → `GET /api/media/:id` 读回；agent0 的 `fetch_image` 能解析本地媒体（零网络）；清理器按 TTL 回收。前端尚未接线。
 
-**Independent Test**: curl 上传一张图 → 返回 id → GET 200 且字节一致；上传 >2 MiB 图 → 存储 ≤1.9 MiB；手工把 expiresAt 改成过去 → 清理器运行后文件与行消失且 stderr 留痕。
+**Independent Test**: curl 上传一张图 → 返回 id → GET 200 且字节一致；上传 >500 KiB 图 → 存储 ≤500 KiB；手工把 expiresAt 改成过去 → 清理器运行后文件与行消失且 stderr 留痕。
 
 ### Tests（先写并确认 FAIL）
 
 - [X] T101 [P] [S1] `apps/server/src/test/media.test.ts`：TTL 纯函数（0 / 100 KiB / 1 MiB / 2 MiB → 30/28.9/18.5/7 天；clamp 边界）
 - [X] T102 [P] [S1] `apps/server/src/test/media.test.ts`：`extractImageUrls` / `mediaIdFromUrl` 的脏形态（T005）
 - [X] T103 [P] [S1] `apps/server/src/test/media.test.ts`：上传校验矩阵（T001/T002：SVG、伪装 MIME、截断、超限）
-- [X] T104 [P] [S1] `apps/server/src/test/media.test.ts`：压缩（大 JPEG → ≤1.9 MiB；**多帧图 >2 MiB → 压缩后 ≤1.9 MiB 且提示动画被压缩**；HEIC 拒收；**最低档仍 ≥2 MiB 拒收**）
+- [X] T104 [P] [S1] `apps/server/src/test/media.test.ts`：压缩（大 JPEG → ≤500 KiB；**多帧图 >500 KiB → 压缩后 ≤500 KiB 且提示动画被压缩**；HEIC 拒收；**最低档仍 >500 KiB 拒收**）
 - [X] T105 [P] [S1] `apps/server/src/test/media.test.ts`：读取隔离（未登录 401 / 他人账户 404 / 坏 id 404 / 文件缺失 404）
 - [X] T106 [P] [S1] `apps/server/src/test/media.test.ts`：清理器（过期删文件+行、未过期不动、文件缺失不炸）
 
@@ -64,7 +64,7 @@
 - [X] T115 [S1] 新 `apps/server/src/shared/imageBytes.ts`：`ALLOWED_IMAGE_MIME` / `matchesMagic` / `sniffImageMime` / `mediaExt`（从 `agent0/fetchImage.ts` 抽出，原处改 import——单一出处）
 - [X] T116 [S1] 新 `apps/server/src/shared/mediaTtl.ts`：`MEDIA_COMPRESS_THRESHOLD` / `MEDIA_TARGET_BYTES` / `MEDIA_MAX_INPUT_BYTES` / `MEDIA_MAX_PIXELS` / `CITED_TTL_DAYS = 90` / `baseMediaTtlMs` / `addDaysWallClock` / `initialMediaExpiry` / `uncitedMediaExpiry` / `citedMediaExpiry`
 - [X] T117 [S1] 新 `apps/server/src/shared/mediaPlaceholders.ts`：`extractImageUrls` / `mediaIdFromUrl`（引用判定后续落在 `repo.resolveMediaId` / `repo.isMediaCited`）
-- [X] T118 [S1] 新 `apps/server/src/application/media.ts`：`storeImageBytes(db, mediaDir, bytes, { originUrl })`——校验 → 超限判定 → sharp 压缩（静图：质量阶梯 85→75→65→55，再降采样 2560→1920→1280，PNG 走调色板；**多帧图：先降帧率/丢帧，仍超则按静图档继续压，返回 `animationCompressed=true`**）→ **压到最低档仍 ≥2 MiB 则拒收** → sha256 → 落盘 → 落行（重复内容复用已有行，`expiresAt` 取较晚者）；失败抛人话错误
+- [X] T118 [S1] 新 `apps/server/src/application/media.ts`：`storeImageBytes(db, mediaDir, bytes, { originUrl })`——校验 → 超限判定 → sharp 压缩（静图：质量阶梯 85→75→65→55，再降采样 2560→1920→1280，PNG 走调色板；**多帧图：先降帧率/丢帧，仍超则按静图档继续压，返回 `animationCompressed=true`**）→ **压到最低档仍 >500 KiB 则拒收** → sha256 → 落盘 → 落行（重复内容复用已有行，`expiresAt` 取较晚者）；失败抛人话错误
 - [X] T119 [S1] `application/media.ts`：`sweepExpiredMedia(db, mediaDir)`——删文件+行，stderr 一次汇总（张数/字节）；文件缺失只删行并留痕
 - [X] T120 [S1] 新 `apps/server/src/routes/media.ts`：`POST /api/media`（认证；raw body 解析器只在该路由挂 `image/*`；`bodyLimit` 20 MiB；返回 `MediaUploadResponse`）
 - [X] T121 [S1] `routes/media.ts`：`GET /api/media/:id`（认证 + 本账户库命中 + 文件缺失 404；`Content-Type`、`Cache-Control: private, max-age=31536000, immutable`、`X-Content-Type-Options: nosniff`）
@@ -117,7 +117,7 @@
 
 - [X] T303 [S3] `apps/server/src/application/ingest.ts`：落档后异步扫描占位（`extractImageUrls`），并发上限 2；失败 stderr 留痕，不影响进站回执
 - [X] T304 [S3] 复用 `agent0/fetchImage.ts` 的 SSRF 五道闸做下载（抽 `downloadImageBytes(url)`，不编码 data URL）；成功后 `storeImageBytes`（originUrl 记原链接）
-- [X] T305 [S3] 下载上限对齐：进站缓存沿用 20 MiB 输入上限（压缩后 ≤1.9 MiB 入库）；超限/非图片/失败均留痕
+- [X] T305 [S3] 下载上限对齐：进站缓存沿用 20 MiB 输入上限（压缩后 ≤500 KiB 入库）；超限/非图片/失败均留痕
 
 **Checkpoint（commit 回滚点）**: `npm run check` 绿；QQ 图过期场景可演示（本地替身断链后仍可见）。
 

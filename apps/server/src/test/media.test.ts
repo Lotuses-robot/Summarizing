@@ -200,9 +200,9 @@ describe("上传校验", () => {
 });
 
 describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", () => {
-  it("≤2 MiB 原样入库（不重编码）", async () => {
+  it("≤500 KiB 原样入库（不重编码）", async () => {
     const db = makeDb(":memory:");
-    const bytes = await jpegAtLeast(300_000);
+    const bytes = await smallJpeg();
     const r = await storeImageBytes(db, tmpDir(), bytes);
     expect(r.sizeBytes).toBe(bytes.length);
     expect(r.mime).toBe("image/jpeg");
@@ -210,13 +210,18 @@ describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", (
     expect(r.alphaFlattened).toBe(false);
   });
 
-  it(">2 MiB 的静图压到 ≤1.9 MiB（agent0 读取闸稳过）", async () => {
+  it(">500 KiB 的静图压到 ≤500 KiB（agent0 读取闸稳过）", async () => {
     const db = makeDb(":memory:");
-    const bytes = await jpegAtLeast(3_000_000);
-    expect(bytes.length).toBeGreaterThan(2 * 1024 * 1024);
+    // 1600×1600 噪声 JPEG ≈ 2.5 MiB——超过 500 KiB 但编码只要亚秒级
+    const bytes = await sharp(crypto.randomBytes(1600 * 1600 * 3), {
+      raw: { width: 1600, height: 1600, channels: 3 },
+    })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    expect(bytes.length).toBeGreaterThan(500 * 1024);
     const r = await storeImageBytes(db, tmpDir(), bytes);
-    expect(r.sizeBytes).toBeLessThanOrEqual(Math.floor(1.9 * 1024 * 1024));
-  });
+    expect(r.sizeBytes).toBeLessThanOrEqual(500 * 1024);
+  }, 30_000);
 
   it("大动图被压成单帧也必须报 animationCompressed（否则界面不提示，动画悄悄没了）", async () => {
     const db = makeDb(":memory:");
@@ -240,7 +245,7 @@ describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", (
     const dir = tmpDir();
     const w = 900;
     const h = 900;
-    const rgb = crypto.randomBytes(w * h * 3); // 噪声：PNG 压不动，才过得了 2 MiB 触发线
+    const rgb = crypto.randomBytes(w * h * 3); // 噪声：PNG 压不动，才过得了 500 KiB 触发线
     const rgba = Buffer.alloc(w * h * 4);
     for (let i = 0; i < w * h; i += 1) {
       const x = i % w;

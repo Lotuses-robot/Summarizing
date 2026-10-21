@@ -6,11 +6,13 @@
 // expireDate，agent0 干完自动更新，更新不到就算了」）。墙钟串是北京时间、无时区后缀；
 // 加天数走 UTC 分量算术（北京无夏令时，结果与真实日历一致）。
 
-/** 基础留存的满额基准（2 MiB）：插值用它当分母，「2 MiB 封顶 7 天」的锚点。 */
-const MEDIA_COMPRESS_THRESHOLD = 2 * 1024 * 1024;
+/** 基础留存的满额基准（2 MiB）：插值用它当分母，「2 MiB 封顶 7 天」的锚点。
+ *  与压缩目标无关——储存上限降到 500 KiB 后这个锚点没动（用户 2026-10-21：只限制大小）。 */
+const MEDIA_TTL_ANCHOR_BYTES = 2 * 1024 * 1024;
 
-/** 压缩目标（<2 MiB，留边界余量——保证 agent0 的 2 MiB 读取闸稳过）。 */
-export const MEDIA_TARGET_BYTES = Math.floor(1.9 * 1024 * 1024);
+/** 存储大小的硬上限（500 KiB，用户 2026-10-21 定）：>此值一律压缩到它以下再入库。
+ *  远低于 agent0 的 2 MiB 读取闸，也低于大多数 CDN/模型上下文阈值。 */
+export const MEDIA_TARGET_BYTES = 500 * 1024;
 
 /** 单图输入硬上限（防解压炸弹/滥用）。 */
 export const MEDIA_MAX_INPUT_BYTES = 20 * 1024 * 1024;
@@ -29,7 +31,7 @@ const MAX_TTL_DAYS = 30;
 
 /** 基础留存时长（毫秒）：越小留得越久，2 MiB 封顶 7 天。 */
 export function baseMediaTtlMs(sizeBytes: number): number {
-  const ratio = Math.min(1, Math.max(0, sizeBytes / MEDIA_COMPRESS_THRESHOLD));
+  const ratio = Math.min(1, Math.max(0, sizeBytes / MEDIA_TTL_ANCHOR_BYTES));
   const days = MAX_TTL_DAYS - ratio * (MAX_TTL_DAYS - MIN_TTL_DAYS);
   return Math.round(Math.max(MIN_TTL_DAYS, Math.min(MAX_TTL_DAYS, days)) * DAY_MS);
 }

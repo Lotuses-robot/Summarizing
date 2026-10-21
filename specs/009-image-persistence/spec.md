@@ -28,7 +28,7 @@
 
 1. **Given** 对话输入框，**When** 用户粘贴/选择一张 ≤2 MiB 的 JPEG，**Then** 输入框旁出现缩略图（**此时尚未上传**，只是本地预览），可移除。
 2. **Given** 输入框已有预览图，**When** 点发送，**Then** 图片先上传、成功后消息发出；落档正文 = 用户文字（若有）+ 空行 + 单独一行 `[图片](/api/media/<id>)`。
-3. **Given** 上传的图片 >2 MiB 且 ≤20 MiB，**When** 发送，**Then** 服务端压缩到 2 MiB 以下后存储，用户与 agent0 都能看到压缩后的图。
+3. **Given** 上传的图片 >500 KiB 且 ≤20 MiB，**When** 发送，**Then** 服务端压缩到 500 KiB 以内后存储，用户与 agent0 都能看到压缩后的图。
 4. **Given** 上传失败（超限/不是图片/网络），**When** 发送，**Then** 消息不发出、错误可见，预览图保留可重试。
 5. **Given** 未登录或属于其他账户，**When** 请求 `/api/media/<id>`，**Then** 401/404，不泄露图片。
 
@@ -52,15 +52,15 @@ QQ 群消息里的图片（原文占位 `[图片](url)`）在进站时由服务�
 
 ### User Story 3 - 大图自动压缩 (Priority: P2)
 
-超过 2 MiB 的图片在存储前由服务端压缩（质量阶梯 + 降采样重插值），目标 2 MiB 以下；完成后 agent0 仍可读取（**agent0 的单图读取上限仍是 2 MiB**，压缩目标取 ≤1.9 MiB 留余量）。
+超过 500 KiB 的图片在存储前由服务端压缩（质量阶梯 + 降采样重插值），目标 500 KiB 以内（用户 2026-10-21 定）；完成后 agent0 仍可读取（**agent0 的单图读取上限仍是 2 MiB**）。
 
 **动图（GIF / 多帧 WebP）同样走压缩**（用户 2026-10-20 定）：先降帧率/丢帧，仍超则按静图档继续压。代价是动画可能变短或变成单帧——**压缩器必须在界面与日志里说明这一点**，不静默。
 
 **Acceptance Scenarios**：
 
 1. **Given** 一张 8 MiB JPEG，**When** 上传/进站，**Then** 存储大小 <2 MiB，图片可正常查看。
-2. **Given** 一张压缩到最低档仍 ≥2 MiB 的静图（如高噪点照片），**When** 上传/进站，**Then** 拒收并给出可见理由（不存一张 agent0 永远读不了的图）。
-3. **Given** 一张 >2 MiB 的动图，**When** 上传/进站，**Then** 压缩（必要时降帧/转单帧）到 2 MiB 以下后存储，并提示「动画已压缩」。
+2. **Given** 一张压缩到最低档仍 >500 KiB 的静图（如高噪点照片），**When** 上传/进站，**Then** 拒收并给出可见理由（不存一张超限的图）。
+3. **Given** 一张 >500 KiB 的动图，**When** 上传/进站，**Then** 压缩（必要时降帧/转单帧）到 500 KiB 以内后存储，并提示「动画已压缩」。
 4. **Given** HEIC，**When** 上传，**Then** 拒收并提示转 JPEG（预编译 sharp 不含 HEVC 解码）。
 
 ---
@@ -116,7 +116,7 @@ QQ 群消息里的图片（原文占位 `[图片](url)`）在进站时由服务�
 - **FR-001**: 系统 MUST 提供 `POST /api/media`（认证；鉴权先于解析 body），接收原始图片字节，返回 `{ id, url, mime, sizeBytes, animationCompressed, alphaFlattened }`。
 - **FR-002**: 系统 MUST 校验 MIME + 魔数；只收 JPEG/PNG/WebP/GIF/BMP/TIFF；拒收 SVG。
 - **FR-003**: 单图输入上限 20 MiB；像素上限 50MP；超限拒收并可见报错。
-- **FR-004**: 存储前 >2 MiB 的图 MUST 被压缩到 2 MiB 以下（质量阶梯 → 降采样；动图先降帧/丢帧再按静图压缩）；压到最低档仍 ≥2 MiB 拒收。**任何降级都必须回报**：动图变短/变单帧 → `animationCompressed`；透明背景被填白 → `alphaFlattened`。
+- **FR-004**: 存储前 >500 KiB 的图 MUST 被压缩到 500 KiB 以内（质量阶梯 → 降采样；动图先降帧/丢帧再按静图压缩）；压到最低档仍 >500 KiB 拒收。**任何降级都必须回报**：动图变短/变单帧 → `animationCompressed`；透明背景被填白 → `alphaFlattened`。
 - **FR-005**: 文件 MUST 存于 `data/media/<uid>/<sha256>.<ext>`；用户库新增 `media` 表（id/mime/sizeBytes/createdAt/expiresAt/originUrl）。
 - **FR-006**: `GET /api/media/:id` MUST 要求登录并按账户库校验归属；响应 `Cache-Control: private`、`nosniff`；文件缺失 404。
 - **FR-007**: 进站（`ingestBatch`）后 MUST 扫描 `[图片](http…)` 并后台缓存（并发上限 2）；失败 stderr 留痕；原文字节不变。
@@ -138,7 +138,7 @@ QQ 群消息里的图片（原文占位 `[图片](url)`）在进站时由服务�
 
 - **SC-001**: 前台粘贴图片 → 事项详情可见图片，全链路无手工步骤。
 - **SC-002**: 缓存后的 nc 图片在原 URL 失效后仍可显示。
-- **SC-003**: 任何存储的图片 ≤2 MiB 且 agent0 可读取。
+- **SC-003**: 任何存储的图片 ≤500 KiB 且 agent0 可读取。
 - **SC-004**: 留存规则在测试中可精确断言（给定 size/读/引用 → 期望 expiresAt；三档边界全覆盖）。
 - **SC-005**: `npm run check` 全绿；真实入口断言用户所见。
 

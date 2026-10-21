@@ -16,7 +16,7 @@ import {
 
 // 图片存储执行层（009）。三条入口共用同一段逻辑：
 //   前台上传 POST /api/media、信源图片进站缓存、agent0 取图成功后顺手持久化。
-// 管线 = 校验 → 超限判定 → 压缩（>2 MiB 触发，目标 ≤1.9 MiB）→ sha256 去重 → 落盘 + 落行。
+// 管线 = 校验 → 超限判定 → 压缩（>500 KiB 触发，目标 ≤500 KiB）→ sha256 去重 → 落盘 + 落行。
 // ⚠️ 压缩**一律在这里做**，不在路上任何一处——同一张图不同入口进来必须有同样的结果。
 
 /** 存储一帧图片（上传 / 进站缓存 / 取图持久化的共同入口）。
@@ -86,7 +86,7 @@ function resolveMime(bytes: Buffer, declared: string | undefined): string {
   return sniffed;
 }
 
-/** 压缩（>2 MiB 触发）：质量阶梯 → 降采样；动图先降帧。压到最低档仍 ≥2 MiB → 拒。
+/** 压缩（>500 KiB 触发）：质量阶梯 → 降采样；动图先降帧。压到最低档仍 >500 KiB → 拒。
  *  两个降级标记都不许静默：`animationCompressed`（动图变成静图/被重编码）、
  *  `alphaFlattened`（透明背景被填白——JPEG 没有 alpha 通道）。 */
 async function compressImage(
@@ -109,7 +109,7 @@ async function compressImage(
     throw new Error("图片像素数超过上限（5000 万像素）");
   }
 
-  // ≤2 MiB：原样入库（不重编码——避免无谓的画质损失与耗时）
+  // ≤500 KiB：原样入库（不重编码——避免无谓的画质损失与耗时）
   if (bytes.length <= MEDIA_TARGET_BYTES) {
     return { data: bytes, mime, animationCompressed: false, alphaFlattened: false };
   }
@@ -134,10 +134,14 @@ async function compressImage(
 
   // 静图档：**先缩到候选长边，再在小图上试质量**。
   // 顺序反了会极慢：对 4000 万像素的原图直接 mozjpeg 一次要数秒，而原尺寸多半压不到目标
-  // （输入已 >2 MiB），等于白烧 CPU。先 resize 再编码，每档都在接近目标尺寸的图上工作。
+  // （输入已 >500 KiB），等于白烧 CPU。先 resize 再编码，每档都在接近目标尺寸的图上工作。
   // 每档内质量从高到低，第一个 ≤目标的就返回（命中即止，不再糟蹋画质）。
+  // 候选长边按源图实际长边去重（`withoutEnlargement` 下，源图比候选小时几档其实是同一个尺寸——
+  // 不去重就会把同一套质量阶梯重复编码好几次）。
   const flattenAlpha = meta.hasAlpha === true; // JPEG 无 alpha：透明区不填白就是默认黑
-  for (const longEdge of [2560, 1920, 1280]) {
+  const longSide = Math.max(width, height);
+  const edges = [...new Set([2560, 1920, 1280].map((e) => Math.min(e, longSide)))];
+  for (const longEdge of edges) {
     for (const quality of [85, 75, 65, 55]) {
       let pipeline = sharp(bytes, { failOn: "none" })
         .rotate() // 按 EXIF orientation 归一（不存方向标记，读取侧也一致）
@@ -158,7 +162,7 @@ async function compressImage(
       }
     }
   }
-  throw new Error("图片压到最小仍超过 2 MiB，无法入库");
+  throw new Error("图片压到最小仍超过 500 KiB，无法入库");
 }
 
 /** 清理过期媒体：删文件 + 删行，stderr 一次汇总（张数/字节）。文件缺失只删行并留痕。 */

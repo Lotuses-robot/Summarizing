@@ -179,7 +179,7 @@ export const api = {
     req(`/api/usage?range=${range}`).then((r) => to<UsageSummary>(r)),
 
   /** 上传图片（009）：原始字节 + Content-Type；返回 `/api/media/<sha256>` 供正文占位。
-   *  服务端会做 MIME/魔数校验、>2 MiB 压缩、内容寻址去重——失败一律 reject 人话错误。 */
+   *  服务端会做 MIME/魔数校验、>500 KiB 压缩、内容寻址去重——失败一律 reject 人话错误。 */
   uploadMedia: (file: File): Promise<MediaUploadResponse> =>
     req("/api/media", {
       method: "POST",
