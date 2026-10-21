@@ -101,7 +101,7 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
 
   <section class="grid two">
     <article class="card">
-      <h2>用量排行（累计 · 前 2）</h2>
+      <h2>用量排行（累计 · 前 10）</h2>
       <ol id="ranking" class="rank"><li class="small">暂无数据</li></ol>
     </article>
     <article class="card">

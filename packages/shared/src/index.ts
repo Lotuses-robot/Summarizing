@@ -668,9 +668,13 @@ export const DashboardTokenTotalsSchema = z.object({
 });
 export type DashboardTokenTotals = z.infer<typeof DashboardTokenTotalsSchema>;
 
+/** 排行榜服务端截断条数（用户 2026-10-21 定「前 10」）：截断逻辑与 schema 上限的唯一出处。 */
+export const DASHBOARD_RANKING_LIMIT = 10;
+
 /** 公开状态快照（`GET /api/dashboard`，无需登录）：**全字段白名单**——只有数字、枚举、
- *  时间与版本号。除累计 token 排行前两名的**截断用户名**（只露前两个字）外，不含任何自由
+ *  时间与版本号。除累计 token 排行前 10 名的**截断用户名**（只露前两个字）外，不含任何自由
  *  文本、uid、路径或内容（011 FR-009；没有人工审核这一环，所以安全只能靠「按构造少说」）。 */
+
 export const DashboardSnapshotSchema = z.object({
   version: z.string(),
   startedAt: z.string(),
@@ -716,7 +720,7 @@ export const DashboardSnapshotSchema = z.object({
     today: DashboardTokenTotalsSchema,
     total: DashboardTokenTotalsSchema,
   }),
-  /** 累计 token 前两名（启用中账户）：服务端截断为最多两项，`name` 只露原用户名前两个字 +「…」；
+  /** 累计 token 前 10 名（启用中账户）：服务端截断为最多十项，`name` 只露原用户名前两个字 +「…」；
    *  不含 uid；按总量降序、并列按原用户名升序（排序用全名，展示用截断名）。 */
   tokenRanking: z
     .array(
@@ -725,7 +729,7 @@ export const DashboardSnapshotSchema = z.object({
         tokens: z.number().int().nonnegative(),
       }),
     )
-    .max(2),
+    .max(DASHBOARD_RANKING_LIMIT),
   /** 有库读不了或数据形状异常——页面显示「部分数据不可读」，不静默。 */
   degraded: z.boolean(),
   /** 本次聚合的时刻（北京墙钟）；缓存命中时保持上次成功时刻。 */

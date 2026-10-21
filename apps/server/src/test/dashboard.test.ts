@@ -359,7 +359,7 @@ describe("只读与降级", () => {
 });
 
 describe("token 排行（US4）", () => {
-  it("三个账户 → 只出前两名，按累计降序（服务端截断）", async () => {
+  it("三个账户 → 全部入榜（上限 10），按累计降序（服务端截断）", async () => {
     const realm = await makeTestRealm();
     const big = await realm.addAccount({ username: "big" });
     const mid = await realm.addAccount({ username: "mid" });
@@ -373,6 +373,7 @@ describe("token 排行（US4）", () => {
     expect(snap.tokenRanking).toEqual([
       { name: "bi…", tokens: 120_000 },
       { name: "mi…", tokens: 3_000 },
+      { name: "sm…", tokens: 1_000 },
     ]);
     // 响应体里不能出现完整用户名（截断是服务端做的，不靠前端藏）
     const res = await realm.app.inject({ method: "GET", url: "/api/dashboard" });
@@ -381,7 +382,20 @@ describe("token 排行（US4）", () => {
     expect(res.body).not.toContain("small");
   });
 
-  it("并列按用户名升序稳定；第三名同量不会挤进来", async () => {
+  it("超过 10 个账户 → 服务端只出前 10 名", async () => {
+    const realm = await makeTestRealm();
+    for (let i = 0; i < 12; i += 1) {
+      const acc = await realm.addAccount({ username: `user${String(i).padStart(2, "0")}` });
+      seedUsage(acc.db, (i + 1) * 100, 0, null);
+    }
+    const snap = await getSnapshot(realm.app);
+    expect(snap.tokenRanking).toHaveLength(10);
+    // 降序：第 11、12 名（100 / 200 token）被截掉
+    expect(snap.tokenRanking[0]?.tokens).toBe(1_200);
+    expect(snap.tokenRanking[9]?.tokens).toBe(300);
+  });
+
+  it("并列按用户名升序稳定", async () => {
     const realm = await makeTestRealm();
     const c = await realm.addAccount({ username: "charlie" });
     const a = await realm.addAccount({ username: "alice" });
@@ -391,7 +405,7 @@ describe("token 排行（US4）", () => {
     seedUsage(b.db, 500, 0, null);
 
     const snap = await getSnapshot(realm.app);
-    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["al…", "bo…"]);
+    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["al…", "bo…", "ch…"]);
   });
 
   it("两个字以内的用户名原样显示（不画蛇添足加省略号）", async () => {

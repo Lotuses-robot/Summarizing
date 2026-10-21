@@ -1,7 +1,7 @@
 import { existsSync, statfsSync } from "node:fs";
 import path from "node:path";
 import { errText, type DashboardSnapshot } from "@summarizing/shared";
-import { DashboardSnapshotSchema } from "@summarizing/shared";
+import { DASHBOARD_RANKING_LIMIT, DashboardSnapshotSchema } from "@summarizing/shared";
 import { listAccounts, type RegistryDb } from "../storage/registry";
 import {
   aggregateTokenTotals,
@@ -150,10 +150,10 @@ export function collectDashboardSnapshot(args: {
     }
   }
 
-  // 服务端截断：响应里永远最多两项、名字只露前两字（不靠前端隐藏）
+  // 服务端截断：响应里最多 DASHBOARD_RANKING_LIMIT 项、名字只露前两字（不靠前端隐藏；用户 2026-10-21 定 10）
   ranking.sort(compareRanking);
-  const topTwo = ranking
-    .slice(0, 2)
+  const topRanked = ranking
+    .slice(0, DASHBOARD_RANKING_LIMIT)
     .map((r) => ({ name: publicRankName(r.fullName), tokens: r.tokens }));
 
   const nowIso = wallClockFromDate(args.now);
@@ -183,7 +183,7 @@ export function collectDashboardSnapshot(args: {
       today: aggregateTokenTotals(usageToday),
       total: aggregateTokenTotals(usageTotal),
     },
-    tokenRanking: topTwo,
+    tokenRanking: topRanked,
     // 坏库或畸形数据都算「部分数据不可读」——不静默
     degraded: dbFailed > 0 || totals.malformed > 0,
     generatedAt: nowIso,
