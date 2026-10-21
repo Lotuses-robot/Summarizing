@@ -668,8 +668,8 @@ export const DashboardTokenTotalsSchema = z.object({
 export type DashboardTokenTotals = z.infer<typeof DashboardTokenTotalsSchema>;
 
 /** 公开状态快照（`GET /api/dashboard`，无需登录）：**全字段白名单**——只有数字、枚举、
- *  时间与版本号。除累计 token 排行前两名的用户名外，不含任何自由文本、uid、路径或内容
- *  （011 FR-009；没有人工审核这一环，所以安全只能靠「按构造少说」）。 */
+ *  时间与版本号。除累计 token 排行前两名的**截断用户名**（只露前两个字）外，不含任何自由
+ *  文本、uid、路径或内容（011 FR-009；没有人工审核这一环，所以安全只能靠「按构造少说」）。 */
 export const DashboardSnapshotSchema = z.object({
   version: z.string(),
   startedAt: z.string(),
@@ -715,7 +715,8 @@ export const DashboardSnapshotSchema = z.object({
     today: DashboardTokenTotalsSchema,
     total: DashboardTokenTotalsSchema,
   }),
-  /** 累计 token 前两名（启用中账户）：服务端截断，不含 uid，按总量降序、并列按用户名升序。 */
+  /** 累计 token 前两名（启用中账户）：服务端截断为最多两项，`name` 只露原用户名前两个字 +「…」；
+   *  不含 uid；按总量降序、并列按原用户名升序（排序用全名，展示用截断名）。 */
   tokenRanking: z
     .array(
       z.object({

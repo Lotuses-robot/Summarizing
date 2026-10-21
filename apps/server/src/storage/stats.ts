@@ -16,6 +16,7 @@ export interface TokenSums {
 /** 单个账户库的聚合结果（字段全部来自计数/求和，不含任何内容）。 */
 export interface UserDbStats {
   rawToday: number;
+  /** 今日进站的批次里，**当前状态**已消化 / 未处理的数量（按 raw_inputs.digest_state 算）。 */
   digestedToday: number;
   failedToday: number;
   callsToday: number;
@@ -183,14 +184,16 @@ export function readUserDbStats(file: string, since: string): UserDbStats {
       rawToday: scalarQuery(db, "SELECT count(*) AS v FROM raw_inputs WHERE received_at >= ?", [
         since,
       ]),
+      // 副标题描述的是「今天的进站」：按这些批次的**当前** digest_state 计。不用 pipeline_events
+      // 的完成时刻——重试旧批次会产出「今日进站 0、已消化 5」这种自相矛盾的读数（2026-10-21 用户逮出）。
       digestedToday: scalarQuery(
         db,
-        "SELECT count(DISTINCT entity_id) AS v FROM pipeline_events WHERE action = 'digest_done' AND at >= ?",
+        "SELECT count(*) AS v FROM raw_inputs WHERE received_at >= ? AND digest_state = 'digested'",
         [since],
       ),
       failedToday: scalarQuery(
         db,
-        "SELECT count(DISTINCT entity_id) AS v FROM pipeline_events WHERE action = 'digest_failed' AND at >= ?",
+        "SELECT count(*) AS v FROM raw_inputs WHERE received_at >= ? AND digest_state = 'failed'",
         [since],
       ),
       callsToday: scalarQuery(db, "SELECT count(*) AS v FROM llm_usage WHERE at >= ?", [since]),

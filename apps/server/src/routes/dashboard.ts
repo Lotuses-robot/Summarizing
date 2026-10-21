@@ -4,7 +4,8 @@ import { makeDashboardService } from "../application/dashboard";
 
 // 公开状态面板（011）：`GET /api/dashboard`（白名单 JSON）+ `GET /dashboard`（自包含 HTML）。
 // 注册在**公开面**——无认证、无 Cookie、无参数；数据面只在 application/dashboard.ts 里聚合。
-// 页面自包含（inline CSS/JS，无外链、无 CDN），不进入 React 构建；30 秒轮询自身 API。
+// 页面自包含（inline CSS/JS，无外链、无 CDN），不进入 React 构建；每 60 秒轮询自身 API
+// （与快照缓存同周期：每次轮询都拿到刚聚合的数据；比缓存更密的轮询只会重复拿同一份）。
 
 /** 页面（服务端直出）：状态卡 + 数字 + 排行；失败时只改状态行，不把旧数据冒充新数据。 */
 const DASHBOARD_HTML = `<!doctype html>
@@ -56,6 +57,15 @@ h1 { margin: 6px 0 4px; font-size: clamp(28px, 5vw, 40px); line-height: 1.15; di
 .diskline { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12.5px; }
 footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 22px; color: var(--muted); font-size: 12.5px; }
 .warn { color: var(--warn); }
+/* token 三数：只给缩写（IN / OUT / CACHE）+ 颜色，解释放悬浮提示（用户 2026-10-21 定） */
+.toks { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+.tok { display: flex; align-items: baseline; gap: 4px; font-variant-numeric: tabular-nums; }
+.tok .k { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--muted); }
+.tok .v { font-size: 15px; font-weight: 600; }
+.tok.in .v { color: var(--accent); }
+.tok.out .v { color: var(--warn); }
+.tok.cache .v { color: var(--muted); }
+.tok.na .v { color: var(--muted); font-weight: 400; font-size: 12.5px; }
 </style>
 </head>
 <body>
@@ -70,7 +80,7 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
     <article class="card"><h2>今日进站</h2><div id="rawToday" class="big">—</div><p id="rawSub" class="small">已消化 — · 失败 —</p></article>
     <article class="card"><h2>消化队列</h2><div id="queue" class="big">—</div><p id="queueSub" class="small">排队 — · 消化中 —</p></article>
     <article class="card"><h2>今日模型调用</h2><div id="calls" class="big">—</div><p class="small">按北京时间日历日</p></article>
-    <article class="card"><h2>今日 token</h2><div id="tokenTodayTotal" class="big">—</div><p id="tokenTodaySub" class="small">未命中 — · 输出 — · 缓存 —</p></article>
+    <article class="card"><h2>今日 token</h2><div id="tokenTodayTotal" class="big">—</div><div id="tokenTodayParts" class="toks"></div></article>
   </section>
 
   <section class="grid two">
@@ -85,7 +95,7 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
     <article class="card">
       <h2>累计 token</h2>
       <div id="tokenTotal" class="big">—</div>
-      <p id="tokenTotalSub" class="small">未命中 — · 输出 — · 缓存 —</p>
+      <div id="tokenTotalParts" class="toks"></div>
     </article>
   </section>
 
@@ -119,7 +129,18 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
   function byId(id) { return document.getElementById(id); }
   var lastOk = null;
 
-  function fmt(n) { return typeof n === "number" ? n.toLocaleString("zh-CN") : "—"; }
+  // 数字显示（用户 2026-10-21 定）：≥1000 用 K/M/B 缩写、最多 3 位有效数字（1.23K / 12.3K / 1.23M）；
+  // 精确值一律放 title 悬浮提示。小于 1000 原样。
+  function fmt(n) {
+    if (typeof n !== "number") return "—";
+    if (Math.abs(n) < 1000) return String(n);
+    return new Intl.NumberFormat("en-US", {
+      notation: "compact", maximumSignificantDigits: 3,
+    }).format(n);
+  }
+
+  // 精确值（千分位）——fmt 的悬浮提示用
+  function exact(n) { return typeof n === "number" ? n.toLocaleString("zh-CN") : "—"; }
 
   function fmtBytes(n) {
     if (typeof n !== "number") return "—";
@@ -137,13 +158,47 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
     return m + " 分钟";
   }
 
-  function tokenParts(t) {
-    return "未命中 " + fmt(t.inputTokens) + " · 输出 " + fmt(t.completionTokens) +
-      " · 缓存 " + (t.cachedTokens === null ? "服务商未提供" : fmt(t.cachedTokens));
-  }
-
   function tokenSum(t) {
     return t.inputTokens + t.completionTokens + (t.cachedTokens === null ? 0 : t.cachedTokens);
+  }
+
+  // 三数徽标（无中文标签）：IN = 未命中输入 / OUT = 输出 / CACHE = 缓存命中。解释与精确值都在 title 里。
+  function tokenPart(kind, key, label, value, valueEl) {
+    var wrap = document.createElement("span");
+    wrap.className = "tok " + kind + (value === null ? " na" : "");
+    var k = document.createElement("span");
+    k.className = "k";
+    k.textContent = key;
+    var v = document.createElement("span");
+    v.className = "v";
+    v.textContent = value === null ? "—" : fmt(value);
+    wrap.appendChild(k);
+    wrap.appendChild(v);
+    wrap.title = value === null ? label : label + "：" + exact(value);
+    return wrap;
+  }
+
+  /** 填充一行三数（今日 / 累计共用）。 */
+  function renderTokenParts(container, t) {
+    container.textContent = "";
+    container.appendChild(tokenPart("in", "IN", "未命中输入", t.inputTokens));
+    container.appendChild(tokenPart("out", "OUT", "输出", t.completionTokens));
+    if (t.cachedTokens === null) {
+      var na = document.createElement("span");
+      na.className = "tok cache na";
+      var naKey = document.createElement("span");
+      naKey.className = "k";
+      naKey.textContent = "CACHE";
+      var naVal = document.createElement("span");
+      naVal.className = "v";
+      naVal.textContent = "—";
+      na.title = "缓存命中：服务商未提供这项数据";
+      na.appendChild(naKey);
+      na.appendChild(naVal);
+      container.appendChild(na);
+    } else {
+      container.appendChild(tokenPart("cache", "CACHE", "缓存命中", t.cachedTokens));
+    }
   }
 
   function rankItem(name, tokens, max) {
@@ -155,6 +210,7 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
     var val = document.createElement("span");
     val.className = "rankval";
     val.textContent = fmt(tokens);
+    val.title = exact(tokens) + " token";
     line.appendChild(nm);
     line.appendChild(val);
     var bar = document.createElement("div");
@@ -180,9 +236,11 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
       " · 未处理失败 " + fmt(s.failedRawInputs);
     byId("calls").textContent = fmt(s.today.llmCalls);
     byId("tokenTodayTotal").textContent = fmt(tokenSum(s.tokens.today));
-    byId("tokenTodaySub").textContent = tokenParts(s.tokens.today);
+    byId("tokenTodayTotal").title = exact(tokenSum(s.tokens.today)) + " token";
+    renderTokenParts(byId("tokenTodayParts"), s.tokens.today);
     byId("tokenTotal").textContent = fmt(tokenSum(s.tokens.total));
-    byId("tokenTotalSub").textContent = tokenParts(s.tokens.total);
+    byId("tokenTotal").title = exact(tokenSum(s.tokens.total)) + " token";
+    renderTokenParts(byId("tokenTotalParts"), s.tokens.total);
     byId("tasks").textContent = fmt(s.items.tasks);
     byId("notices").textContent = fmt(s.items.notices);
     byId("trashed").textContent = fmt(s.items.trashed);
@@ -239,7 +297,9 @@ footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wr
   }
 
   tick();
-  setInterval(tick, 30000);
+  // 与快照缓存同周期（60s）：每次轮询都拿到刚聚合的新数据；更密的轮询只会重复拿同一份缓存。
+  // fetch 用 no-store 绕过浏览器 HTTP 缓存——max-age 只服务于中间层，不该让页面自己读到旧值。
+  setInterval(tick, 60000);
 })();
 </script>
 </body>

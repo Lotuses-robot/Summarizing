@@ -44,24 +44,42 @@ function makeSummary(overrides: Partial<UsageSummary> = {}): UsageSummary {
 }
 
 describe("UsageModal", () => {
-  it("三个大号数字分开显示：未命中输入 / 输出 / 缓存命中", async () => {
+  it("三个大号数字分开显示，按 K/M 压缩（最多 3 位有效数字），悬浮给精确值", async () => {
     stubUsage({ "7d": makeSummary() });
     render(<UsageModal open onClose={() => {}} />);
 
-    expect(await screen.findByText("12,345")).toBeInTheDocument();
+    // 12345 → 12.3K；678 原样；9000 → 9K（用户 2026-10-21：面板与这里统一 K/M）
+    expect(await screen.findByText("12.3K")).toBeInTheDocument();
     expect(screen.getByText("678")).toBeInTheDocument();
-    expect(screen.getByText("9,000")).toBeInTheDocument(); // 缓存命中——独立一项
+    expect(screen.getByText("9K")).toBeInTheDocument(); // 缓存命中——独立一项
+    // 悬浮看精确值
+    expect(screen.getByText("12.3K")).toHaveAttribute("title", "12,345 token");
+    expect(screen.getByText("9K")).toHaveAttribute("title", "9,000 token");
     expect(screen.getByText("未命中输入")).toBeInTheDocument();
     expect(screen.getByText("输出")).toBeInTheDocument();
     expect(screen.getByText("缓存命中")).toBeInTheDocument();
     expect(screen.getByText("共 12 次调用")).toBeInTheDocument();
   });
 
+  it("百万级用 M（1.23M），不是「万/亿」", async () => {
+    stubUsage({
+      "7d": makeSummary({
+        inputTokens: 1_234_567,
+        completionTokens: 12_345_678,
+        cachedTokens: 999,
+      }),
+    });
+    render(<UsageModal open onClose={() => {}} />);
+    expect(await screen.findByText("1.23M")).toBeInTheDocument();
+    expect(screen.getByText("12.3M")).toBeInTheDocument();
+    expect(screen.getByText("999")).toBeInTheDocument();
+  });
+
   it("服务商未提供缓存字段 → 显示「服务商未提供」，不是 0", async () => {
     stubUsage({ "7d": makeSummary({ cachedTokens: null }) });
     render(<UsageModal open onClose={() => {}} />);
 
-    await screen.findByText("12,345");
+    await screen.findByText("12.3K");
     expect(screen.getByText("服务商未提供")).toBeInTheDocument();
     expect(screen.queryByText("0")).not.toBeInTheDocument();
   });
@@ -91,7 +109,7 @@ describe("UsageModal", () => {
       }),
     });
     render(<UsageModal open onClose={() => {}} />);
-    await screen.findByText("12,345");
+    await screen.findByText("12.3K");
 
     fireEvent.click(screen.getByRole("tab", { name: "今日" }));
     expect(await screen.findByText("111")).toBeInTheDocument();

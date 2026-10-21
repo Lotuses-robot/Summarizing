@@ -248,24 +248,31 @@ describe("聚合正确（US2）", () => {
     expect(r1.id).toBeTruthy();
   });
 
-  it("重试的同一批 digest_done 只算一次（count DISTINCT）", async () => {
+  it("已消化 / 失败按今日进站批次的当前状态计（重试旧批次不串味）", async () => {
     const realm = await makeTestRealm();
     const a = await realm.addAccount({ username: "alice" });
-    const raw = seedRaw(a.db, "一批");
+    const r1 = seedRaw(a.db, "今天的，消化完成");
+    const r2 = seedRaw(a.db, "今天的，未处理");
+    const r3 = seedRaw(a.db, "今天的，还在排队");
+    repo.setDigestState(a.db, r1.id, "digested");
+    repo.setDigestState(a.db, r2.id, "failed");
+
+    // 重试一条**昨天**的旧批次、今天完成——不能算进「今日已消化」（否则出现「今日进站 0 · 已消化 5」）
+    const old = seedRaw(a.db, "昨天的", "2026-09-01T10:00:00");
+    repo.setDigestState(a.db, old.id, "digested");
     repo.appendPipelineEvent(a.db, {
-      rawInputId: raw.id,
+      rawInputId: old.id,
       action: "digest_done",
-      detail: "第一次",
+      detail: "重试后今天完成",
       by: { actor: "agent0", model: "test" },
     });
-    repo.appendPipelineEvent(a.db, {
-      rawInputId: raw.id,
-      action: "digest_done",
-      detail: "重试后",
-      by: { actor: "agent0", model: "test" },
-    });
+
     const snap = await getSnapshot(realm.app);
+    expect(snap.today.rawBatches).toBe(3);
     expect(snap.today.digested).toBe(1);
+    expect(snap.today.digestFailed).toBe(1);
+    expect(snap.queue).toEqual({ pending: 1, digesting: 0 });
+    expect(r3.id).toBeTruthy();
   });
 
   it("「今日」以北京墙钟为准，不随机器时区漂移（固定时刻直接对聚合数学）", async () => {
@@ -362,10 +369,16 @@ describe("token 排行（US4）", () => {
     seedUsage(small.db, 1_000, 0, null);
 
     const snap = await getSnapshot(realm.app);
+    // 名字只露前两字（用户 2026-10-21：publicRankName 在服务端截断）
     expect(snap.tokenRanking).toEqual([
-      { name: "big", tokens: 120_000 },
-      { name: "mid", tokens: 3_000 },
+      { name: "bi…", tokens: 120_000 },
+      { name: "mi…", tokens: 3_000 },
     ]);
+    // 响应体里不能出现完整用户名（截断是服务端做的，不靠前端藏）
+    const res = await realm.app.inject({ method: "GET", url: "/api/dashboard" });
+    expect(res.body).not.toContain("big");
+    expect(res.body).not.toContain("mid");
+    expect(res.body).not.toContain("small");
   });
 
   it("并列按用户名升序稳定；第三名同量不会挤进来", async () => {
@@ -378,7 +391,15 @@ describe("token 排行（US4）", () => {
     seedUsage(b.db, 500, 0, null);
 
     const snap = await getSnapshot(realm.app);
-    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["alice", "bob"]);
+    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["al…", "bo…"]);
+  });
+
+  it("两个字以内的用户名原样显示（不画蛇添足加省略号）", async () => {
+    const realm = await makeTestRealm();
+    const a = await realm.addAccount({ username: "阿明" });
+    seedUsage(a.db, 100, 0, null);
+    const snap = await getSnapshot(realm.app);
+    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["阿明"]);
   });
 
   it("停用账户不上榜，但历史仍计入全站总量", async () => {
@@ -390,7 +411,7 @@ describe("token 排行（US4）", () => {
     setAccountStatus(realm.registry, a.space.uid, "disabled");
 
     const snap = await getSnapshot(realm.app);
-    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["bob"]);
+    expect(snap.tokenRanking.map((r) => r.name)).toEqual(["bo…"]);
     expect(snap.tokens.total.inputTokens).toBe(10_100); // 停用账户历史仍是全站总量的一部分
     expect(snap.accounts).toEqual({ total: 2, active: 1 });
   });

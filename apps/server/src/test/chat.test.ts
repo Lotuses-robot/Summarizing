@@ -114,6 +114,49 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     );
   });
 
+  it("ingest 漏抄图片占位 → 补回原文（2026-10-21 实测：模型只抄文字，图丢了）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    const mediaUrl = `/api/media/${"a".repeat(64)}`;
+    // 模型只抄了文字，没带 `[图片](…)`——此前这版图片持久化在对话入口等于白做
+    llm.push({
+      content: null,
+      toolCalls: [
+        { id: "t1", name: "ingest", argsJson: JSON.stringify({ content: "明天下午三点开班会" }) },
+      ],
+    });
+    llm.push({ content: '{"changes":[]}' });
+    llm.push({ content: "已记录。" });
+
+    await handleChat(db, llm, MODEL, `明天下午三点开班会\n\n[图片](${mediaUrl})`, [], "");
+
+    const raws = chatRaws(db);
+    expect(raws).toHaveLength(1);
+    const ingested = raws[0];
+    if (!ingested) throw new Error("批次缺失");
+    // 文字保持模型抄的原样，占位原样补在末尾
+    expect(ingested.content).toBe(`明天下午三点开班会\n\n[图片](${mediaUrl})`);
+  });
+
+  it("ingest 已带上图片占位 → 原样不重复补", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    const mediaUrl = `/api/media/${"b".repeat(64)}`;
+    const full = `开班会\n\n[图片](${mediaUrl})`;
+    llm.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "ingest", argsJson: JSON.stringify({ content: full }) }],
+    });
+    llm.push({ content: '{"changes":[]}' });
+    llm.push({ content: "已记录。" });
+
+    await handleChat(db, llm, MODEL, full, [], "");
+
+    const raws = chatRaws(db);
+    expect(raws).toHaveLength(1);
+    expect(raws[0]?.content).toBe(full);
+  });
+
   it("零工具调用但回话声称已录入 → 兜底真录入（2026-10-10 事故：回复说谎 = 静默丢消息）", async () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm();

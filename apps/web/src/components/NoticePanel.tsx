@@ -18,6 +18,12 @@ import { fmtFullTime, fmtShortTime } from "../lib/time";
 // 自动选择：进入 / 筛选变化 / 清除 / 稍后之后，选下一条未跳过的；轮询不抢焦点。
 // 拖动走直接 DOM 变换（不经 state）——ItemBody 内容重不参与逐帧重渲染，手感跟手。
 
+/** 单侧的滑动提示显隐（直接改 DOM 样式，不触发重渲染）。 */
+function setSideVisible(root: HTMLElement, side: "left" | "right", visible: boolean): void {
+  const el = root.querySelector<HTMLElement>(`[data-side='${side}']`);
+  if (el !== null) el.style.visibility = visible ? "visible" : "hidden";
+}
+
 /** 拖动阈值：卡片宽度的 35%。 */
 const SWIPE_RATIO = 0.35;
 /** 清除的撤销窗口（秒）。 */
@@ -280,7 +286,11 @@ export function NoticePanel({
       cardBodyRef.current.style.transition = "none";
       cardBodyRef.current.style.userSelect = "none"; // 拖动中别顺带选中文字
     }
-    if (revealRef.current !== null) revealRef.current.style.display = "block";
+    if (revealRef.current !== null) {
+      revealRef.current.style.display = "block";
+      setSideVisible(revealRef.current, "left", false);
+      setSideVisible(revealRef.current, "right", false);
+    }
     return true;
   };
   /** 移动一帧：先定轴向（横向才拖动）；位移限制在 ±60% 卡宽；底层动作层随位移加深。 */
@@ -303,6 +313,9 @@ export function NoticePanel({
     const strength = Math.min(1, Math.abs(dx) / Math.max(1, d.width * SWIPE_RATIO));
     if (revealRef.current !== null) {
       revealRef.current.style.opacity = String(0.35 + strength * 0.65);
+      // 只亮当前方向那一侧的提示（另一侧被卡片遮着，亮着也是死字）
+      setSideVisible(revealRef.current, "left", dx > 0);
+      setSideVisible(revealRef.current, "right", dx < 0);
     }
   };
   /** 复位拖动期间写下的临时样式与底层动作层（只动 DOM，不改状态）。 */
@@ -312,7 +325,12 @@ export function NoticePanel({
       cardBodyRef.current.style.transform = "";
       cardBodyRef.current.style.userSelect = "";
     }
-    if (revealRef.current !== null) revealRef.current.style.display = "none";
+    if (revealRef.current !== null) {
+      revealRef.current.style.display = "none";
+      // 下一次拖动重新按方向点亮（否则会继承上一次的可见性）
+      setSideVisible(revealRef.current, "left", false);
+      setSideVisible(revealRef.current, "right", false);
+    }
   };
   /** 松手：过阈值即执行（右=清除、左=稍后），否则回弹。 */
   const finishDrag = (): void => {
@@ -423,18 +441,27 @@ export function NoticePanel({
       <div className="sticky top-0 z-10 -mx-1 bg-canvas px-1 pb-3">
         {/* overflow-hidden：卡片左右拖动时被容器裁剪，不把页面撑出横向滚动条 */}
         <div className="relative overflow-hidden rounded-lg">
-          {/* 底层：低一层的画布色 + 左右两个记号（拖动时随卡片滑开露出；纯显示，用户 2026-10-19） */}
+          {/* 底层：卡片滑开时露出——**右侧标「稍后」**（向左拖才露它）、**左侧标「清除」**（向右拖）。
+              中文字提示（用户 2026-10-21：不挡内容，正好说明这一下会发生什么）。 */}
           <div
             ref={revealRef}
             aria-hidden
             className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg bg-canvas"
             style={{ opacity: 0.35 }}
           >
-            <span className="absolute left-6 top-1/2 -translate-y-1/2 select-none text-lg leading-none text-ink-muted">
-              ‹
+            <span
+              data-side="left"
+              className="absolute left-6 top-1/2 flex -translate-y-1/2 items-center gap-1.5 text-sm font-medium text-ink-muted"
+              style={{ visibility: "hidden" }}
+            >
+              <span className="text-lg leading-none">‹</span>清除
             </span>
-            <span className="absolute right-6 top-1/2 -translate-y-1/2 select-none text-lg leading-none text-ink-muted">
-              ›
+            <span
+              data-side="right"
+              className="absolute right-6 top-1/2 flex -translate-y-1/2 items-center gap-1.5 text-sm font-medium text-ink-muted"
+              style={{ visibility: "hidden" }}
+            >
+              稍后<span className="text-lg leading-none">›</span>
             </span>
           </div>
 

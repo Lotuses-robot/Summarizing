@@ -35,7 +35,7 @@
 
 ## Phase 3: 路由、页面与构建注入
 
-- [ ] T301 新 `apps/server/src/routes/dashboard.ts`：`GET /api/dashboard`（公开，JSON；`Cache-Control: public, max-age=30` + `X-Robots-Tag: noindex`）；`GET /dashboard`（自包含 HTML，inline CSS/JS，30s 轮询，失败显示「状态未知 + 上次成功时间」，数字用 `textContent`）
+- [ ] T301 新 `apps/server/src/routes/dashboard.ts`：`GET /api/dashboard`（公开，JSON；`Cache-Control: public, max-age=30` + `X-Robots-Tag: noindex`）；`GET /dashboard`（自包含 HTML，inline CSS/JS，**60s 轮询**，失败显示「状态未知 + 上次成功时间」，数字用 `textContent`，≥1000 用 K/M 缩写 + 悬浮精确值）
 - [ ] T302 `apps/server/src/app.ts`：公开面注册（在受保护作用域之前）；`onSend` 的 `no-store` 放行 `/api/dashboard`
 - [ ] T303 `apps/server/src/spaces.ts`：`SpaceHub` 暴露只读 `dataRoot`（实现回传构造参数）；更新测试里的假 hub
 - [ ] T304 `scripts/build-server.mjs`：读 `CHANGELOG.md` 首个 `## [vX.Y.Z]` → `define.__APP_VERSION__`（便携包与 Docker 共用）

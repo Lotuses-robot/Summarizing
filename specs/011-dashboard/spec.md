@@ -17,7 +17,7 @@
 ### User Story 1 - 任何人打开就能看到服务在不在 (Priority: P1)
 
 访问 `https://<站点>/dashboard`（无需登录、无需令牌），一眼看到：服务运行中、版本、已运行多久、
-内存与数据盘剩余、以及各库能否打开。页面每 30 秒自动刷新。
+内存与数据盘剩余、以及各库能否打开。页面每 60 秒自动刷新。
 
 **Why this priority**：这是「监控」的最小价值——出问题时先确认「服务活着」。
 
@@ -60,7 +60,7 @@ grep 响应体，不存在任何事项标题/群名/用户名。
 ### User Story 4 - 谁用得最多：token 排行 (Priority: P2)
 
 页面底部有一个**用户 token 排行**：按**累计流过的 token 总量**（未命中输入 + 输出 + 缓存命中）从高到低，
-**只展示前两名**（启用中账户）。用户 2026-10-21 定：实名用户名、累计口径、只暴露前两名。
+**只展示前两名**（启用中账户）。用户 2026-10-21 定：累计口径、只暴露前两名；同日走查后追加：**名字只露前两个字 +「…」**（输出层截断，服务端做）。
 
 **Why this priority**：多人实例里，「谁在用、用了多少」是运维与朋友间最直观的一眼信息。
 
@@ -94,7 +94,7 @@ grep 响应体，不存在任何事项标题/群名/用户名。
   - **L1**：`accounts { total, active }`、`today { rawBatches, digested, digestFailed, llmCalls }`、`queue { pending, digesting }`、`failedRawInputs`、`items { tasks, notices, trashed }`、`media { count, bytes }`
   - **tokens**（用户 2026-10-21 追加：复用 010 的用量数据）：`tokens.today` 与 `tokens.total`，各含 `{ input, completion, cached }` 三个**互不重叠**的数（`input` = prompt − cached 的未命中部分）；
     `cached` 为 `null` ⇔ 该范围内**所有账户的所有调用**都没有缓存字段（与 010 的「服务商未提供」同义）。
-  - **tokenRanking**（用户 2026-10-21 追加）：`[{ name, tokens }]`，`tokens` = 该账户累计 `input + completion + cached`；按 `tokens` 降序、并列按 `name` 升序；只含**启用中**账户；**最多两项**（服务端截断，不靠前端隐藏）；**不含 uid**。
+  - **tokenRanking**（用户 2026-10-21 追加）：`[{ name, tokens }]`，`tokens` = 该账户累计 `input + completion + cached`；`name` = 原用户名**前两个字 +「…」**（两字以内原样）；按 `tokens` 降序、并列按**原用户名**升序；只含**启用中**账户；**最多两项**（服务端截断，不靠前端隐藏）；**不含 uid**。
   - **元**：`generatedAt`、`cached`
 - **FR-003**: 聚合口径 MUST 为：
   - `today` 起点 = 北京墙钟今日 00:00（D-97）；`rawBatches` 按 `raw_inputs.received_at`、`llmCalls` 按 `llm_usage.at`；`digested` / `digestFailed` = 今日 `pipeline_events` 里 `digest_done` / `digest_failed` 的**去重批次数**（`count(DISTINCT entity_id)`——重试的同一批只算一次）；`tokens.today` 同起点，`tokens.total` 不限起点。
@@ -105,11 +105,11 @@ grep 响应体，不存在任何事项标题/群名/用户名。
   - `tokenRanking` 逐账户取 `llm_usage` 全表的同样三项求和再相加；账户名取自系统库 `accounts.username`；排序后 **`slice(0, 2)`**。
 - **FR-004**: 读取用户库 MUST 使用**只读连接**（`readonly: true`）——绝不触发迁移、建表或任何写；单库失败只标记不抛。
 - **FR-005**: 聚合 MUST 有 60 秒进程内缓存 + 单飞；响应头 `Cache-Control: public, max-age=30`；快照带 `generatedAt`/`cached`。
-- **FR-006**: `GET /dashboard` MUST 返回一个**自包含**页面（无外链 CSS/JS/字体），每 30 秒轮询 `/api/dashboard`；请求失败时显示「状态未知 + 上次成功时间」，不得把旧数据当新数据。
+- **FR-006**: `GET /dashboard` MUST 返回一个**自包含**页面（无外链 CSS/JS/字体），每 60 秒轮询 `/api/dashboard`；请求失败时显示「状态未知 + 上次成功时间」，不得把旧数据当新数据。
 - **FR-007**: 公开接口 MUST 限流（每 IP 60 次/分，进程内令牌桶）；超限回 429，不带任何内部信息。
 - **FR-008**: `version` MUST 取自 `CHANGELOG.md` 的当前版本（构建时注入，单一出处）；开发态回退 `dev`。
 - **FR-009**: 响应 MUST NOT 出现：事项/通知的任何文本、原文、引文、来源名、uid、令牌、文件路径、SQL/异常详情、单账户维度的任何数字。
-  **唯一例外（用户 2026-10-21 明示）**：`tokenRanking` 的**前两名**实名用户名与累计 token 数——那是公开榜单本身；
+  **唯一例外（用户 2026-10-21 明示）**：`tokenRanking` 的**前两名**（用户名只露前两个字）与累计 token 数——那是公开榜单本身；
   其余账户的名字与用量一律不出现在响应里（截断在服务端做）。
 - **FR-010**: 页面与接口 MUST 标注 `noindex`。
 

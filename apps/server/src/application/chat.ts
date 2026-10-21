@@ -1,6 +1,7 @@
 import {
   errText,
   CHAT_HISTORY_MAX_ITEMS,
+  extractImageUrls,
   GetItemArgsSchema,
   itemName,
   SearchItemsArgsSchema,
@@ -103,6 +104,8 @@ interface ChatTurnState {
   ingested: boolean;
   actions: { tool: string; note: string }[];
   refTitles: Map<string, string>;
+  /** 本回合用户消息里的图片占位 URL——ingest 工具据它把模型漏抄的占位补回原文。 */
+  imageUrls: string[];
 }
 
 /** references 组装：按触碰顺序去重、上限 8（防 chips 洪泛，05§四）。 */
@@ -137,7 +140,12 @@ export async function handleChat(
   mentions: { id: string; title: string }[] = [],
 ): Promise<ChatResult> {
   const tools = makeAgentTools(db, mediaDir);
-  const state: ChatTurnState = { ingested: false, actions: [], refTitles: new Map() };
+  const state: ChatTurnState = {
+    ingested: false,
+    actions: [],
+    refTitles: new Map(),
+    imageUrls: extractImageUrls(message),
+  };
   // 持久化本轮用户消息（L16：刷新/换设备可回填）——落库即用户话已存，模型再挂也不丢这句
   repo.appendChatTurn(db, "user", message);
   let result: ChatResult;
@@ -365,7 +373,15 @@ async function runTool(
           });
         }
         const { content } = IngestArgsSchema.parse(args);
-        const raw = insertChatRaw(db, content);
+        // 图片占位补齐：模型常只抄用户打的字、把正文末尾的 `[图片](…)` 丢掉——
+        // 丢了就等于图片持久化白做（原文里没有占位 → 界面渲染不出图、进站缓存也扫不到）。
+        // 用户原话里的占位由我们补回，不给模型「记得带上」的机会（补的是原文，不是噪音）。
+        const missing = state.imageUrls.filter((url) => !extractImageUrls(content).includes(url));
+        const full =
+          missing.length === 0
+            ? content
+            : `${content}\n\n${missing.map((u) => `[图片](${u})`).join("\n")}`;
+        const raw = insertChatRaw(db, full);
         state.ingested = true;
         state.actions.push(ingestAction());
         kickDigest(db, llm, tools, modelTag, raw, "ingest-tool", mediaDir);

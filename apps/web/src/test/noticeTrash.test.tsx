@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NoticeRow, TrashRow } from "@summarizing/shared";
 import { NoticePanel } from "../components/NoticePanel";
@@ -200,15 +200,18 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     expect(screen.queryByText("已清除")).not.toBeInTheDocument();
   });
 
-  it("稍后：左滑 → 标记「稍后」并跳到下一条，不写库", async () => {
+  it("稍后：左滑 → 跳到下一条，不写库；列表行上不出现「稍后」标记", async () => {
     const second = notice({
       item: { ...notice().item, id: "n2", elements: [{ label: "name", text: "线性代数调课" }] },
     });
     render(<NoticePanel notices={[notice(), second]} filter={ALL} onRefresh={() => {}} />);
     swipeCard(-200);
-    // 主卡切到第二条（1/2 → 2/2）；不再有「稍后」标签（用户 2026-10-19：只要已读/未读）
+    // 主卡切到第二条（1/2 → 2/2）
     await waitFor(() => expect(screen.getByText("2/2")).toBeInTheDocument());
-    expect(screen.queryByText("稍后")).not.toBeInTheDocument();
+    // 列表行上不再有「稍后」标签（用户 2026-10-19：只要已读/未读）。
+    // 卡片底层的滑动提示（aria-hidden 装饰）不算列表标记——它只在拖动时可见。
+    const list = screen.getByRole("list");
+    expect(within(list).queryByText("稍后")).not.toBeInTheDocument();
   });
 });
 

@@ -4,6 +4,7 @@ import { errText, type UsageRange, type UsageSummary } from "@summarizing/shared
 import { api } from "../api";
 import { pushEscLayer } from "../lib/escLayer";
 import { cn } from "../lib/cn";
+import { fmtCompact, fmtExact } from "../lib/format";
 
 // 用量仪表盘（010）：活动栏左下角独立入口打开——**不进设置**（用户 2026-10-20 定：
 // 设置 = 声明式偏好，这里只是看数字）。三个大号数字：未命中输入 / 输出 / 缓存命中，互不重叠
@@ -16,12 +17,8 @@ const RANGES: { id: UsageRange; label: string }[] = [
   { id: "30d", label: "近 30 天" },
 ];
 
-/** 千分位（大号数字读起来才不费劲）。 */
-function fmt(n: number): string {
-  return n.toLocaleString("zh-CN");
-}
-
-/** 一枚大号数字卡；value=null 时显示「—」+ note（如「服务商未提供」）。 */
+/** 一枚大号数字卡；value=null 时显示「—」+ note（如「服务商未提供」）。
+ *  数字按 K/M/B 压缩（最多 3 位有效数字），悬浮显示精确值——与公开面板同一套记法。 */
 function Stat({ label, value, note }: { label: string; value: number | null; note?: string }) {
   return (
     <div className="flex flex-col items-center rounded-xl border border-line bg-canvas px-4 py-5">
@@ -31,8 +28,9 @@ function Stat({ label, value, note }: { label: string; value: number | null; not
           "mt-1.5 font-semibold tabular-nums tracking-tight",
           value === null ? "text-xl text-ink-muted" : "text-3xl",
         )}
+        title={value === null ? undefined : `${fmtExact(value)} token`}
       >
-        {value === null ? "—" : fmt(value)}
+        {value === null ? "—" : fmtCompact(value)}
       </div>
       <div className="mt-1 min-h-4 text-[11px] text-ink-muted">{note ?? ""}</div>
     </div>
@@ -128,7 +126,9 @@ export function UsageModal({ open, onClose }: { open: boolean; onClose: () => vo
                 />
               </div>
               <p className="mt-3 text-xs text-ink-muted">
-                {shown.callCount === 0 ? "这段时间还没有调用" : `共 ${fmt(shown.callCount)} 次调用`}
+                {shown.callCount === 0
+                  ? "这段时间还没有调用"
+                  : `共 ${fmtExact(shown.callCount)} 次调用`}
               </p>
             </>
           )}

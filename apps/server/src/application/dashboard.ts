@@ -74,14 +74,21 @@ function readDisk(dataRoot: string): { freeBytes: number; totalBytes: number } |
   }
 }
 
+/** 排行榜用户名的公开形态：只露前两个字（码点计）+「…」（用户 2026-10-21 定）。
+ *  截断在**服务端**做——`curl /api/dashboard` 拿到的就是截断后的名字，不靠前端藏。 */
+function publicRankName(username: string): string {
+  const cps = Array.from(username);
+  return cps.length <= 2 ? username : `${cps.slice(0, 2).join("")}…`;
+}
+
 /** 排行排序：总量降序，并列按用户名升序（码点序——刷新不跳动）。 */
 function compareRanking(
-  a: { name: string; tokens: number },
-  b: { name: string; tokens: number },
+  a: { fullName: string; tokens: number },
+  b: { fullName: string; tokens: number },
 ): number {
   if (a.tokens !== b.tokens) return b.tokens - a.tokens;
-  if (a.name < b.name) return -1;
-  if (a.name > b.name) return 1;
+  if (a.fullName < b.fullName) return -1;
+  if (a.fullName > b.fullName) return 1;
   return 0;
 }
 
@@ -110,7 +117,7 @@ export function collectDashboardSnapshot(args: {
   };
   const usageToday: TokenSums[] = [];
   const usageTotal: TokenSums[] = [];
-  const ranking: Array<{ name: string; tokens: number }> = [];
+  const ranking: Array<{ fullName: string; tokens: number }> = [];
   let dbTotal = 0;
   let dbOpened = 0;
   let dbFailed = 0;
@@ -136,13 +143,15 @@ export function collectDashboardSnapshot(args: {
     usageToday.push(stats.usageToday);
     usageTotal.push(stats.usageTotal);
     if (account.status === "active") {
-      ranking.push({ name: account.username, tokens: tokenTotal(stats.usageTotal) });
+      ranking.push({ fullName: account.username, tokens: tokenTotal(stats.usageTotal) });
     }
   }
 
-  // 服务端截断：响应里永远最多两项（不靠前端隐藏）
+  // 服务端截断：响应里永远最多两项、名字只露前两字（不靠前端隐藏）
   ranking.sort(compareRanking);
-  const topTwo = ranking.slice(0, 2);
+  const topTwo = ranking
+    .slice(0, 2)
+    .map((r) => ({ name: publicRankName(r.fullName), tokens: r.tokens }));
 
   const nowIso = wallClockFromDate(args.now);
   return DashboardSnapshotSchema.parse({
