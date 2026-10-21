@@ -32,7 +32,7 @@
   <a href="#"><img src="https://img.shields.io/badge/Fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify" /></a>
   <a href="#"><img src="https://img.shields.io/badge/Tailwind-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind v4" /></a>
   <a href="#"><img src="https://img.shields.io/badge/SQLite-每账户一库-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" /></a>
-  <a href="#"><img src="https://img.shields.io/badge/tests-447%20passing-brightgreen?style=flat-square" alt="tests" /></a>
+  <a href="#"><img src="https://img.shields.io/badge/tests-593%20passing-brightgreen?style=flat-square" alt="tests" /></a>
 </p>
 
 ## 它解决什么
@@ -59,9 +59,10 @@
 - **来源信息**：展开一个事项能看到它的每一条消息来自哪（一行一条进站消息，点开见来源的全部细节与原文入口）。
 - **存疑信息库**：拿不准的先存进库里（原话逐字 + 来源 + 需要人看的程度），不硬挂到事项上；之后可以人工清掉，也可以对 AI 说「清扫存疑库」让它复核。
 - **流水**：每条信息从进站到成事项的全程留痕——消化中实时显示轮次与轨迹，完成后留档；漏掉、拒收、降级都看得见。
+- **用量**：活动栏左下角的「用量」把一段时间里流过的 token 拆成三个互不重叠的数——未用缓存的输入、输出、缓存命中；缓存命中单独显示，一眼看出省了多少。服务商不返回缓存数据时明说「服务商未提供」，不拿 0 含糊。
 - **修改留痕**：每次改动都追加一份完整快照，历史随时可查。
-- **公开状态页**：`/dashboard` 不用登录就能看服务是否在跑、今天收了多少、队列有没有堆积、token 用量与累计前两名。只给数字、时间与版本号——不暴露你记了什么。
-- **信源可扩展**：新的消息来源按统一契约接入（[开发信源 →](SOURCE-GUIDE.md)）；信源自己声明设置项，界面自动渲染表单，core 和前端都不认识具体信源。
+- **公开状态页**：`/dashboard` 不用登录就能看服务是否在跑、今天收了多少、队列有没有堆积、token 用量与累计排行（前 10 名，名字只露前两个字）。只给数字、时间与版本号——不暴露你记了什么。
+- **信源可扩展**：新的消息来源按统一契约接入（[开发信源 →](SOURCE-GUIDE.md)）；信源自己声明设置项、接入引导与「最近活动」信号，界面自动渲染，core 和前端都不认识具体信源。
 - **多账户（邀请制）**：每个账户一套独立的看板/对话/信源/数据（每人一库）；AI key 各用各的。单机自用 = 一个账户的实例。
 - **自托管**：SQLite 单文件数据，拷走即备份；AI 走 OpenAI 兼容接口，可接本地模型。
 - **外观**：深色模式（可跟系统）、六种主题色、三种字体、两档信息密度；手机也能用。
@@ -84,7 +85,7 @@ npm run dev                # 打开 http://localhost:5173 登录 → 设置 → 
 装完之后，常用检查：
 
 ```bash
-npm test              # vitest（447 个用例）
+npm test              # vitest（593 个用例）
 npm run check         # 类型 + 代码规范 + 测试
 npm run check:dead    # 死代码检查
 npm run build -w @summarizing/web
