@@ -143,7 +143,10 @@ export function collectDashboardSnapshot(args: {
     usageToday.push(stats.usageToday);
     usageTotal.push(stats.usageTotal);
     if (account.status === "active") {
-      ranking.push({ fullName: account.username, tokens: tokenTotal(stats.usageTotal) });
+      const tokens = tokenTotal(stats.usageTotal);
+      // 0 token 的账户不上榜（2026-10-21 走查）：榜单回答「谁用得多」，
+      // 没调用过的账户占着第二名只是噪音，且与「暂无数据」的空态自相矛盾。
+      if (tokens > 0) ranking.push({ fullName: account.username, tokens });
     }
   }
 

@@ -415,6 +415,27 @@ describe("token 排行（US4）", () => {
     expect(snap.tokens.total.inputTokens).toBe(10_100); // 停用账户历史仍是全站总量的一部分
     expect(snap.accounts).toEqual({ total: 2, active: 1 });
   });
+
+  it("0 token 的账户不上榜（没调用过不是「第二名」）", async () => {
+    const realm = await makeTestRealm();
+    const used = await realm.addAccount({ username: "alice" });
+    await realm.addAccount({ username: "bob" }); // 从未调用
+    seedUsage(used.db, 500, 100, null);
+
+    const snap = await getSnapshot(realm.app);
+    expect(snap.tokenRanking).toEqual([{ name: "al…", tokens: 600 }]);
+    // 全站总量照常是 0 token 账户贡献的 0（不因不上榜而消失）
+    expect(snap.accounts.active).toBe(2);
+  });
+
+  it("所有账户都是 0 token → 空榜（页面显示「暂无数据」）", async () => {
+    const realm = await makeTestRealm();
+    await realm.addAccount({ username: "alice" });
+    await realm.addAccount({ username: "bob" });
+
+    const snap = await getSnapshot(realm.app);
+    expect(snap.tokenRanking).toEqual([]);
+  });
 });
 
 describe("只读聚合的脏形态（stats 层）", () => {

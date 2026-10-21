@@ -2,8 +2,8 @@ name: release
 
 # 发布：推 v* tag 时跑质量门 → 出 Windows 便携包 → 建/更新 GitHub Release 并挂附件。
 # 便携包在 windows-latest 上构建（build:release 内置的是本机 node.exe，故必须 Windows runner）。
-# 镜像构建（推 ACR）默认关闭——装好 Docker/配好 ACR secrets 后把 ENABLE_IMAGE_BUILD 置 true 或用
-# 手动触发时勾选（见下方 image job 的 if）。服务器只 pull 镜像，不在 2C2G 上 build（docs/11 阶段 2）。
+# 镜像构建（推 ACR）随 tag 自动跑；手动触发时也可勾 build_image 单独补推/重推某个 tag。
+# 前置 = 仓库已配好 4 个 ACR secret（docs/13 二·1）。服务器只 pull 镜像，不在 2C2G 上 build（docs/11 阶段 2）。
 on:
   push:
     tags: ["v*"]

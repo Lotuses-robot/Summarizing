@@ -34,6 +34,7 @@ function stubApi(
     hookPath?: string | null;
     lastEventAt?: string;
     lastIngestAt?: string;
+    state?: "ok" | "error";
   } = {},
 ): {
   writes: { url: string; method: string; body: unknown }[];
@@ -52,12 +53,13 @@ function stubApi(
         return Promise.resolve(emptyResponse(204));
       }
       if (url.endsWith("/api/sources")) {
+        const state = opts.state ?? "error";
         return Promise.resolve(
           jsonResponse([
             {
               name: "nc",
-              state: "error",
-              lastError: "封批失败（群 123）",
+              state,
+              lastError: state === "error" ? "封批失败（群 123）" : undefined,
               lastEventAt: opts.lastEventAt,
               lastIngestAt: opts.lastIngestAt,
               settings: opts.settingsSchema ?? [
@@ -249,26 +251,29 @@ describe("设置·信源区（D-89 / 走查修订③：分组卡 + 改完即生�
     expect(screen.queryByText("接入地址")).not.toBeInTheDocument();
   });
 
-  it("最近活动：显示「收到消息 / 成功入库」的相对时间（悬浮给精确时刻）", async () => {
-    stubApi({}, { lastEventAt: beijingAgo(5), lastIngestAt: beijingAgo(120) });
+  it("卡头 chip 显示「收到 · 入库」相对时间（取代原「正常」）", async () => {
+    stubApi({}, { state: "ok", lastEventAt: beijingAgo(5), lastIngestAt: beijingAgo(120) });
     renderSection();
-    expect(await screen.findByText(/收到消息：/)).toBeInTheDocument();
-    expect(screen.getByText(/5 分钟前/)).toBeInTheDocument();
-    expect(screen.getByText(/2 小时前/)).toBeInTheDocument();
+    expect(await screen.findByText("收到 5 分钟前 · 入库 2 小时前")).toBeInTheDocument();
   });
 
-  it("从未收到过：两处都写「从未」，不编造时间", async () => {
-    stubApi({});
+  it("从未收到过：卡头写「从未收到 · 从未入库」，不编造时间", async () => {
+    stubApi({}, { state: "ok" });
     renderSection();
-    await screen.findByText("nc");
-    expect(screen.getAllByText("从未").length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText("从未收到 · 从未入库")).toBeInTheDocument();
   });
 
-  it("无 webhook 的源（hookPath=null）只显示「成功入库」，不显示「收到消息」", async () => {
-    stubApi({}, { hookPath: null, lastIngestAt: beijingAgo(1) });
+  it("无 webhook 的源（hookPath=null）：卡头只有「入库」", async () => {
+    stubApi({}, { state: "ok", hookPath: null, lastIngestAt: beijingAgo(1) });
     renderSection();
-    await screen.findByText("nc");
-    expect(screen.queryByText(/收到消息：/)).not.toBeInTheDocument();
-    expect(screen.getByText(/1 分钟前|刚刚/)).toBeInTheDocument();
+    expect(await screen.findByText(/^入库 (1 分钟前|刚刚)$/)).toBeInTheDocument();
+    expect(screen.queryByText(/收到/)).not.toBeInTheDocument();
+  });
+
+  it("出错态：卡头仍是「最近出错」，不显示活动时间", async () => {
+    stubApi({}, { state: "error", lastEventAt: beijingAgo(5), lastIngestAt: beijingAgo(120) });
+    renderSection();
+    expect(await screen.findByText("最近出错")).toBeInTheDocument();
+    expect(screen.queryByText(/^收到 /)).not.toBeInTheDocument();
   });
 });

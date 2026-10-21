@@ -7,7 +7,7 @@
 **Tests**: 本特性**要求测试**（spec SC-005：`npm run check` 全绿、真实入口断言用户所见）。每个 story 的关键行为都配真实入口测试（HTTP 端点 / 真实组件渲染）。
 
 > **状态（2026-10-18 对账）**：T001–T041 已全部落地（代码/测试/CHANGELOG/seed；两轮 /code-review 的修复也含在内），
-> 逐条勾选以实际交付为准。**T042（真实入口走查）仍待用户真机执行**——见 docs/04 §四 N1–N8。
+> 逐条勾选以实际交付为准。**T042（真实入口走查）仍待用户真机执行**——见 docs/04 §七 N1–N9。
 > T002 的「脏形态基线」以落地测试为准：kind 缺席/脏值与 archived 迁移形态覆盖在
 > `apps/server/src/test/schema-migrate.test.ts` 与 `fence.test.ts`（基线式 TDD 未单独留存，说明在此）。
 

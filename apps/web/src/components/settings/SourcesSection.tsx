@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { SettingField, SourceSummary } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
@@ -16,11 +16,34 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-/** 活动时刻的人话（悬浮显示精确时间）；从未有记录 → 「从未」。
- *  给的是事实而不是判断：源安静多久、上次入库是什么时候，由用户自己看。 */
-function activityText(iso: string | undefined): ReactNode {
-  if (iso === undefined) return <span className="text-ink-muted">从未</span>;
-  return <span title={fmtFullTime(iso)}>{fmtAgo(iso) ?? iso}</span>;
+/** 活动时刻的相对说法（「N 分钟前」）；从未有记录 → 「从未」。 */
+function agoText(iso: string | undefined): string {
+  if (iso === undefined) return "从未";
+  return fmtAgo(iso) ?? iso;
+}
+
+/** 活动时刻的精确说法（悬浮提示用）；从未有记录 → 「从未」。 */
+function fullAt(iso: string | undefined): string {
+  return iso === undefined ? "从未" : fmtFullTime(iso);
+}
+
+/** 卡头活动信号：HTTP 源「收到」在前（源还在推是更强的活信号），所有源都带「入库」。
+ *  给的是事实而不是判断：安静多久由用户自己看。 */
+function activityLabel(summary: SourceSummary): string {
+  const ingest =
+    summary.lastIngestAt === undefined ? "从未入库" : `入库 ${agoText(summary.lastIngestAt)}`;
+  if (summary.hookPath === null) return ingest;
+  const received =
+    summary.lastEventAt === undefined ? "从未收到" : `收到 ${agoText(summary.lastEventAt)}`;
+  return `${received} · ${ingest}`;
+}
+
+/** 卡头活动信号的悬浮全文（精确时刻；无 webhook 的源没有「收到」一说）。 */
+function activityTitle(summary: SourceSummary): string {
+  const parts: string[] = [];
+  if (summary.hookPath !== null) parts.push(`收到：${fullAt(summary.lastEventAt)}`);
+  parts.push(`入库：${fullAt(summary.lastIngestAt)}`);
+  return parts.join(" · ");
 }
 
 /** 单字段输入（判别联合五型分支渲染——record 由调用方分流给 RecordEditor；前端不含信源专属知识，全按 schema 走）。
@@ -308,21 +331,23 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
     );
   };
 
-  const stateChip =
+  const headerChip =
     summary.state === "error" ? (
       <span className="chip shrink-0 border-danger/50 text-danger" title={summary.lastError ?? ""}>
         最近出错
       </span>
     ) : (
-      <span className="chip shrink-0">正常</span>
+      <span className="chip shrink-0" title={activityTitle(summary)}>
+        {activityLabel(summary)}
+      </span>
     );
 
   return (
     <Card
       title={
-        <span className="flex items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2">
           {summary.name}
-          {stateChip}
+          {headerChip}
         </span>
       }
       desc={
@@ -349,19 +374,6 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
           </div>
         </Row>
       )}
-      {/* 最近活动（2026-10-21 用户要求）：用「多久以前」判断源是否还在推数据。
-          HTTP 源看「收到消息」（webhook 命中即算），所有源都有「成功入库」；从未有记录就说从未。 */}
-      <Row label="最近活动" description="判断这个源还在不在推数据">
-        <span className="text-sm">
-          {summary.hookPath !== null && (
-            <>
-              收到消息：{activityText(summary.lastEventAt)}
-              <span className="mx-2 text-ink-muted">·</span>
-            </>
-          )}
-          成功入库：{activityText(summary.lastIngestAt)}
-        </span>
-      </Row>
       {summary.settings.length === 0 ? (
         <Row label={<span className="text-ink-muted">这个信源没有可配置项</span>} />
       ) : readFailed ? (
