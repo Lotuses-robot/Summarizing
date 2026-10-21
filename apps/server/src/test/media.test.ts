@@ -90,10 +90,10 @@ async function smallJpeg(): Promise<Buffer> {
 const DAY = 86_400_000;
 
 describe("mediaTtl（留存三档纯函数）", () => {
-  it("基础留存与大小反向：0 → 30 天、100 KiB ≈ 28.9 天、1 MiB ≈ 18.5 天、2 MiB → 7 天", () => {
-    expect(baseMediaTtlMs(0) / DAY).toBe(30);
-    expect(baseMediaTtlMs(100 * 1024) / DAY).toBeCloseTo(28.87, 1);
-    expect(baseMediaTtlMs(1024 * 1024) / DAY).toBeCloseTo(18.5, 1);
+  it("基础留存与大小反向：0 → 14 天、100 KiB ≈ 13.7 天、1 MiB → 10.5 天、2 MiB → 7 天", () => {
+    expect(baseMediaTtlMs(0) / DAY).toBe(14);
+    expect(baseMediaTtlMs(100 * 1024) / DAY).toBeCloseTo(13.66, 1);
+    expect(baseMediaTtlMs(1024 * 1024) / DAY).toBeCloseTo(10.5, 1);
     expect(baseMediaTtlMs(2 * 1024 * 1024) / DAY).toBe(7);
   });
 
@@ -103,7 +103,7 @@ describe("mediaTtl（留存三档纯函数）", () => {
 
   it("三档目标值：入库 = createdAt+基础；未引用 = readAt+3；引用 = citedAt+90", () => {
     const t0 = "2026-10-20T08:00:00";
-    expect(initialMediaExpiry(t0, 0)).toBe("2026-11-19T08:00:00"); // 30 天
+    expect(initialMediaExpiry(t0, 0)).toBe("2026-11-03T08:00:00"); // 14 天
     expect(uncitedMediaExpiry("2026-10-20T08:00:00")).toBe("2026-10-23T08:00:00"); // 3 天
     expect(citedMediaExpiry("2026-10-20T08:00:00")).toBe("2027-01-18T08:00:00"); // 90 天
   });

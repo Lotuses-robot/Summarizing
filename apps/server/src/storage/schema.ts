@@ -119,7 +119,7 @@ export const chatTurns = sqliteTable(
 
 // 图片媒体缓存（009）：文件在 data/media/<uid>/<sha256>.<ext>，本表只存元数据与生命周期。
 // expires_at 是**唯一**生命周期字段（用户 2026-10-20 定「只要一个 expiredate」）：
-//   入库 → 基础留存（大小反向 7–30 天）；读过未被引用 → 缩短到 3 天；被证据引用 → 抬到 90 天。
+//   入库 → 基础留存（大小反向 7–14 天）；读过未被引用 → 缩短到 3 天；被证据引用 → 抬到 90 天。
 // origin_url 供原文占位反查（上传图的占位就是 /api/media/<id>，直接按主键命中，此列为 null）。
 export const media = sqliteTable(
   "media",

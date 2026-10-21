@@ -1,5 +1,5 @@
 // 图片缓存留存规则单一出处（009 / 用户 2026-10-20 定）：
-//   入库        → clamp(30天 − size/2MiB × 23天, 7天, 30天)（与大小反向）
+//   入库        → clamp(14天 − size/2MiB × 7天, 7天, 14天)（与大小反向）
 //   读过未引用   → min(原值, 读取时刻 + 3 天)（只提前、不延后）
 //   证据引用     → max(当前, 引用时刻 + 90 天)（证据链不断）
 // `expiresAt` 是**唯一**生命周期字段：没有 readAt/citedAt 状态机（用户 2026-10-20 定「只要一个
@@ -27,7 +27,7 @@ const CITED_TTL_DAYS = 90;
 
 const DAY_MS = 86_400_000;
 const MIN_TTL_DAYS = 7;
-const MAX_TTL_DAYS = 30;
+const MAX_TTL_DAYS = 14;
 
 /** 基础留存时长（毫秒）：越小留得越久，2 MiB 封顶 7 天。 */
 export function baseMediaTtlMs(sizeBytes: number): number {
