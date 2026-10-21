@@ -118,6 +118,8 @@ async function assembleSpace(
 
 /** 空间集线器：惰性装配（并发去重）+ 令牌索引 + 全量启停。 */
 export interface SpaceHub {
+  /** 数据根目录（system.db 与 users/ 的所在处；公开状态面板只读遍历账户库用）。 */
+  readonly dataRoot: string;
   /** 取（必要时装配）uid 的空间——并发首访去重（promise map）。 */
   ensure(uid: string): Promise<Space>;
   /** 按接入令牌定空间（webhook 网关用）：仅 active 账户；无/错/停用 → undefined。 */
@@ -155,6 +157,7 @@ export function makeSpaceHub(args: {
   }
 
   return {
+    dataRoot: args.dataRoot,
     ensure,
     async byToken(token: string): Promise<Space | undefined> {
       const account = getAccountByToken(args.registry, token);

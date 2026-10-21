@@ -321,6 +321,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
 
   it("关停超时兜底：挂起的空间 closeAll（永不 settle）按超时放弃等待，不无限等待", async () => {
     const hangingHub: SpaceHub = {
+      dataRoot: os.tmpdir(),
       ensure: () => new Promise<Space>(() => {}),
       byToken: () => new Promise<Space | undefined>(() => {}),
       ensureAll: async () => {},

@@ -656,6 +656,82 @@ export const UsageSummarySchema = z.object({
 });
 export type UsageSummary = z.infer<typeof UsageSummarySchema>;
 
+// ───────────────────────── 公开状态面板（011）─────────────────────────
+
+/** 一组 token 总量：三个维度互不重叠（与 010 的 UsageSummary 同口径）。
+ *  `cachedTokens` 为 null ⇔ 范围内所有账户的所有调用都没返回缓存字段。 */
+export const DashboardTokenTotalsSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  completionTokens: z.number().int().nonnegative(),
+  cachedTokens: z.number().int().nonnegative().nullable(),
+});
+export type DashboardTokenTotals = z.infer<typeof DashboardTokenTotalsSchema>;
+
+/** 公开状态快照（`GET /api/dashboard`，无需登录）：**全字段白名单**——只有数字、枚举、
+ *  时间与版本号。除累计 token 排行前两名的用户名外，不含任何自由文本、uid、路径或内容
+ *  （011 FR-009；没有人工审核这一环，所以安全只能靠「按构造少说」）。 */
+export const DashboardSnapshotSchema = z.object({
+  version: z.string(),
+  startedAt: z.string(),
+  now: z.string(),
+  uptimeSec: z.number().int().nonnegative(),
+  memory: z.object({ rssBytes: z.number().int().nonnegative() }),
+  disk: z
+    .object({
+      freeBytes: z.number().int().nonnegative(),
+      totalBytes: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  databases: z.object({
+    total: z.number().int().nonnegative(),
+    opened: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+  }),
+  accounts: z.object({
+    total: z.number().int().nonnegative(),
+    active: z.number().int().nonnegative(),
+  }),
+  today: z.object({
+    rawBatches: z.number().int().nonnegative(),
+    digested: z.number().int().nonnegative(),
+    digestFailed: z.number().int().nonnegative(),
+    llmCalls: z.number().int().nonnegative(),
+  }),
+  queue: z.object({
+    pending: z.number().int().nonnegative(),
+    digesting: z.number().int().nonnegative(),
+  }),
+  failedRawInputs: z.number().int().nonnegative(),
+  items: z.object({
+    tasks: z.number().int().nonnegative(),
+    notices: z.number().int().nonnegative(),
+    trashed: z.number().int().nonnegative(),
+  }),
+  media: z.object({
+    count: z.number().int().nonnegative(),
+    bytes: z.number().int().nonnegative(),
+  }),
+  tokens: z.object({
+    today: DashboardTokenTotalsSchema,
+    total: DashboardTokenTotalsSchema,
+  }),
+  /** 累计 token 前两名（启用中账户）：服务端截断，不含 uid，按总量降序、并列按用户名升序。 */
+  tokenRanking: z
+    .array(
+      z.object({
+        name: z.string(),
+        tokens: z.number().int().nonnegative(),
+      }),
+    )
+    .max(2),
+  /** 有库读不了或数据形状异常——页面显示「部分数据不可读」，不静默。 */
+  degraded: z.boolean(),
+  /** 本次聚合的时刻（北京墙钟）；缓存命中时保持上次成功时刻。 */
+  generatedAt: z.string(),
+  cached: z.boolean(),
+});
+export type DashboardSnapshot = z.infer<typeof DashboardSnapshotSchema>;
+
 // ───────────────────────── 设置面板（05§五，D-81）─────────────────────────
 
 /** AI 连接设置（PUT /api/settings/ai 请求体）。apiKey 省略 = 沿用现值（GET 不回显完整 Key，防肩窥）。 */

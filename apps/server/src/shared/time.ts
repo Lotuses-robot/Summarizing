@@ -39,3 +39,13 @@ export function nowWallClock(): string {
 export function wallClockFromUnix(seconds: number): string {
   return wallClockFromDate(new Date(seconds * 1000));
 }
+
+/** 北京墙钟某日 00:00 的墙钟串：`daysBack = 0` 为今日，6 = 六天前（含今日共 7 个日历日）。
+ *  纯 UTC 分量算术（+8h 后归零到 UTC 日界再减回）——与机器时区无关（D-97 同口径）。 */
+export function beijingDayStart(now: Date, daysBack = 0): string {
+  const beijingMidnight = new Date(now.getTime() + BEIJING_OFFSET_MS);
+  beijingMidnight.setUTCHours(0, 0, 0, 0);
+  return wallClockFromDate(
+    new Date(beijingMidnight.getTime() - daysBack * 86_400_000 - BEIJING_OFFSET_MS),
+  );
+}

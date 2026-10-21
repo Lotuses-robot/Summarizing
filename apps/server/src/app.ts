@@ -21,6 +21,7 @@ import { registerSettingsRoutes } from "./routes/settings";
 import { registerUncertainRoutes } from "./routes/uncertain";
 import { registerUsageRoutes } from "./routes/usage";
 import { registerMediaRoutes } from "./routes/media";
+import { registerDashboardRoutes } from "./routes/dashboard";
 import { MEDIA_MAX_INPUT_BYTES } from "./shared/mediaTtl";
 import { nowWallClock } from "./shared/time";
 import type { SpaceHub } from "./spaces";
@@ -106,11 +107,17 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
   // 禁嵌框；API 响应 no-store（防共享设备浏览器缓存残留）。CSP 留批次 3（需对 Vite 产物实测）。
   // ⚠️ /api/media/ 排除在 no-store 外（009）：图片是内容寻址的静态字节，private+immutable
   //    让浏览器长期缓存、不反复打服务端；这里的钩子在 onSend 跑，晚于路由设的头，故必须让步。
+  // ⚠️ /api/dashboard 同样让步（011）：公开状态快照自己声明 public, max-age=30——它是唯一
+  //    刻意可共享缓存的 API（60s 服务端缓存 + 浏览器 30s），no-store 会把限流意义抹掉。
   app.addHook("onSend", async (req, reply, payload) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "same-origin");
     reply.header("X-Frame-Options", "DENY");
-    if (req.url.startsWith("/api/") && !req.url.startsWith("/api/media/")) {
+    if (
+      req.url.startsWith("/api/") &&
+      !req.url.startsWith("/api/media/") &&
+      !req.url.startsWith("/api/dashboard")
+    ) {
       reply.header("Cache-Control", "no-store");
     }
     return payload;
@@ -119,6 +126,8 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
   // ── 公开面 ──
   registerAuthPublicRoutes(app, { registry: deps.registry, hub: deps.hub, secret });
   registerWebhookGateway(app, deps.hub);
+  // 公开状态面板（011）：无认证，只吐白名单快照；页面自包含，不进 React 构建。
+  registerDashboardRoutes(app, { registry: deps.registry, dataRoot: deps.hub.dataRoot });
 
   // ── 受保护面（封装作用域：preHandler 一次挂全；路由只读 req.space）──
   void app.register(async (scope) => {
