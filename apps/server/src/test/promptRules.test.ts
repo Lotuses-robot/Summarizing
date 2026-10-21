@@ -52,3 +52,34 @@ describe("buildDigestPrompt：用户拒收规则注入（D-107）", () => {
     expect(p).toContain("不得含 dueDate");
   });
 });
+
+describe("buildDigestPrompt：事项 / 通知判类（2026-10-21 走查修订）", () => {
+  it("主尺 = 备忘录测试（不用动作词清单判类）", () => {
+    const p = buildDigestPrompt("");
+    expect(p).toContain("如果这条消息是你自己记在手机备忘录里的，你会把它写成待办吗");
+    // 旧的「作业、会议、报名、投票…」清单已删——词面命中曾把一条报名公告误建为事项
+    expect(p).not.toContain("（作业、会议、报名、投票、领取、缴费、登记、面试、提交…）");
+    expect(p).toContain("不要靠关键词命中判类");
+  });
+
+  it("条件受众：面向「参加 X 的同学」这类群体时倾向通知；带时间压力才判事项", () => {
+    const p = buildDigestPrompt("");
+    expect(p).toContain("条件群体");
+    expect(p).toContain("不替他承担可能的义务");
+    expect(p).toContain("带明确时间压力");
+  });
+
+  it("重要性测试兜漏判：无比重要 → 破例进待办", () => {
+    const p = buildDigestPrompt("");
+    expect(p).toContain("重要性测试");
+    expect(p).toContain("无比重要");
+  });
+
+  it("缺日期/缺字段不是存疑（doubtNote 恒 null）", () => {
+    const p = buildDigestPrompt("");
+    expect(p).toContain("缺日期 / 缺字段不是存疑");
+    expect(p).toContain("doubtNote 恒为 null");
+    // 格式文档里不再给 doubtNote 留槽位（有槽位模型就会填）
+    expect(p).not.toContain('"doubtNote":null');
+  });
+});

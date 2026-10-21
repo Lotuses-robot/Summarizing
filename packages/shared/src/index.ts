@@ -329,7 +329,10 @@ export const ChangeItemSchema = z.discriminatedUnion("action", [
     elements: z.array(ElementInputSchema).min(1),
     tags: z.array(z.string().min(1)),
     kind: z.enum(["task", "notice"]).optional(), // 分类轴（007）：缺省 task；通知=notice（不得含 dueDate，围栏强制 FR-003）
-    doubtNote: z.string().nullable(),
+    /** 存疑标记（⚠️ D-85 起停用：agent0 判不准走 park_uncertain，缺日期属「日期未知」不是存疑）。
+     *  保留**可选**仅为兼容存量调用方；新产出恒缺省 = null（用户 2026-10-21 走查逮出：必填会让模型
+     *  把「我没能设出日期」写进来，渲染成流水里的「⚠ 存疑」——把正常留空说成了存疑）。 */
+    doubtNote: z.string().nullable().optional(),
   }),
   z
     .object({
@@ -839,10 +842,18 @@ export const SourceSummarySchema = z.object({
   lastError: z.string().optional(),
   /** 最近出错时刻（北京墙钟）——「最近出错」显示多久以前。 */
   lastErrorAt: z.string().optional(),
-  /** 最近一次命中 webhook 路由的请求时刻（仅 HTTP 源有）。 */
-  lastEventAt: z.string().optional(),
-  /** 最近一次成功进站时刻——「最近活动」的主信号。 */
-  lastIngestAt: z.string().optional(),
+  /** 「最近活动」信号：**由信源适配器声明**（key + 短名），时刻由适配器/core 打点。
+   *  core 与前端都不认识具体信号的含义——加新源只改适配器，展示层一行不动（2026-10-21 解耦）。 */
+  activity: z.array(
+    z.object({
+      /** 给人看的短名（如「收到」「入库」）。 */
+      label: z.string(),
+      /** 最近一次发生时刻；缺席 = 从未。 */
+      at: z.string().optional(),
+    }),
+  ),
+  /** 接入引导（适配器声明）：怎么在**该信源自己的系统**里把 webhook 指过来。缺席 = 无引导。 */
+  guide: z.string().optional(),
   settings: z.array(SettingFieldSchema),
   hookPath: z.string().nullable(),
 });

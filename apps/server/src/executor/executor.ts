@@ -61,22 +61,23 @@ function applyChanges(
       case "create_item": {
         const elements = buildElements(item.elements);
         const kind = item.kind ?? "task"; // 分类轴（007）：缺省 task；通知=notice（无 dueDate，围栏已强制）
+        const doubtNote = item.doubtNote ?? null; // D-85 起停用：缺席即 null（存量调用方仍可显式传）
         const itemId = newItemId();
         repo.appendItemVersion(tx, {
           itemId,
           action: "create_item",
-          detail: describe(elements, item.tags, item.doubtNote, kind),
+          detail: describe(elements, item.tags, doubtNote, kind),
           snapshot: {
             elements,
             tags: item.tags,
             status: "todo",
             kind,
-            doubtNote: item.doubtNote,
+            doubtNote,
           },
           by,
         });
         attachElementEvidence(tx, raw, itemId, item.elements, by, citedMediaIds);
-        details.push(describe(elements, item.tags, item.doubtNote, kind));
+        details.push(describe(elements, item.tags, doubtNote, kind));
         break;
       }
       case "update_item": {
