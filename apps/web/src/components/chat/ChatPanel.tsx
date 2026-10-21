@@ -29,6 +29,9 @@ type Msg = {
 
 type Mention = { id: string; title: string };
 
+/** 降级提示的停留时长（毫秒）：说清「刚刚发生了什么」就够，不长期占着输入区。 */
+const IMAGE_NOTICE_MS = 2000;
+
 /** 对话面板（05§四）：VS Code 停靠式——只听用户的，绝不自动收；
  *  会话流 + 工具轨迹 chips（人话）+ 事项 chips（点击深链看板）+ @ 提及事项（2026-09-27）。 */
 export function ChatPanel({
@@ -60,6 +63,8 @@ export function ChatPanel({
   const [imageNotice, setImageNotice] = useState<string | null>(null);
   // 上传中（009：点发送才上传，网络那几秒要有可见反馈——否则只是按钮变灰）
   const [sending, setSending] = useState(false);
+  // 提示的自动消失定时器（用户 2026-10-21：挂两秒就够，别长期占着输入区）
+  const noticeTimerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -85,6 +90,13 @@ export function ChatPanel({
 
   // 面板与 @ 下拉各挂一层 Esc（05§六）：后注册先退——下拉关完才轮到收面板
   useEffect(() => pushEscLayer(() => onCloseRef.current()), []);
+  // 卸载时撤掉提示的自动收起定时器（不然回调会在已卸载组件上 setState）
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
   useEffect(() => {
     if (mentionQuery === null) return;
     return pushEscLayer(() => setMentionQuery(null));
@@ -175,6 +187,16 @@ export function ChatPanel({
     setImageNotice(null);
   };
 
+  /** 亮一条降级提示并 2 秒后自动收起（同一提示连发也重新计时）。 */
+  const showImageNotice = (text: string): void => {
+    setImageNotice(text);
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => {
+      noticeTimerRef.current = null;
+      setImageNotice(null);
+    }, IMAGE_NOTICE_MS);
+  };
+
   /** 上传待发送的图（009）——**发送时才调**，返回服务端 url 与「动图被压缩」标记。 */
   const uploadImage = async (file: File) => api.uploadMedia(file);
 
@@ -206,7 +228,7 @@ export function ChatPanel({
         const notes: string[] = [];
         if (up.animationCompressed) notes.push("动图已压缩（保存的动画可能比原图短）");
         if (up.alphaFlattened) notes.push("透明背景已填白");
-        if (notes.length > 0) setImageNotice(notes.join("；"));
+        if (notes.length > 0) showImageNotice(notes.join("；"));
       } catch (err) {
         setImageError(errText(err));
         setBusy(false);

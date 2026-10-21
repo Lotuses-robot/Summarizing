@@ -40,6 +40,7 @@ export async function storeImageBytes(
   const createdAt = nowWallClock();
   const expiresAt = initialMediaExpiry(createdAt, data.length);
   const file = mediaFilePath(mediaDir, id, mime);
+  let wrote = false;
   if (!existsFile(file)) {
     // 幂等：先写临时文件再 rename，防并发写同一路径时半截文件被读走
     mkdirSync(mediaDir, { recursive: true });
@@ -47,15 +48,29 @@ export async function storeImageBytes(
     const { writeFileSync, renameSync } = await import("node:fs");
     writeFileSync(tmp, data);
     renameSync(tmp, file);
+    wrote = true;
   }
-  repo.insertMedia(db, {
-    id,
-    mime,
-    sizeBytes: data.length,
-    createdAt,
-    expiresAt,
-    originUrl: opts.originUrl ?? null,
-  });
+  try {
+    repo.insertMedia(db, {
+      id,
+      mime,
+      sizeBytes: data.length,
+      createdAt,
+      expiresAt,
+      originUrl: opts.originUrl ?? null,
+    });
+  } catch (err) {
+    // 落行失败 → 撤掉本次新建的文件：清理器按行扫，没有行指向的文件永远没人回收。
+    // 只删「自己新建的」且「库里确实没有这一行」（并发插入同一 sha 时，文件要留给对方）。
+    if (wrote) {
+      try {
+        if (repo.getMedia(db, id) === null) rmSync(file, { force: true });
+      } catch {
+        // 连读都失败就保守留着：最多一个孤儿文件，比误删别人在用的文件安全
+      }
+    }
+    throw err;
+  }
   return { id, mime, sizeBytes: data.length, animationCompressed, alphaFlattened };
 }
 

@@ -416,6 +416,15 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
     await waitFor(() => expect(screen.getByText(/动图已压缩/)).toBeInTheDocument());
   });
 
+  it("降级提示 2 秒后自动收起（不长期占着输入区）", async () => {
+    stubUpload({ animationCompressed: true });
+    renderPanel();
+    pickImage();
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText(/动图已压缩/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/动图已压缩/)).toBeNull(), { timeout: 3000 });
+  });
+
   it("透明背景被填白 → 界面明说（不静默）", async () => {
     stubUpload({ alphaFlattened: true });
     renderPanel();

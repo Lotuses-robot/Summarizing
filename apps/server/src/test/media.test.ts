@@ -806,3 +806,16 @@ describe("进站缓存的重试（009：只对瞬态错误重试一次）", () =
     );
   });
 });
+
+describe("落行失败的回滚（009：不留无行孤儿文件）", () => {
+  it("insertMedia 失败 → 本次新建的文件被撤掉，目录不留垃圾", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    // 用触发器让插入必失败（select 仍正常——正好覆盖「库可查、插入炸」这条路径）
+    db.$client.exec(
+      "CREATE TRIGGER media_fail BEFORE INSERT ON media BEGIN SELECT RAISE(ABORT, 'boom'); END",
+    );
+    await expect(storeImageBytes(db, dir, await smallJpeg())).rejects.toThrow();
+    expect(readdirSync(dir)).toEqual([]); // 文件已回滚（清理器按行扫，孤儿文件永远没人收）
+  });
+});
