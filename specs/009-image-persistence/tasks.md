@@ -48,7 +48,7 @@
 ### Tests（先写并确认 FAIL）
 
 - [X] T101 [P] [S1] `apps/server/src/test/media.test.ts`：TTL 纯函数（0 / 100 KiB / 1 MiB / 2 MiB → 30/28.9/18.5/7 天；clamp 边界）
-- [X] T102 [P] [S1] `apps/server/src/test/media.test.ts`：`extractImageUrls` / `mediaIdFromUrl` / `textCitesMedia` 的脏形态（T005）
+- [X] T102 [P] [S1] `apps/server/src/test/media.test.ts`：`extractImageUrls` / `mediaIdFromUrl` 的脏形态（T005）
 - [X] T103 [P] [S1] `apps/server/src/test/media.test.ts`：上传校验矩阵（T001/T002：SVG、伪装 MIME、截断、超限）
 - [X] T104 [P] [S1] `apps/server/src/test/media.test.ts`：压缩（大 JPEG → ≤1.9 MiB；**多帧图 >2 MiB → 压缩后 ≤1.9 MiB 且提示动画被压缩**；HEIC 拒收；**最低档仍 ≥2 MiB 拒收**）
 - [X] T105 [P] [S1] `apps/server/src/test/media.test.ts`：读取隔离（未登录 401 / 他人账户 404 / 坏 id 404 / 文件缺失 404）
@@ -63,7 +63,7 @@
 - [X] T114 [S1] `apps/server/src/storage/repo.ts`：`insertMedia` / `getMedia` / `getMediaByOriginUrl` / `resolveMediaId` / `bumpMediaExpiry` / `shortenMediaExpiry` / `listExpiredMedia` / `deleteMediaRow`（幂等插入：同 sha256 重复上传直接复用）
 - [X] T115 [S1] 新 `apps/server/src/shared/imageBytes.ts`：`ALLOWED_IMAGE_MIME` / `matchesMagic` / `sniffImageMime` / `mediaExt`（从 `agent0/fetchImage.ts` 抽出，原处改 import——单一出处）
 - [X] T116 [S1] 新 `apps/server/src/shared/mediaTtl.ts`：`MEDIA_COMPRESS_THRESHOLD` / `MEDIA_TARGET_BYTES` / `MEDIA_MAX_INPUT_BYTES` / `MEDIA_MAX_PIXELS` / `CITED_TTL_DAYS = 90` / `baseMediaTtlMs` / `addDaysWallClock` / `initialMediaExpiry` / `uncitedMediaExpiry` / `citedMediaExpiry`
-- [X] T117 [S1] 新 `apps/server/src/shared/mediaPlaceholders.ts`：`extractImageUrls` / `mediaIdFromUrl` / `textCitesMedia`
+- [X] T117 [S1] 新 `apps/server/src/shared/mediaPlaceholders.ts`：`extractImageUrls` / `mediaIdFromUrl`（引用判定后续落在 `repo.resolveMediaId` / `repo.isMediaCited`）
 - [X] T118 [S1] 新 `apps/server/src/application/media.ts`：`storeImageBytes(db, mediaDir, bytes, { originUrl })`——校验 → 超限判定 → sharp 压缩（静图：质量阶梯 85→75→65→55，再降采样 2560→1920→1280，PNG 走调色板；**多帧图：先降帧率/丢帧，仍超则按静图档继续压，返回 `animationCompressed=true`**）→ **压到最低档仍 ≥2 MiB 则拒收** → sha256 → 落盘 → 落行（重复内容复用已有行，`expiresAt` 取较晚者）；失败抛人话错误
 - [X] T119 [S1] `application/media.ts`：`sweepExpiredMedia(db, mediaDir)`——删文件+行，stderr 一次汇总（张数/字节）；文件缺失只删行并留痕
 - [X] T120 [S1] 新 `apps/server/src/routes/media.ts`：`POST /api/media`（认证；raw body 解析器只在该路由挂 `image/*`；`bodyLimit` 20 MiB；返回 `MediaUploadResponse`）
@@ -137,7 +137,7 @@
 
 ### 实现
 
-- [X] T404 [S4] `apps/server/src/executor/executor.ts`：`attachElementEvidence` 写 quote 时用 `textCitesMedia` 判定 → 命中即 `updateMediaExpiry(max(当前, 引用时刻 + 90 天))`；`executeChanges` 返回 `citedMediaIds`。⚠️ **执行时刻由执行器取 `nowWallClock()`**（不是 `createdAt`）——晚到引用才有意义
+- [X] T404 [S4] `apps/server/src/executor/executor.ts`：`attachElementEvidence` 写 quote 时扫占位（`repo.resolveMediaId`）→ 命中即 `bumpMediaExpiry(引用时刻 + 90 天)`；缩短另设跨批否决 `repo.isMediaCited`；`executeChanges` 返回 `citedMediaIds`。⚠️ **执行时刻由执行器取 `nowWallClock()`**（不是 `createdAt`）——晚到引用才有意义
 - [X] T405 [S4] `apps/server/src/agent0/digest.ts`：`fetch_image` 成功时记录 media id（本批集合）；`executeChanges` 之后对「读过且不在 citedMediaIds」的项 `updateMediaExpiry(min(原值, readAt+3d))`；更新 0 行静默跳过
 - [X] T406 [S4] `apps/server/src/index.ts`：清理器改为启动一次 + 每小时 `setInterval`（`unref()`，不阻止进程退出）；关停时 clear
 

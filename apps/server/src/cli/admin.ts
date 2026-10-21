@@ -45,8 +45,8 @@ const ADMIN_USAGE = `用法（运维命令）：
   passwd:reset <username>    重置密码（全端下线；交互输入新密码）
   invite:new [--days N]      生成一次性邀请码（默认 7 天；设 BASE_URL 时附完整注册链接）
   invite:revoke <code>       作废未使用的邀请码
-  backup [--out DIR]         在线备份全部库（system.db + users/*.db → DIR，默认 <dataRoot>/backups/<时间戳>）
-  restore <DIR>              从备份目录还原全部库（**须先停服**）`;
+  backup [--out DIR]         在线备份全部库与图片（system.db + users/*.db + media/ → DIR，默认 <dataRoot>/backups/<时间戳>）
+  restore <DIR>              从备份目录还原全部库与图片（**须先停服**）`;
 
 /** 按用户名取账户；不存在/格式坏抛人话错误。 */
 function mustFind(db: RegistryDb, usernameRaw: string) {

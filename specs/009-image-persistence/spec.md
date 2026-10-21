@@ -113,16 +113,16 @@ QQ 群消息里的图片（原文占位 `[图片](url)`）在进站时由服务�
 
 ### Functional Requirements
 
-- **FR-001**: 系统 MUST 提供 `POST /api/media`（认证），接收原始图片字节，返回 `{ id, url, mime, sizeBytes }`。
+- **FR-001**: 系统 MUST 提供 `POST /api/media`（认证；鉴权先于解析 body），接收原始图片字节，返回 `{ id, url, mime, sizeBytes, animationCompressed, alphaFlattened }`。
 - **FR-002**: 系统 MUST 校验 MIME + 魔数；只收 JPEG/PNG/WebP/GIF/BMP/TIFF；拒收 SVG。
 - **FR-003**: 单图输入上限 20 MiB；像素上限 50MP；超限拒收并可见报错。
-- **FR-004**: 存储前 >2 MiB 的图 MUST 被压缩到 2 MiB 以下（质量阶梯 → 降采样；动图先降帧/丢帧再按静图压缩）；压到最低档仍 ≥2 MiB 拒收。
+- **FR-004**: 存储前 >2 MiB 的图 MUST 被压缩到 2 MiB 以下（质量阶梯 → 降采样；动图先降帧/丢帧再按静图压缩）；压到最低档仍 ≥2 MiB 拒收。**任何降级都必须回报**：动图变短/变单帧 → `animationCompressed`；透明背景被填白 → `alphaFlattened`。
 - **FR-005**: 文件 MUST 存于 `data/media/<uid>/<sha256>.<ext>`；用户库新增 `media` 表（id/mime/sizeBytes/createdAt/expiresAt/originUrl）。
 - **FR-006**: `GET /api/media/:id` MUST 要求登录并按账户库校验归属；响应 `Cache-Control: private`、`nosniff`；文件缺失 404。
 - **FR-007**: 进站（`ingestBatch`）后 MUST 扫描 `[图片](http…)` 并后台缓存（并发上限 2）；失败 stderr 留痕；原文字节不变。
 - **FR-008**: agent0 `fetch_image` MUST 优先解析本地媒体（零网络）；未命中走原下载，成功后持久化。**agent0 单图读取上限保持 2 MiB**。
 - **FR-009**: 基础留存 MUST 为 `clamp(30d − size/2MiB × 23d, 7d, 30d)`，按**最终存储大小**计算。
-- **FR-010**: digest 结束后，本批 agent0 读过且未被证据引用的媒体 MUST 将 `expiresAt` 改为 `min(原值, 读取时刻 + 3 天)`；更新 0 行则忽略。
+- **FR-010**: digest 结束后，本批 agent0 读过且**未被任何批次的证据引用**的媒体 MUST 将 `expiresAt` 改为 `min(原值, 读取时刻 + 3 天)`（跨批否决：A 批引用过、B 批只读过 → 不缩）；更新 0 行则忽略。
 - **FR-011**: 证据引用（引文含该图占位）MUST 把 `expiresAt` 抬到 `max(当前, 引用时刻 + 90 天)`——晚到的引用能把被缩短过的图救回来；多次引用以最后一次为准（日期只增不减）。
 - **FR-012**: 清理器 MUST 在启动时与每小时运行一次，删除 `expiresAt <= now` 的文件与行，stderr 留痕。
 - **FR-013**: `GetItemResult` MUST 附带 `media` 映射：key = **原文里的占位 URL**（上传图是 `/api/media/<id>`，信源图是原始链接），value = `MediaRef`。前端一次拿全，不做 N+1。

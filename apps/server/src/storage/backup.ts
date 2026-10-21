@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 
@@ -53,21 +53,41 @@ function listDbRelPaths(dataRoot: string): string[] {
 
 /**
  * 备份数据根下全部库到 outDir（保留相对结构：outDir/system.db、outDir/users/<uid>.db）。
- * 逐库 .backup，返回备份出的文件相对路径列表。
+ * **图片字节也一起备**（009）：只备库不备 `media/`，还原后每张图都成了「已过期」（行在文件不在）。
+ * 逐库 .backup；图片整目录拷贝（内容寻址只增，备份期间新增的图最多漏拷，不会产生坏文件）。
+ * 返回备份出的条目（库的相对路径 + `media/` 标记）。
  */
 export async function backupAll(layout: DataLayout, outDir: string): Promise<string[]> {
   const rels = listDbRelPaths(layout.dataRoot);
   for (const rel of rels) {
     await backupDatabase(path.join(layout.dataRoot, rel), path.join(outDir, rel));
   }
+  if (existsSync(mediaRoot(layout.dataRoot))) {
+    cpSync(mediaRoot(layout.dataRoot), path.join(outDir, "media"), { recursive: true });
+    rels.push("media/");
+  }
   return rels;
 }
 
-/** 把 inDir 里的全部库还原回数据根（system.db + users/<uid>.db）。**离线**（停服后）。返回还原的文件清单。 */
+/** 把 inDir 里的全部库还原回数据根（system.db + users/<uid>.db），媒体目录同快照一并替换。
+ *  **离线**（停服后）。返回还原的条目清单。 */
 export function restoreAll(layout: DataLayout, inDir: string): string[] {
   const rels = listDbRelPaths(inDir);
   for (const rel of rels) {
     restoreDatabase(path.join(inDir, rel), path.join(layout.dataRoot, rel));
   }
+  const mediaSrc = path.join(inDir, "media");
+  if (existsSync(mediaSrc)) {
+    // 与库同一份快照：先清再铺（否则会留下「库已回滚、文件还在」的幽灵图）
+    const mediaDst = mediaRoot(layout.dataRoot);
+    rmSync(mediaDst, { recursive: true, force: true });
+    cpSync(mediaSrc, mediaDst, { recursive: true });
+    rels.push("media/");
+  }
   return rels;
+}
+
+/** 图片字节根（`<dataRoot>/media/<uid>/`）——与库同属一份备份快照。 */
+function mediaRoot(dataRoot: string): string {
+  return path.join(dataRoot, "media");
 }

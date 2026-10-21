@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { z } from "zod";
-import { extractImageUrls, mediaIdFromUrl, textCitesMedia } from "@summarizing/shared";
+import { extractImageUrls, mediaIdFromUrl } from "@summarizing/shared";
 import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
 import { executeChanges } from "../executor/executor";
 import { makeDb } from "../storage/db";
@@ -17,6 +17,7 @@ import {
   mediaFilePath,
 } from "../application/media";
 import { makeAgentTools } from "../agent0/tools";
+import { retryRawInput } from "../agent0/digest";
 import { FakeLlm } from "./helpers/fakeLlm";
 import type * as downloaderModule from "../shared/imageDownloader";
 import {
@@ -144,13 +145,7 @@ describe("图片占位解析", () => {
     expect(mediaIdFromUrl("https://a/1.jpg")).toBeNull();
     expect(mediaIdFromUrl("/api/board")).toBeNull();
     expect(mediaIdFromUrl("/api/media/")).toBeNull();
-  });
-
-  it("引用判定：本地图按 id、信源图按 originUrl", () => {
-    const opts = { mediaId: "deadbeef", originUrl: "https://a/1.jpg" };
-    expect(textCitesMedia("见 [图片](/api/media/deadbeef)", opts)).toBe(true);
-    expect(textCitesMedia("见 [图片](https://a/1.jpg)", opts)).toBe(true);
-    expect(textCitesMedia("见 [图片](https://a/2.jpg)", opts)).toBe(false);
+    expect(mediaIdFromUrl("")).toBeNull();
   });
 });
 
@@ -204,13 +199,15 @@ describe("上传校验", () => {
   });
 });
 
-describe("压缩（薄切 sharp；详见 media.compress.test.ts 的档位矩阵）", () => {
+describe("压缩（薄切 sharp；档位矩阵见本文件各分支用例）", () => {
   it("≤2 MiB 原样入库（不重编码）", async () => {
     const db = makeDb(":memory:");
     const bytes = await jpegAtLeast(300_000);
     const r = await storeImageBytes(db, tmpDir(), bytes);
     expect(r.sizeBytes).toBe(bytes.length);
     expect(r.mime).toBe("image/jpeg");
+    expect(r.animationCompressed).toBe(false);
+    expect(r.alphaFlattened).toBe(false);
   });
 
   it(">2 MiB 的静图压到 ≤1.9 MiB（agent0 读取闸稳过）", async () => {
@@ -219,6 +216,73 @@ describe("压缩（薄切 sharp；详见 media.compress.test.ts 的档位矩阵�
     expect(bytes.length).toBeGreaterThan(2 * 1024 * 1024);
     const r = await storeImageBytes(db, tmpDir(), bytes);
     expect(r.sizeBytes).toBeLessThanOrEqual(Math.floor(1.9 * 1024 * 1024));
+  });
+
+  it("大动图被压成单帧也必须报 animationCompressed（否则界面不提示，动画悄悄没了）", async () => {
+    const db = makeDb(":memory:");
+    // 4 帧 800×800 噪声 → GIF 压不动，动画分支也救不回 → 落进静图档（只取第一帧）
+    const w = 800;
+    const h = 800;
+    const frames = 4;
+    const gif = await sharp(crypto.randomBytes(w * h * 3 * frames), {
+      raw: { width: w, height: h * frames, channels: 3, pageHeight: h },
+    })
+      .gif()
+      .toBuffer();
+    expect(gif.length).toBeGreaterThan(2 * 1024 * 1024);
+    const r = await storeImageBytes(db, tmpDir(), gif);
+    expect(r.mime).toBe("image/jpeg"); // 静图档
+    expect(r.animationCompressed).toBe(true); // 动画已经没了——必须说
+  }, 60_000);
+
+  it("透明 PNG 压成 JPEG 时填白并报 alphaFlattened（不填白就是默认黑）", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const w = 900;
+    const h = 900;
+    const rgb = crypto.randomBytes(w * h * 3); // 噪声：PNG 压不动，才过得了 2 MiB 触发线
+    const rgba = Buffer.alloc(w * h * 4);
+    for (let i = 0; i < w * h; i += 1) {
+      const x = i % w;
+      const transparent = x < w / 2; // 左半透明、右半不透明
+      rgba[i * 4] = rgb[i * 3] ?? 0;
+      rgba[i * 4 + 1] = rgb[i * 3 + 1] ?? 0;
+      rgba[i * 4 + 2] = rgb[i * 3 + 2] ?? 0;
+      rgba[i * 4 + 3] = transparent ? 0 : 255;
+    }
+    const png = await sharp(rgba, { raw: { width: w, height: h, channels: 4 } })
+      .png()
+      .toBuffer();
+    expect(png.length).toBeGreaterThan(2 * 1024 * 1024);
+
+    const r = await storeImageBytes(db, dir, png);
+    expect(r.mime).toBe("image/jpeg");
+    expect(r.alphaFlattened).toBe(true);
+    // 透明区应为白（若没 flatten 会变成黑）
+    const raw = await sharp(readFileSync(mediaFilePath(dir, r.id, r.mime)))
+      .extract({ left: 10, top: 10, width: 1, height: 1 })
+      .raw()
+      .toBuffer();
+    expect(raw[0]).toBeGreaterThan(240);
+    expect(raw[1]).toBeGreaterThan(240);
+    expect(raw[2]).toBeGreaterThan(240);
+  });
+
+  it("像素闸按总解码量算：多帧图只数首帧会被绕过", async () => {
+    const db = makeDb(":memory:");
+    // 350×350 × 420 帧 = 5145 万像素（首帧只有 12 万）——超过 5000 万像素硬闸。
+    // 每帧首像素不同，防止编码器把相同帧合并成一帧（合并了就不是多帧图了，测不到这条闸）
+    const w = 350;
+    const h = 350;
+    const frames = 420;
+    const raw = Buffer.alloc(w * h * 3 * frames);
+    for (let f = 0; f < frames; f += 1) raw[f * w * h * 3] = (f * 37) % 255;
+    const gif = await sharp(raw, {
+      raw: { width: w, height: h * frames, channels: 3, pageHeight: h },
+    })
+      .gif({ effort: 1 })
+      .toBuffer();
+    await expect(storeImageBytes(db, tmpDir(), gif)).rejects.toThrow(/像素数超过上限/);
   });
 });
 
@@ -627,5 +691,68 @@ describe("引用续命 + 每小时清理（009 刀 4）", () => {
     const third = await seedExpired();
     await new Promise((r) => setTimeout(r, 10));
     expect(repo.getMedia(db, third)).not.toBeNull(); // 停掉后不再清
+  });
+});
+
+describe("内容寻址去重与 originUrl（009 修复）", () => {
+  it("先无链接上传、后带原链接进来 → 复用同一行并补上 originUrl", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const bytes = await smallJpeg();
+    const uploaded = await storeImageBytes(db, dir, bytes); // 前台上传：无链接
+    expect(repo.getMediaByOriginUrl(db, "https://qq.example/x.jpg")).toBeNull();
+
+    const cached = await storeImageBytes(db, dir, bytes, { originUrl: "https://qq.example/x.jpg" });
+    expect(cached.id).toBe(uploaded.id); // 内容寻址：同一份字节只有一行
+    // 补上映射后，缓存去重与占位反查才是通的（否则每次进站都重下、详情永远查不到）
+    expect(repo.getMediaByOriginUrl(db, "https://qq.example/x.jpg")?.id).toBe(uploaded.id);
+  });
+});
+
+describe("进站图片缓存的上限与顺序（009 修复：未登录不该缓冲 body）", () => {
+  it("未登录 + 21 MiB 请求体 → 401（鉴权在解析 body 之前，不把字节读进来）", async () => {
+    const realm = await makeTestRealm();
+    const res = await realm.app.inject({
+      method: "POST",
+      url: "/api/media",
+      headers: { "content-type": "image/jpeg" },
+      payload: Buffer.alloc(21 * 1024 * 1024, 1),
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("已登录 + 超过 20 MiB → 413（自定义解析器自己卡字节，bodyLimit 对它不生效）", async () => {
+    const t = await makeTestAccount();
+    const res = await t.inject({
+      method: "POST",
+      url: "/api/media",
+      headers: { "content-type": "image/jpeg" },
+      payload: Buffer.alloc(21 * 1024 * 1024, 1),
+    });
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toContain("20 MiB");
+  });
+});
+
+describe("重试与对话路径也缓存图片（009 修复：缓存挂在 kickDigest）", () => {
+  it("重试一条失败批次 → 图片重新尝试缓存并落行", async () => {
+    const db = makeDb(":memory:");
+    const dir = tmpDir();
+    const raw = repo.insertRawInput(db, {
+      content: "看 [图片](https://pic.invalid/retry.png)",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "群" },
+      receivedAt: "2026-10-21T10:00:00",
+      eventTime: null,
+    });
+    repo.setDigestState(db, raw.id, "failed");
+    downloadStub.mockResolvedValue({ bytes: await smallJpeg(), contentType: "image/jpeg" });
+
+    const llm = new FakeLlm(); // 队列空 → 消化失败无妨，本用例只看缓存
+    const result = retryRawInput(db, llm, makeAgentTools(db, dir), "test-model", raw.id, dir);
+    expect(result.ok).toBe(true);
+    await vi.waitFor(() =>
+      expect(repo.getMediaByOriginUrl(db, "https://pic.invalid/retry.png")).not.toBeNull(),
+    );
   });
 });

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { UsageRangeSchema, type UsageRange } from "@summarizing/shared";
 import * as repo from "../storage/repo";
 import { wallClockFromDate } from "../shared/time";
@@ -24,14 +25,17 @@ function rangeStart(range: UsageRange, now: Date): string {
   return wallClockFromDate(shifted);
 }
 
+/** 查询参数（运行时数据一律 zod 解析，不用 `as`）：range 缺席 = 近 7 天，非法 = 400。 */
+const UsageQuerySchema = z.object({ range: UsageRangeSchema.default("7d") });
+
 /** 注册用量路由（受保护面）：GET /api/usage?range=。range 非法 → 400（安全报错，不由 Fastify 兜）。 */
 export function registerUsageRoutes(app: FastifyInstance): void {
   app.get("/api/usage", async (req, reply) => {
-    const parsed = UsageRangeSchema.safeParse((req.query as { range?: unknown }).range ?? "7d");
+    const parsed = UsageQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return reply.code(400).send({ error: "range 取值只能是 today / 7d / 30d" });
     }
-    const range = parsed.data;
+    const range = parsed.data.range;
     const since = rangeStart(range, new Date());
     return { range, ...repo.sumLlmUsage(req.space.db, since) };
   });

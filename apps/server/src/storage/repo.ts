@@ -696,20 +696,20 @@ export function insertMedia(
 ): MediaRefRow {
   const existing = db.select().from(s.media).where(eq(s.media.id, args.id)).get();
   if (existing !== undefined) {
-    if (args.expiresAt > existing.expiresAt) {
-      db.update(s.media).set({ expiresAt: args.expiresAt }).where(eq(s.media.id, args.id)).run();
-      return {
-        id: existing.id,
-        mime: existing.mime,
-        sizeBytes: existing.sizeBytes,
-        expiresAt: args.expiresAt,
-      };
+    /** 要改的列（没有变化就是空对象，不写库）。 */
+    const patch: { expiresAt?: string; originUrl?: string } = {};
+    if (args.expiresAt > existing.expiresAt) patch.expiresAt = args.expiresAt;
+    // 先以「无原链接」的形式存过（前台上传），之后同一份字节从信源带着原链接再来：
+    // 补上映射——否则 getMediaByOriginUrl 永远查不到它，缓存白存、每次进站都重下
+    if (existing.originUrl === null && args.originUrl !== null) patch.originUrl = args.originUrl;
+    if (Object.keys(patch).length > 0) {
+      db.update(s.media).set(patch).where(eq(s.media.id, args.id)).run();
     }
     return {
       id: existing.id,
       mime: existing.mime,
       sizeBytes: existing.sizeBytes,
-      expiresAt: existing.expiresAt,
+      expiresAt: patch.expiresAt ?? existing.expiresAt,
     };
   }
   db.insert(s.media).values(args).run();
@@ -748,6 +748,31 @@ function getMediaByIds(db: DbOrTx, ids: string[]): MediaRefRow[] {
     sizeBytes: r.sizeBytes,
     expiresAt: r.expiresAt,
   }));
+}
+
+/** 这张图是否被**任何**证据引过（跨批次）——「读过未引用 → 缩到 3 天」的否决闸。
+ *  只看本批是不够的：A 批引用过、B 批读过没引用，缩了就把 A 批的证据链拆了。
+ *  判据 = 片段池里存在含该占位的引文（`/api/media/<id>` 任意形态命中本地；信源图按原链接）。
+ *  用 `instr` 而不是 `LIKE`：URL 天然带 `%`（百分号编码），LIKE 会把它当通配符。 */
+export function isMediaCited(db: DbOrTx, mediaId: string): boolean {
+  const row = db
+    .select({ originUrl: s.media.originUrl })
+    .from(s.media)
+    .where(eq(s.media.id, mediaId))
+    .get();
+  if (row === undefined) return false;
+  const needles = [`/api/media/${mediaId}`];
+  if (row.originUrl !== null) needles.push(row.originUrl);
+  for (const needle of needles) {
+    const hit = db
+      .select({ id: s.fragments.id })
+      .from(s.fragments)
+      .where(sql`instr(${s.fragments.content}, ${needle}) > 0`)
+      .limit(1)
+      .get();
+    if (hit !== undefined) return true;
+  }
+  return false;
 }
 
 /** 抬到较晚的到期时间——只在 next 更晚时写（引用判定；日期只增不减，防后一次引用反向缩短）。 */

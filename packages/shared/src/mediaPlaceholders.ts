@@ -26,15 +26,3 @@ export function mediaIdFromUrl(url: string): string | null {
   const m = /^(?:https?:\/\/[^/]+)?\/api\/media\/([A-Za-z0-9]+)(?:\.[A-Za-z0-9]+)?$/.exec(url);
   return m?.[1] ?? null;
 }
-
-/** 原文里是否出现某张图片的占位（引用判定用；本地图按 id、信源图按原 URL）。 */
-export function textCitesMedia(
-  text: string,
-  opts: { mediaId: string; originUrl: string | null },
-): boolean {
-  for (const url of extractImageUrls(text)) {
-    if (mediaIdFromUrl(url) === opts.mediaId) return true;
-    if (opts.originUrl !== null && url === opts.originUrl) return true;
-  }
-  return false;
-}

@@ -185,18 +185,25 @@ export function ChatPanel({
 
   /** 发送执行体：上传 → 拼占位 → 落消息 → 调前台。
    *  上传失败消息**不发**、预览保留可重试（不丢用户写好的字）。
+   *  上传等待期间用户新打的字 / 新选的图 / 新 @ 的条目全部保留——只清「发出去的那一份」。
    *  history = 本条之前的轮次（不含本条，剔除本地占位，截断策略与共享常量一致）；
    *  mentions 随请求上传；回复后无条件刷看板（延迟双刷等异步消化浮出）。 */
   const submit = async (message: string): Promise<void> => {
+    const sentImage = image;
+    const sentMentions = mentions;
     setBusy(true);
     let placeholder = "";
-    if (image !== null) {
+    if (sentImage !== null) {
       setImageError(null);
       try {
-        const up = await uploadImage(image.file);
+        const up = await uploadImage(sentImage.file);
         // 占位单独一行拼在用户文字后——原文逐字、agent0 与渲染侧都能认（009 FR-015）
         placeholder = message === "" ? `[图片](${up.url})` : `\n\n[图片](${up.url})`;
-        if (up.animationCompressed) setImageNotice("动图已压缩（保存的动画可能比原图短）");
+        // 降级不静默：动画没了 / 透明背景被填白，都要在界面里说出来
+        const notes: string[] = [];
+        if (up.animationCompressed) notes.push("动图已压缩（保存的动画可能比原图短）");
+        if (up.alphaFlattened) notes.push("透明背景已填白");
+        if (notes.length > 0) setImageNotice(notes.join("；"));
       } catch (err) {
         setImageError(errText(err));
         setBusy(false);
@@ -209,11 +216,10 @@ export function ChatPanel({
     // 同步快照滚底（不赖 effect）：发送后迟到的惯性 scroll 事件会把 stick 翻回 false 并跳过 effect（四轮评审竞态）
     const logEl = logRef.current;
     if (logEl !== null) logEl.scrollTop = logEl.scrollHeight;
-    setDraft("");
-    if (image !== null) URL.revokeObjectURL(image.previewUrl);
-    setImage(null);
-    const savedMentions = mentions;
-    setMentions([]);
+    setDraft((cur) => (cur.trim() === message ? "" : cur));
+    if (sentImage !== null) URL.revokeObjectURL(sentImage.previewUrl);
+    setImage((cur) => (cur === sentImage ? null : cur));
+    setMentions((cur) => (cur === sentMentions ? [] : cur));
     const history: ChatHistoryItem[] = msgs
       .filter((m) => !m.local)
       .slice(-CHAT_HISTORY_MAX_ITEMS)
@@ -235,7 +241,7 @@ export function ChatPanel({
         // ⚠️ 不透传 err：此处异常只剩传输层故障（服务端真因都被 handleChat 的 catch-all 吞并转成正常回复），
         // errText 只会给出 "Failed to fetch" 这类英文，反不如友好话术（2026-10-13 测试逮住误改）。
         setDraft((cur) => (cur === "" ? message : cur)); // 等待期间用户已输入新内容则不覆盖
-        setMentions(savedMentions);
+        setMentions(sentMentions);
         setMsgs((m) => [
           ...m,
           { role: "front", text: "（前台暂时联系不上，稍后再试）", local: true },
@@ -305,7 +311,7 @@ export function ChatPanel({
               {/* 前台回复渲染 Markdown 子集（2026-09-30 插播）；用户气泡纯文本 + 换行保真
                   （用户粘贴的星号就是星号，不做 markdown 解释） */}
               {m.role === "user" ? (
-                <MediaText text={m.text} />
+                <MediaText text={m.text} className="whitespace-pre-wrap" />
               ) : (
                 <div className="mt-0.5">
                   <Markdown text={m.text} />

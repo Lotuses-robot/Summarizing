@@ -811,7 +811,7 @@ describe("流水数据层（specs/004）", () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });
     const raw = seedRaw(db);
-    kickDigest(db, llm, makeAgentTools(db, ""), MODEL, raw, "test");
+    kickDigest(db, llm, makeAgentTools(db, ""), MODEL, raw, "test", "");
     expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digesting");
   });
 
@@ -837,7 +837,7 @@ describe("流水数据层（specs/004）", () => {
     });
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
     const raw = seedRaw(db);
-    kickDigest(db, llm, makeAgentTools(db, ""), MODEL, raw, "test");
+    kickDigest(db, llm, makeAgentTools(db, ""), MODEL, raw, "test", "");
     await vi.waitFor(
       () => {
         expect(repo.getRawInput(db, raw.id)?.digestState).toBe("digested");
@@ -1197,5 +1197,28 @@ describe("读后留存联动（009 刀 4：读过未引用 3 天 / 被引用 90 
 
     const got = repo.getMedia(db, mediaId)?.expiresAt ?? "";
     expect(got >= before && got <= after).toBe(true);
+  });
+
+  it("A 批引用过的图，B 批读过但没引用也不会被缩短（跨批否决）", async () => {
+    const db = makeDb(":memory:");
+    const mediaId = seedMedia(db);
+    // A 批：证据引用 → 抬到 90 天档
+    const llmA = new FakeLlm();
+    llmA.push({ content: citedChangeList() });
+    await digestRawInput(db, llmA, makeAgentTools(db, ""), MODEL, seedImageRaw(db));
+    const citedExpiry = repo.getMedia(db, mediaId)?.expiresAt ?? "";
+    expect(citedExpiry > "2020-01-02T00:00:00").toBe(true); // 已不是原来的过去时刻
+
+    // B 批：读过同一张图、但证据没引用它 —— 不得把 A 批挣来的 90 天缩到 3 天
+    const llmB = new FakeLlm();
+    llmB.push({
+      content: null,
+      toolCalls: [{ id: "t1", name: "fetch_image", argsJson: JSON.stringify({ url: IMG_URL }) }],
+    });
+    llmB.push({ content: '{"changes":[]}' });
+    const toolsB = { ...makeAgentTools(db, ""), fetchImage: fakeFetch(mediaId) };
+    await digestRawInput(db, llmB, toolsB, MODEL, seedImageRaw(db));
+
+    expect(repo.getMedia(db, mediaId)?.expiresAt).toBe(citedExpiry); // 原封不动
   });
 });

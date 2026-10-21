@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { MediaUploadResponseSchema, errText } from "@summarizing/shared";
 import { eq } from "drizzle-orm";
 import { media as mediaTable } from "../storage/schema";
@@ -12,8 +13,13 @@ import { MEDIA_MAX_INPUT_BYTES } from "../shared/mediaTtl";
 // 查不到 → 404（与「不存在」同形，不泄露图片存在性；同 image 类端点的通行做法）。
 // 读取响应：private（不进共享缓存）+ immutable（内容寻址，字节永不改，重传零成本）。
 
-/** 上传 body 上限：与本机收图的输入上限同值（多插一步总得有上限），由 Fastify 先截断。 */
+/** 上传 body 上限：与本机收图的输入上限同值（多插一步总得有上限）。
+ *  ⚠️ 路由级 `bodyLimit` 对自定义 content-type 解析器**不生效**（实测），真正的上限在
+ *  app.ts 的解析器里按字节卡；这里保留 bodyLimit 只为 Fastify 其它路径兜底。 */
 const BODY_LIMIT = MEDIA_MAX_INPUT_BYTES;
+
+/** 路径参数（运行时数据一律 zod 解析，不用 `as`）。 */
+const MediaIdParamsSchema = z.object({ id: z.string().min(1) });
 
 /** 注册媒体路由（受保护面）。 */
 export function registerMediaRoutes(app: FastifyInstance): void {
@@ -37,6 +43,7 @@ export function registerMediaRoutes(app: FastifyInstance): void {
         mime: stored.mime,
         sizeBytes: stored.sizeBytes,
         animationCompressed: stored.animationCompressed,
+        alphaFlattened: stored.alphaFlattened,
       });
     } catch (err) {
       return reply.code(400).send({ error: errText(err) });
@@ -45,7 +52,9 @@ export function registerMediaRoutes(app: FastifyInstance): void {
 
   // 读回：行在才读文件；文件缺失也 404（清理器或手工删过）
   app.get("/api/media/:id", async (req, reply) => {
-    const { id } = req.params as { id: string };
+    const parsed = MediaIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) return reply.code(404).send({ error: "图片不存在" });
+    const { id } = parsed.data;
     const row = req.space.db
       .select({ mime: mediaTable.mime })
       .from(mediaTable)

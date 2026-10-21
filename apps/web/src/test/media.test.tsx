@@ -82,3 +82,32 @@ describe("MediaText", () => {
     expect(screen.getByText(/\[图片\]/)).toBeInTheDocument();
   });
 });
+
+describe("MediaText：缓存图必须读本地副本（009 修复）", () => {
+  /** 信源图命中：map 的键是原链接，值指向本地 sha。 */
+  const originKeyed = {
+    "https://qq.example/x.jpg": {
+      id: "abc123",
+      mime: "image/jpeg",
+      sizeBytes: 1000,
+      expiresAt: "2026-11-01T00:00:00",
+    },
+  };
+
+  it("原链接已过期也没关系——src 读 /api/media/<id>，不是占位里的原链接", () => {
+    render(<MediaText text="[图片](https://qq.example/x.jpg)" mediaMap={originKeyed} />);
+    const img = document.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe("/api/media/abc123"); // 关键：不是 qq 的地址
+  });
+
+  it("占位写成带扩展名/绝对地址时按归一键命中（不会误判成「已过期」）", () => {
+    render(<MediaText text="[图片](/api/media/abc123.jpg)" mediaMap={mediaMap()} />);
+    expect(document.querySelector("img")?.getAttribute("src")).toBe("/api/media/abc123");
+    cleanup();
+    render(
+      <MediaText text="[图片](https://sum.lotuses.cn/api/media/abc123)" mediaMap={mediaMap()} />,
+    );
+    expect(document.querySelector("img")?.getAttribute("src")).toBe("/api/media/abc123");
+  });
+});

@@ -111,6 +111,8 @@ const pinnedNetworkGet: ImageTransport = (url, ips, signal) =>
         // 连接只用已核验的 IP——域名不再交给传输层二次解析（防 DNS 重绑定 TOCTOU）。
         // opts.family 是 Node 传下的家族偏好（0/缺席 = 不限）：先归一成 4/6 再过滤，
         // 滤空回退全集——连接地址恒出自 assertSafeImageUrl 核过的那批。
+        // ⚠️ 回调形状跟着 `opts.all` 走：autoSelectFamily（Node 20+ 默认开）要数组，关掉时只要
+        //    单个地址。恒回数组在关掉自动选择的配置下会 ERR_INVALID_IP_ADDRESS（实测）。
         lookup: (_hostname, opts, cb) => {
           const wish =
             opts.family === "IPv4" || opts.family === "IPv6"
@@ -120,10 +122,19 @@ const pinnedNetworkGet: ImageTransport = (url, ips, signal) =>
               : opts.family;
           const preferred = ips.filter((a) => a.family === wish);
           const chosen = preferred.length > 0 ? preferred : ips;
-          cb(
-            null,
-            chosen.map((a) => ({ address: a.address, family: a.family })),
-          );
+          const first = chosen[0];
+          if (first === undefined) {
+            cb(new Error("域名解析不到地址"), "", 0);
+            return;
+          }
+          if (opts.all === true) {
+            cb(
+              null,
+              chosen.map((a) => ({ address: a.address, family: a.family })),
+            );
+          } else {
+            cb(null, first.address, first.family);
+          }
         },
       },
       (res: http.IncomingMessage) => {

@@ -142,14 +142,24 @@ export async function handleChat(
   repo.appendChatTurn(db, "user", message);
   let result: ChatResult;
   try {
-    const reply = await converse(db, llm, modelTag, message, history, tools, state, mentions);
+    const reply = await converse(
+      db,
+      llm,
+      modelTag,
+      message,
+      history,
+      tools,
+      state,
+      mentions,
+      mediaDir,
+    );
     // 兜底录入（2026-10-10 事故；二轮评审收口）：①本轮无**成功**工具调用 = 回话无凭据；
     // ②未 ingest 却声称已录入——实证的同型事故：先成功查询做了掩护、再谎称「原话已录入」。
     // 按 D-14「宁可误录入」真录一次：声称与事实对齐，绝不静默。
     if (!state.ingested && (state.actions.length === 0 || claimsRecorded(reply))) {
       const why = state.actions.length === 0 ? "本轮无成功工具调用" : "回复声称已录入";
       process.stderr.write(`[chat] ${why}，按兜底录入：${message.slice(0, 60)}\n`);
-      fallbackIngest(db, llm, modelTag, tools, message);
+      fallbackIngest(db, llm, modelTag, tools, message, mediaDir);
       state.actions.push(ingestAction());
     }
     result = { reply, actions: state.actions, references: pickReferences(state) };
@@ -159,7 +169,7 @@ export async function handleChat(
     // 前台 LLM 挂了 ≠ 消息丢失（D-14）：本轮尚未录入 → 原文走消化管线兜底；已录入过则如实相告
     if (!state.ingested) {
       result = {
-        reply: fallbackIngest(db, llm, modelTag, tools, message),
+        reply: fallbackIngest(db, llm, modelTag, tools, message, mediaDir),
         actions: [ingestAction()],
         references: [],
       };
@@ -187,6 +197,7 @@ async function converse(
   tools: AgentTools,
   state: ChatTurnState,
   mentions: { id: string; title: string }[],
+  mediaDir: string,
 ): Promise<string> {
   // @ 提及（用户 2026-09-27）：注记拼进本条用户消息——模型拿到精确 id 指代，不用猜「就是那条」
   const mentionNote =
@@ -214,7 +225,7 @@ async function converse(
         messages.push({
           role: "tool",
           toolCallId: call.id,
-          content: await runTool(db, llm, modelTag, tools, call, state),
+          content: await runTool(db, llm, modelTag, tools, call, state, mediaDir),
         });
       }
       continue;
@@ -242,6 +253,7 @@ async function runTool(
   tools: AgentTools,
   call: ToolCall,
   state: ChatTurnState,
+  mediaDir: string,
 ): Promise<string> {
   try {
     const args: unknown = JSON.parse(call.argsJson);
@@ -356,7 +368,7 @@ async function runTool(
         const raw = insertChatRaw(db, content);
         state.ingested = true;
         state.actions.push(ingestAction());
-        kickDigest(db, llm, tools, modelTag, raw, "ingest-tool");
+        kickDigest(db, llm, tools, modelTag, raw, "ingest-tool", mediaDir);
         return JSON.stringify({ ok: true, note: "已录入待处理队列，agent0 消化中" });
       }
       case "log_chitchat": {
@@ -383,9 +395,10 @@ function fallbackIngest(
   modelTag: string,
   tools: AgentTools,
   message: string,
+  mediaDir: string,
 ): string {
   const raw = insertChatRaw(db, message);
-  kickDigest(db, llm, tools, modelTag, raw, "fallback");
+  kickDigest(db, llm, tools, modelTag, raw, "fallback", mediaDir);
   return "已记录，正在处理。";
 }
 

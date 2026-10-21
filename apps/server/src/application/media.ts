@@ -31,9 +31,10 @@ export async function storeImageBytes(
   mime: string;
   sizeBytes: number;
   animationCompressed: boolean;
+  alphaFlattened: boolean;
 }> {
   const declared = resolveMime(bytes, opts.declaredMime);
-  const { data, mime, animationCompressed } = await compressImage(bytes, declared);
+  const { data, mime, animationCompressed, alphaFlattened } = await compressImage(bytes, declared);
 
   const id = crypto.createHash("sha256").update(data).digest("hex");
   const createdAt = nowWallClock();
@@ -55,7 +56,7 @@ export async function storeImageBytes(
     expiresAt,
     originUrl: opts.originUrl ?? null,
   });
-  return { id, mime, sizeBytes: data.length, animationCompressed };
+  return { id, mime, sizeBytes: data.length, animationCompressed, alphaFlattened };
 }
 
 /** 文件路径：`media/<uid>/<sha256>.<ext>`（内容寻址，字节永不改 → 可长期缓存）。 */
@@ -85,11 +86,13 @@ function resolveMime(bytes: Buffer, declared: string | undefined): string {
   return sniffed;
 }
 
-/** 压缩（>2 MiB 触发）：质量阶梯 → 降采样；动图先降帧。压到最低档仍 ≥2 MiB → 拒。 */
+/** 压缩（>2 MiB 触发）：质量阶梯 → 降采样；动图先降帧。压到最低档仍 ≥2 MiB → 拒。
+ *  两个降级标记都不许静默：`animationCompressed`（动图变成静图/被重编码）、
+ *  `alphaFlattened`（透明背景被填白——JPEG 没有 alpha 通道）。 */
 async function compressImage(
   bytes: Buffer,
   mime: string,
-): Promise<{ data: Buffer; mime: string; animationCompressed: boolean }> {
+): Promise<{ data: Buffer; mime: string; animationCompressed: boolean; alphaFlattened: boolean }> {
   const image = sharp(bytes, { failOn: "none" });
   const meta = await image.metadata().catch((err: unknown) => {
     throw new Error(`图片无法解析：${errText(err)}`);
@@ -97,19 +100,22 @@ async function compressImage(
 
   const width = meta.width ?? 0;
   const height = meta.height ?? 0;
+  const frames = meta.pages ?? 1;
   if (width <= 0 || height <= 0) throw new Error("图片尺寸无法解析");
-  if (width * height > MEDIA_MAX_PIXELS) {
+  // 像素闸按**总解码量**算：多帧图的 height 是单帧高（实测 400×400 + pages=40），
+  // 只乘一帧会放 2000 帧的图进来（首帧 1.44Mpx 过闸、实际解码 28.8 亿像素）
+  const frameHeight = meta.pageHeight ?? height;
+  if (width * frameHeight * frames > MEDIA_MAX_PIXELS) {
     throw new Error("图片像素数超过上限（5000 万像素）");
   }
 
   // ≤2 MiB：原样入库（不重编码——避免无谓的画质损失与耗时）
   if (bytes.length <= MEDIA_TARGET_BYTES) {
-    return { data: bytes, mime, animationCompressed: false };
+    return { data: bytes, mime, animationCompressed: false, alphaFlattened: false };
   }
 
   // 动图（GIF / 多帧 WebP）：先降帧，仍超则按静图档继续压。
   // 代价是动画可能变短或变单帧——返回标记让界面提示，不静默（用户 2026-10-20 定）。
-  const frames = meta.pages ?? 1;
   if (frames > 1) {
     const animated = await sharp(bytes, { animated: true })
       .resize(undefined, undefined, { withoutEnlargement: true })
@@ -117,7 +123,12 @@ async function compressImage(
       .toBuffer()
       .catch(() => null);
     if (animated !== null && animated.length <= MEDIA_TARGET_BYTES) {
-      return { data: animated, mime: "image/gif", animationCompressed: true };
+      return {
+        data: animated,
+        mime: "image/gif",
+        animationCompressed: true,
+        alphaFlattened: false,
+      };
     }
   }
 
@@ -125,16 +136,25 @@ async function compressImage(
   // 顺序反了会极慢：对 4000 万像素的原图直接 mozjpeg 一次要数秒，而原尺寸多半压不到目标
   // （输入已 >2 MiB），等于白烧 CPU。先 resize 再编码，每档都在接近目标尺寸的图上工作。
   // 每档内质量从高到低，第一个 ≤目标的就返回（命中即止，不再糟蹋画质）。
+  const flattenAlpha = meta.hasAlpha === true; // JPEG 无 alpha：透明区不填白就是默认黑
   for (const longEdge of [2560, 1920, 1280]) {
     for (const quality of [85, 75, 65, 55]) {
-      const buf = await sharp(bytes, { failOn: "none" })
+      let pipeline = sharp(bytes, { failOn: "none" })
         .rotate() // 按 EXIF orientation 归一（不存方向标记，读取侧也一致）
-        .resize({ width: longEdge, height: longEdge, fit: "inside", withoutEnlargement: true })
+        .resize({ width: longEdge, height: longEdge, fit: "inside", withoutEnlargement: true });
+      if (flattenAlpha) pipeline = pipeline.flatten({ background: "#ffffff" });
+      const buf = await pipeline
         .jpeg({ quality, mozjpeg: true })
         .toBuffer()
         .catch(() => null);
       if (buf !== null && buf.length <= MEDIA_TARGET_BYTES) {
-        return { data: buf, mime: "image/jpeg", animationCompressed: false };
+        return {
+          data: buf,
+          mime: "image/jpeg",
+          // 走到静图档的动图 = 动画没了（sharp 默认只取第一帧）——必须报 true，否则界面不提示
+          animationCompressed: frames > 1,
+          alphaFlattened: flattenAlpha,
+        };
       }
     }
   }

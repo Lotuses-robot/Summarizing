@@ -54,15 +54,15 @@ async function req(url: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
-/** 统一响应处理：非 2xx 抛错；2xx 返回按泛型标注的 JSON（调用方用 shared 类型标注）。 */
+/** 统一响应处理：非 2xx 抛服务端文案；2xx 返回按泛型标注的 JSON（调用方用 shared 类型标注）。 */
 async function to<T>(res: Response): Promise<T> {
-  ensureOk(res);
+  await ensureOk(res);
   return (await res.json()) as T;
 }
 
-/** 无响应体的写操作守卫：非 2xx 抛错（与 to 同一错误口径）。 */
-function ensureOk(res: Response): void {
-  if (!res.ok) throw new Error(`请求失败 ${res.status}`);
+/** 无响应体的写操作守卫：非 2xx 抛服务端文案（与 to 同一错误口径）。 */
+async function ensureOk(res: Response): Promise<void> {
+  if (!res.ok) throw new Error(await apiErrorText(res));
 }
 
 /** 从 unknown 安全提取 `issues[].message`（运行时类型守卫——不用 as 让编译器闭嘴，工程红线）。
@@ -84,10 +84,11 @@ function issueMessages(v: unknown): string[] {
   return out;
 }
 
-/** 认证端点非 2xx 的错误文案（校验类优先 issues 逐条消息；其余 {error}；非 JSON 兜底）。
+/** 非 2xx 的错误文案（**全部端点共用**：校验类优先 issues 逐条消息；其余 {error}；非 JSON 兜底）。
  *  服务端校验失败返 `{error:"请求体不合法", issues:[zod 逐条中文]}——issues 才是「用户名至少 2 个字符」
- *  这类真话，顶层 error 只说明"哪里错了没写清"（A13：曾只取 error，用户永远看不到规则）。 */
-async function authErrorText(res: Response): Promise<string> {
+ *  这类真话，顶层 error 只说明"哪里错了没写清"（A13：曾只取 error，用户永远看不到规则）。
+ *  图片上传同样靠它把「图片超过大小上限（20 MiB）」这类原话送到用户眼前（曾只剩「请求失败 400」）。 */
+async function apiErrorText(res: Response): Promise<string> {
   try {
     const body: unknown = await res.json();
     if (typeof body === "object" && body !== null) {
@@ -107,14 +108,14 @@ async function authErrorText(res: Response): Promise<string> {
 
 /** 认证端点响应（有体）：非 2xx 优先抛服务端 error 文案（登录表单要显示「账户已停用」等）；2xx 解析 JSON。 */
 async function toAuth<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new Error(await authErrorText(res));
+  if (!res.ok) throw new Error(await apiErrorText(res));
   return (await res.json()) as T;
 }
 
 /** 认证端点（成功态无体，如改密 204）：非 2xx 抛服务端文案；2xx 不解析 body
  *  （评审修复：toAuth 对 204 空体 res.json() 会抛 SyntaxError——改密明明成功了却报失败）。 */
 async function ensureAuthOk(res: Response): Promise<void> {
-  if (!res.ok) throw new Error(await authErrorText(res));
+  if (!res.ok) throw new Error(await apiErrorText(res));
 }
 
 /** 构造 JSON 写请求的 fetch 参数（POST/PUT 共用——C1 教训：方法与后端注册的路由须一致）。 */
@@ -279,9 +280,9 @@ export const api = {
   /** 人工移除一条（D-89）：404=不存在 / 409=已被处置——都算「已不在」，正常 resolve（调用方静默刷新）；
    *  其余非 2xx 抛错（调用方须可见提示——不静默）。 */
   resolveUncertain: (id: string): Promise<void> =>
-    req(`/api/uncertain/${id}`, { method: "PUT" }).then((r) => {
+    req(`/api/uncertain/${id}`, { method: "PUT" }).then(async (r) => {
       if (r.status === 404 || r.status === 409) return;
-      ensureOk(r);
+      await ensureOk(r);
     }),
 
   // ── 对话历史（D-89 启动回填）──

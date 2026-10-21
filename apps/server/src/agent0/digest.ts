@@ -22,6 +22,7 @@ import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
 import { executeChanges } from "../executor/executor";
 import { uncitedMediaExpiry } from "../shared/mediaTtl";
 import { nowWallClock } from "../shared/time";
+import { cacheIngestImages } from "../application/mediaIngest";
 
 // 消化管线（01§4.10 全景）：
 // ① 入口 RawInput（已落档）→ ② 自由推理（工具循环，轮数上限 DIGEST_MAX_ROUNDS 在 shared）
@@ -168,6 +169,9 @@ export async function digestRawInput(
     for (const [mediaId, readAt] of readMedia) {
       if (citedMediaIds.has(mediaId)) continue;
       try {
+        // 跨批否决：**任何一批**的证据引过它就不缩短——否则 A 批引用过的图会被 B 批的
+        // 「读过没引用」缩到 3 天，A 批的证据链当场断（本批 citedMediaIds 只看得见本批）
+        if (repo.isMediaCited(db, mediaId)) continue;
         repo.shortenMediaExpiry(db, mediaId, uncitedMediaExpiry(readAt));
       } catch (err) {
         bestEffortLog(`[media] 缩短未引用图片留存失败（${mediaId}）：${errText(err)}`);
@@ -229,18 +233,22 @@ export function retryRawInput(
   tools: AgentTools,
   modelTag: string,
   id: string,
+  mediaDir: string,
 ): RetryResult {
   const raw = repo.getRawInput(db, id);
   if (!raw) return { ok: false, reason: "not_found" };
   if (!repo.setDigestStateIf(db, id, "failed", "pending")) {
     return { ok: false, reason: "not_failed" };
   }
-  const digestState = kickDigest(db, llm, tools, modelTag, raw, "retry");
+  const digestState = kickDigest(db, llm, tools, modelTag, raw, "retry", mediaDir);
   return { ok: true, digestState };
 }
 
 /** fire-and-forget 消化的唯一发射口：digestRawInput 承诺永不 reject（失败留痕尽力而为），
  *  这里再兜一层防「兜底自身抛错」变 unhandled rejection；from 标记发射来源供排障。
+ *  **图片进站缓存也挂在这里**（009）：所有进站路径（HTTP/信源/对话/兜底录入/重试）都必须经过本函数，
+ *  放在这一处才不会「某条路悄悄不缓存」（曾只有 ingestBatch 调，重试与对话路径漏掉）。
+ *  mediaDir 必填（同 ingestBatch 的理由）；无媒体目录的场景显式传空串。
  *  log 可选注入结构化日志器（HTTP 入口传 fastify 的 req.log 保留请求上下文），缺省写 stderr。
  *  返回 digesting 置位结果——"digesting"（成功）| "pending"（置位失败但照常发射，七轮评审降级）；
  *  回执 MUST 用它而非发射前快照（specs/004 八轮评审：不报与库不符的状态）。 */
@@ -251,8 +259,11 @@ export function kickDigest(
   modelTag: string,
   raw: RawInput,
   from: string,
+  mediaDir: string,
   log?: (msg: string) => void,
 ): "digesting" | "pending" {
+  // 图片缓存与消化并行、互不阻塞（009）：抓图失败绝不影响回执与消化
+  if (mediaDir !== "") cacheIngestImages(db, mediaDir, raw.id);
   // 发射即置「消化中」——尽力而为：库异常时滞留 pending 照常发射（stderr 留痕；七轮评审），
   // 置位结果如实返回供回执（specs/004 八轮评审：不报与库不符的快照）。
   let bumped: "digesting" | "pending" = "pending";

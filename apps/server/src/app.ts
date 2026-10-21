@@ -21,6 +21,7 @@ import { registerSettingsRoutes } from "./routes/settings";
 import { registerUncertainRoutes } from "./routes/uncertain";
 import { registerUsageRoutes } from "./routes/usage";
 import { registerMediaRoutes } from "./routes/media";
+import { MEDIA_MAX_INPUT_BYTES } from "./shared/mediaTtl";
 import type { SpaceHub } from "./spaces";
 
 // 装配 HTTP 应用（006 多用户重构）：
@@ -121,16 +122,39 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
     // ⚠️ 绝不 addContentTypeParser("*")——Fastify 的 parser 按 content-type 层级注册，
     //    通配会把本作用域**所有**路由的 body 解析都吞掉（/api/ingest、/api/chat 收到
     //    undefined → 400 或更糟的静默变形）。image/* 默认不被 Fastify 解析，挂它不挤占谁。
-    // 客户端可能给 application/octet-stream——那种情况走 Fastify 默认 415，路由层可见报错。
+    // ⚠️ 自定义解析器**不吃 `bodyLimit`**（实测：bodyLimit=1000 仍缓冲了 200 KB）——上限必须在这里
+    //    自己数着字节卡死；超限立即 destroy，绝不「读完再判」（那时内存已经被吃掉了）。
     scope.addContentTypeParser(/^image\//, (_req, payload, done) => {
       const chunks: Buffer[] = [];
-      payload.on("data", (c: Buffer) => chunks.push(c));
-      payload.on("end", () => done(null, Buffer.concat(chunks)));
-      payload.on("error", done);
+      let total = 0;
+      let settled = false;
+      /** 只回一次（超限 destroy 后还会来 error/close）：先到者定结果。 */
+      const finish = (err: Error | null, body?: Buffer): void => {
+        if (settled) return;
+        settled = true;
+        done(err, body);
+      };
+      payload.on("data", (c: Buffer) => {
+        total += c.byteLength;
+        if (total > MEDIA_MAX_INPUT_BYTES) {
+          const err = Object.assign(
+            new Error(`图片超过大小上限（${MEDIA_MAX_INPUT_BYTES / 1024 / 1024} MiB）`),
+            { statusCode: 413 },
+          );
+          payload.destroy();
+          finish(err);
+          return;
+        }
+        chunks.push(c);
+      });
+      payload.on("end", () => finish(null, Buffer.concat(chunks)));
+      payload.on("error", (err: Error) => finish(err));
     });
 
+    // 鉴权挂 onRequest（不是 preHandler）：onRequest 在**解析 body 之前**跑——未登录的请求
+    // 连字节都不该被读进来。挂 preHandler 时 body 已整段缓冲完（实测 200 KB 全进内存才回 401）。
     scope.addHook(
-      "preHandler",
+      "onRequest",
       makeSessionAuth({
         registry: deps.registry,
         secret,
@@ -191,7 +215,14 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
     scope.post("/api/raw/:id/retry", async (req, reply) => {
       const { id } = RawIdParamsSchema.parse(req.params);
       const client = req.space.llmRef.current;
-      const result = retryRawInput(req.space.db, client, req.space.tools, client.modelTag, id);
+      const result = retryRawInput(
+        req.space.db,
+        client,
+        req.space.tools,
+        client.modelTag,
+        id,
+        req.space.mediaDir,
+      );
       if (!result.ok) {
         return result.reason === "not_found"
           ? reply.code(404).send({ error: "批次不存在" })

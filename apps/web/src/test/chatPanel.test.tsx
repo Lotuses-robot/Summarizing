@@ -308,7 +308,9 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
   }
 
   /** fetch 替身：/api/media 上传、/api/chat 对话、/api/chat/history 回填；记录调用与请求体。 */
-  function stubUpload(opts: { failUpload?: boolean; animationCompressed?: boolean } = {}) {
+  function stubUpload(
+    opts: { failUpload?: boolean; animationCompressed?: boolean; alphaFlattened?: boolean } = {},
+  ) {
     const calls: string[] = [];
     const chatBodies: unknown[] = [];
     vi.stubGlobal(
@@ -319,7 +321,7 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
         if (url.includes("/api/chat/history")) return Promise.resolve(jsonResponse({ turns: [] }));
         if (url.includes("/api/media")) {
           if (opts.failUpload === true) {
-            return Promise.resolve(jsonResponse({ error: "不是支持的图片格式（image/png）" }, 400));
+            return Promise.resolve(jsonResponse({ error: "图片超过大小上限（20 MiB）" }, 400));
           }
           return Promise.resolve(
             jsonResponse({
@@ -328,6 +330,7 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
               mime: "image/png",
               sizeBytes: 3,
               animationCompressed: opts.animationCompressed ?? false,
+              alphaFlattened: opts.alphaFlattened ?? false,
             }),
           );
         }
@@ -388,6 +391,8 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("图片上传失败"));
+    // 服务端原话要送到用户眼前（不是「请求失败 400」）
+    expect(screen.getByRole("alert")).toHaveTextContent("图片超过大小上限（20 MiB）");
     expect(chatBodies).toHaveLength(0); // 前台没收到任何消息
     expect(calls.some((c) => c.includes("/api/chat") && !c.includes("history"))).toBe(false);
     expect(screen.getByAltText("待发送的图片")).toBeInTheDocument(); // 预览还在
@@ -399,5 +404,64 @@ describe("对话贴图（009）：本地预览、点发送才上传", () => {
     pickImage();
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await waitFor(() => expect(screen.getByText(/动图已压缩/)).toBeInTheDocument());
+  });
+
+  it("透明背景被填白 → 界面明说（不静默）", async () => {
+    stubUpload({ alphaFlattened: true });
+    renderPanel();
+    pickImage();
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText(/透明背景已填白/)).toBeInTheDocument());
+  });
+
+  it("用户气泡换行保真（多行粘贴不被压成一行）", async () => {
+    stubUpload();
+    renderPanel();
+    const text = "作业：\n1. 数学\n2. 英语";
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(screen.getByText(/作业：/)).toBeInTheDocument());
+    const bubble = screen.getByText(/作业：/).closest("span");
+    expect(bubble?.className).toContain("whitespace-pre-wrap");
+  });
+
+  it("上传等待期间新打的字不会被清掉（只清发出去的那一份）", async () => {
+    /** 手动放行的上传响应（模拟慢网络）。 */
+    const gate: { release: (() => void) | null } = { release: null };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/chat/history")) return Promise.resolve(jsonResponse({ turns: [] }));
+        if (url.includes("/api/media")) {
+          return new Promise<Response>((resolve) => {
+            gate.release = () =>
+              resolve(
+                jsonResponse({
+                  id: "m1",
+                  url: "/api/media/m1",
+                  mime: "image/png",
+                  sizeBytes: 3,
+                  animationCompressed: false,
+                  alphaFlattened: false,
+                }),
+              );
+          });
+        }
+        void init;
+        return Promise.resolve(jsonResponse({ reply: "好的", actions: [], references: [] }));
+      }),
+    );
+    renderPanel();
+    pickImage();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "看图" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(gate.release).not.toBeNull());
+
+    // 上传还没回来：用户接着打下一句
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "看图还有一件事" } });
+    gate.release?.();
+
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("看图还有一件事"));
   });
 });

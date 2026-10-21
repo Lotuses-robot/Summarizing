@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { sourceIdentityLabel, type RawInput } from "@summarizing/shared";
+import { sourceIdentityLabel, type MediaMap, type RawInput } from "@summarizing/shared";
 import { pushEscLayer } from "../../lib/escLayer";
 import { fmtFullTime } from "../../lib/time";
 import { MediaText } from "./MediaText";
@@ -16,7 +16,7 @@ export function QuoteOverlay({
 }: {
   rawInput: RawInput;
   quote: string;
-  mediaMap: Record<string, { id: string; mime: string; sizeBytes: number; expiresAt: string }>;
+  mediaMap: MediaMap;
   onClose: () => void;
 }) {
   // Esc 分层退出：挂载期间注册本层（05§六）；onClose 走 ref——重渲染不换层位

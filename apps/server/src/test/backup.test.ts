@@ -217,3 +217,23 @@ describe("运维命令层（backup/restore 走 registry 之外）", () => {
     expect(existsSync(path.join(root, "backups", stamps[0] ?? "", "system.db"))).toBe(true);
   });
 });
+
+describe("备份包含图片字节（009：只备库不备 media 会让还原后全是「已过期」）", () => {
+  it("backupAll 复制 media/；restoreAll 原样铺回", async () => {
+    const root = tmpDir();
+    const out = tmpDir();
+    seed(path.join(root, "users", "u1.db"), 1); // 库清单非空
+    const img = path.join(root, "media", "u1", "abc.jpg");
+    mkdirSync(path.dirname(img), { recursive: true });
+    writeFileSync(img, "bytes");
+
+    const written = await backupAll({ dataRoot: root }, out);
+    expect(written).toContain("media/");
+    expect(existsSync(path.join(out, "media", "u1", "abc.jpg"))).toBe(true);
+
+    rmSync(path.join(root, "media"), { recursive: true, force: true });
+    const replaced = restoreAll({ dataRoot: root }, out);
+    expect(replaced).toContain("media/");
+    expect(existsSync(img)).toBe(true);
+  });
+});
