@@ -1,5 +1,7 @@
 # Implementation Plan: 公开状态面板（/dashboard）
 
+> **注（2026-10-21，D-112 修订）**：排行榜条数由「前两名」放宽为「**前 10 名**」（`RANKING_LIMIT` 常量；名字仍只露前两个字、截断仍在服务端）。本档其余契约（白名单字段、只读聚合、缓存限流）仍为准。
+
 **Branch**: `011-dashboard` | **Date**: 2026-10-21 | **Spec**: [spec.md](./spec.md)
 
 ## Summary
