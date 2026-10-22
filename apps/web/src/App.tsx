@@ -38,7 +38,7 @@ import { loadChatOpen, saveChatOpen } from "./lib/appearance";
 function Banner({ text }: { text: string }) {
   return (
     <div className="page-x mt-2">
-      <div className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+      <div className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
         {text}
       </div>
     </div>
@@ -486,7 +486,7 @@ export default function App() {
 
             {board !== null && board.failedRawInputs.length > 0 && (
               <div className="page-x mt-2">
-                <div className="flex items-center gap-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
+                <div className="flex items-center gap-3 rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
                   <span>
                     有 {board.failedRawInputs.length} 条信息处理失败，已标「未处理」——原文没丢。
                   </span>

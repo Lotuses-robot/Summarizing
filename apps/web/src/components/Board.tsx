@@ -121,7 +121,7 @@ function Row({
     <li
       id={`row-${item.id}`}
       className={cn(
-        "group relative cursor-pointer overflow-hidden rounded-md border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
+        "group relative cursor-pointer overflow-hidden border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
         row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
         near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
         flash && "row-flash",
@@ -258,7 +258,7 @@ function Row({
         // 框内不放标题/收起按钮（用户 2026-09-27：框外行标题常驻、即收起入口，框内重复属冗余）；
         // 展开体内点击在此掐掉冒泡，否则任何点击都会冒到行上触发收起。
         <div
-          className="mt-2 max-h-[70dvh] overflow-y-auto rounded-md border border-line bg-surface"
+          className="mt-2 max-h-[70dvh] overflow-y-auto rounded-lg border border-line bg-surface"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="bg-canvas/40">{children}</div>
@@ -302,7 +302,7 @@ function Section({
   onQuickAction: (id: string, action: RowAction) => void;
 }) {
   return (
-    <section className="rounded-lg border border-line bg-surface p-3">
+    <section className="rounded-2xl border border-line bg-surface p-3">
       <button
         className="flex w-full items-center gap-2 text-left text-sm font-semibold"
         onClick={onToggleFold}
@@ -545,7 +545,7 @@ export function Board({
   return (
     <main className="page-x space-y-4 py-4">
       {actionError !== null && (
-        <p className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+        <p className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
           {actionError}
         </p>
       )}

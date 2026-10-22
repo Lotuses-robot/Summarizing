@@ -142,7 +142,7 @@ export function UserModal({
       onClick={onClose}
     >
       <div
-        className="flex max-h-[84dvh] w-[min(520px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
+        className="flex max-h-[84dvh] w-[min(520px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center gap-2 border-b border-line py-2 pl-5 pr-2">
@@ -203,7 +203,7 @@ export function UserModal({
           >
             <Row label="账户令牌" description="泄露就一键轮换（所有接入地址立即换新）" stacked>
               <div className="flex flex-wrap items-center gap-2">
-                <code className="min-w-0 break-all rounded-md border border-line bg-canvas px-2 py-1 text-xs">
+                <code className="min-w-0 break-all rounded-lg border border-line bg-canvas px-2 py-1 text-xs">
                   {me.sourceToken}
                 </code>
                 <button className="btn" onClick={() => copy("token", me.sourceToken)}>

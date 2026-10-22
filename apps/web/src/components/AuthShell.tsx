@@ -46,13 +46,13 @@ export function AuthShell({
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-6 px-4">
       {notice !== null && (
-        <p className="w-full max-w-sm rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
+        <p className="w-full max-w-sm rounded-lg border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
           {notice}
         </p>
       )}
       <form
         onSubmit={submit}
-        className="w-full max-w-sm space-y-3 rounded-xl border border-line bg-surface p-6 shadow-sm"
+        className="w-full max-w-sm space-y-3 rounded-2xl border border-line bg-surface p-6 shadow-sm"
       >
         <h1 className="text-lg font-semibold">{mode === "login" ? "登录" : "注册"}</h1>
         {mode === "register" && (

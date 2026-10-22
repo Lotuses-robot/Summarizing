@@ -432,7 +432,7 @@ export function NoticePanel({
   return (
     <div className="page-x py-3">
       {actionError !== null && (
-        <p className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+        <p className="mb-3 rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
           {actionError}
         </p>
       )}
@@ -440,13 +440,13 @@ export function NoticePanel({
       {/* 主卡：固定（列表滚动时不动）；内容超出在卡内滚动 */}
       <div className="sticky top-0 z-10 -mx-1 bg-canvas px-1 pb-3">
         {/* overflow-hidden：卡片左右拖动时被容器裁剪，不把页面撑出横向滚动条 */}
-        <div className="relative overflow-hidden rounded-lg">
+        <div className="relative overflow-hidden rounded-2xl">
           {/* 底层：卡片滑开时露出——**右侧标「稍后」**（向左拖才露它）、**左侧标「清除」**（向右拖）。
               中文字提示（用户 2026-10-21：不挡内容，正好说明这一下会发生什么）。 */}
           <div
             ref={revealRef}
             aria-hidden
-            className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg bg-canvas"
+            className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-2xl bg-canvas"
             style={{ opacity: 0.35 }}
           >
             <span
@@ -468,7 +468,7 @@ export function NoticePanel({
           {/* 卡片本体 */}
           <div
             ref={cardBodyRef}
-            className="relative z-10 touch-pan-y rounded-lg border border-line bg-surface transition-transform duration-150"
+            className="relative z-10 touch-pan-y rounded-2xl border border-line bg-surface transition-transform duration-150"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -534,7 +534,7 @@ export function NoticePanel({
 
             {/* 清除的撤销窗口：模糊卡片 + 环形倒计时 + 撤回 */}
             {pending !== null && (
-              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg bg-surface/40 backdrop-blur-md">
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface/40 backdrop-blur-md">
                 <p className="text-sm font-medium text-ink">已清除</p>
                 <CountdownRing remaining={pending.remaining} total={UNDO_SECONDS} />
                 <button className="btn" onClick={cancelDelete}>
@@ -555,7 +555,7 @@ export function NoticePanel({
               <li key={r.item.id}>
                 <button
                   className={cn(
-                    "flex w-full cursor-pointer items-center gap-2 rounded-md border border-transparent px-3 py-1.5 text-left text-sm hover:bg-canvas",
+                    "flex w-full cursor-pointer items-center gap-2 border border-transparent px-3 py-1.5 text-left text-sm hover:bg-canvas",
                     isSelected && "border-line bg-canvas",
                   )}
                   onClick={() => {

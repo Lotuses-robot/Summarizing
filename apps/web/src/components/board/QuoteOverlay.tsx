@@ -31,7 +31,7 @@ export function QuoteOverlay({
     // 遮罩点击 = 关闭；内层 stopPropagation 让阅读区的点击不冒泡
     <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose}>
       <div
-        className="mx-auto mt-[5dvh] w-[min(640px,92vw)] rounded-lg border border-line bg-surface p-4 shadow-xl sm:mt-[10vh]"
+        className="mx-auto mt-[5dvh] w-[min(640px,92vw)] rounded-2xl border border-line bg-surface p-4 shadow-xl sm:mt-[10vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-muted">

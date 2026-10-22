@@ -89,7 +89,7 @@ export function FilterBar({
     <div className="flex min-w-0 flex-1 items-center gap-2">
       {/* 标签 token 嵌在输入框内部占位（用户 2026-09-27 定：不是把框挤向右，而是框内左段） */}
       <div
-        className="relative flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-md border border-line bg-surface px-2 py-1.5 focus-within:border-accent"
+        className="relative flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded-lg border border-line bg-surface px-2 py-1.5 focus-within:border-accent"
         onClick={() => inputRef.current?.focus()}
       >
         {filter.tags.map((t) => (
@@ -116,7 +116,7 @@ export function FilterBar({
           onKeyDown={onInputKeyDown}
         />
         {tagDraft !== null && matchingTags.length > 0 && (
-          <ul className="absolute left-0 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto rounded-md border border-line bg-surface py-1 shadow-lg">
+          <ul className="absolute left-0 top-full z-20 mt-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-line bg-surface py-1 shadow-lg">
             {matchingTags.map((t, i) => (
               <li key={t}>
                 <button

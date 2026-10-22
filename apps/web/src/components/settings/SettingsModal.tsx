@@ -357,7 +357,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       <div
         // 窄屏（<640）：左栏改为**顶部横排**——竖栏占 144px 会把内容区挤到 200px 上下，
         // 标签/输入框全被压扁（2026-10-22 移动端走查）。宽屏仍是左导航 + 右内容。
-        className="flex max-h-[86dvh] w-[min(860px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl sm:flex-row"
+        className="flex max-h-[86dvh] w-[min(860px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl sm:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
         <nav className="flex shrink-0 items-center gap-2 border-b border-line bg-canvas p-2 sm:w-36 sm:flex-col sm:items-stretch sm:gap-1 sm:border-b-0 sm:border-r sm:p-3">
@@ -368,7 +368,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               <button
                 key={s.id}
                 className={cn(
-                  "flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-2 py-2 text-left text-sm",
+                  "flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg px-2 py-2 text-left text-sm",
                   activeSection === s.id
                     ? "bg-accent-soft font-medium text-accent"
                     : "text-ink-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/10",

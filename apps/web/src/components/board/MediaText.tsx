@@ -101,7 +101,7 @@ function MediaImage({ url, media, hasMap }: { url: string; media?: MediaRef; has
       loading="lazy"
       onClick={() => window.open(src, "_blank", "noopener")}
       onError={() => setBroken(true)}
-      className="my-1 max-h-64 cursor-zoom-in rounded-md border border-line align-middle"
+      className="my-1 max-h-64 cursor-zoom-in rounded-lg border border-line align-middle"
     />
   );
 }

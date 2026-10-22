@@ -56,7 +56,7 @@ export function ActivityBar({
         title={view === "board" ? "回到看板顶部" : "回看板"}
         onClick={onHome}
         className={cn(
-          "flex h-9 w-9 items-center justify-center rounded-md text-accent hover:bg-accent-soft",
+          "flex h-9 w-9 items-center justify-center rounded-lg text-accent hover:bg-accent-soft",
           view !== "board" && "text-ink-muted hover:text-accent",
         )}
       >
@@ -66,7 +66,7 @@ export function ActivityBar({
         title={unreadNoticeCount > 0 ? `通知（${unreadNoticeCount} 条未读）` : "通知（都已读过）"}
         onClick={onShowNotice}
         className={cn(
-          "relative flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent-soft hover:text-accent",
+          "relative flex h-9 w-9 items-center justify-center rounded-lg hover:bg-accent-soft hover:text-accent",
           view === "notice" ? "text-accent" : "text-ink-muted",
         )}
       >
@@ -81,7 +81,7 @@ export function ActivityBar({
         title={uncertainCount > 0 ? `存疑库审核（${uncertainCount} 条待定夺）` : "存疑库审核（空）"}
         onClick={onShowUncertain}
         className={cn(
-          "relative flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent-soft hover:text-accent",
+          "relative flex h-9 w-9 items-center justify-center rounded-lg hover:bg-accent-soft hover:text-accent",
           view === "uncertain" ? "text-accent" : "text-ink-muted",
         )}
       >
@@ -96,7 +96,7 @@ export function ActivityBar({
         title="流水：一条信息从进站到成事项的全程"
         onClick={onShowPipeline}
         className={cn(
-          "flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent-soft hover:text-accent",
+          "flex h-9 w-9 items-center justify-center rounded-lg hover:bg-accent-soft hover:text-accent",
           view === "pipeline" ? "text-accent" : "text-ink-muted",
         )}
       >
@@ -106,7 +106,7 @@ export function ActivityBar({
         title="回收站：删掉的信息，可恢复"
         onClick={onShowTrash}
         className={cn(
-          "flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent-soft hover:text-accent",
+          "flex h-9 w-9 items-center justify-center rounded-lg hover:bg-accent-soft hover:text-accent",
           view === "trash" ? "text-accent" : "text-ink-muted",
         )}
       >
@@ -115,28 +115,28 @@ export function ActivityBar({
       <button
         title="用量：这段时间花掉了多少 token"
         onClick={onOpenUsage}
-        className="mt-auto flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+        className="mt-auto flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <ChartColumn size={18} />
       </button>
       <button
         title="账户"
         onClick={onOpenAccount}
-        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <CircleUserRound size={18} />
       </button>
       <button
         title="设置"
         onClick={onOpenSettings}
-        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <Settings size={18} />
       </button>
       <button
         title="关于（版本与更新日志）"
         onClick={onOpenAbout}
-        className="flex h-9 w-9 items-center justify-center rounded-md text-ink-muted hover:bg-accent-soft hover:text-accent"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-ink-muted hover:bg-accent-soft hover:text-accent"
       >
         <Info size={18} />
       </button>

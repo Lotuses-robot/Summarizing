@@ -118,13 +118,13 @@
     min-width: 0; /* flex 子项默认 min-width:auto 会顶破父容器——这是横向溢出的真正根因 */
   }
   .btn {
-    @apply inline-flex cursor-pointer items-center gap-1 rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex cursor-pointer items-center gap-1 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink hover:bg-accent-soft disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-accent {
     @apply border-accent bg-accent text-white hover:opacity-90;
   }
   .card {
-    @apply rounded-lg border border-line bg-surface p-4;
+    @apply rounded-2xl border border-line bg-surface p-4;
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2 py-px text-xs text-ink-muted;
@@ -135,19 +135,19 @@
   /* 行悬停快捷动作（勾/恢复/删除）：平时隐身，行悬停/键盘聚焦/**行展开时**显形。
    *  触屏没有悬停——展开行即入口（2026-10-22 移动端走查）；命中区在手指设备上放大到 32px。 */
   .row-act {
-    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-ink-muted opacity-0 transition pointer-coarse:h-8 pointer-coarse:w-8 hover:bg-accent-soft hover:text-accent group-hover:opacity-100 focus-visible:opacity-100;
+    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg text-ink-muted opacity-0 transition pointer-coarse:h-8 pointer-coarse:w-8 hover:bg-accent-soft hover:text-accent group-hover:opacity-100 focus-visible:opacity-100;
   }
   /* 展开态的快捷动作常驻（用户 2026-10-22）：展开正是要操作的时候，不必再靠悬停找按钮 */
   .row-actions-open .row-act {
     opacity: 1;
   }
   .input {
-    @apply w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none;
+    @apply w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none;
   }
   /* 长文本设置项（收取规则等自由文本）：多行 + 垂直拉伸。
    *  leading-relaxed 让中文多行文本行间不至于挤在一起——紧贴框线的观感主要来自行高与内边距。 */
   .textarea {
-    @apply w-full resize-y rounded-md border border-line bg-surface px-3 py-2.5 text-sm leading-relaxed text-ink placeholder:text-ink-muted/70 focus:border-accent focus:outline-none;
+    @apply w-full resize-y rounded-lg border border-line bg-surface px-3 py-2.5 text-sm leading-relaxed text-ink placeholder:text-ink-muted/70 focus:border-accent focus:outline-none;
   }
   /* 深链短促高亮（05§三）：背景色动画不产生 containing block，不伤 sticky */
   .row-flash {

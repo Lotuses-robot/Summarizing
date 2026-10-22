@@ -37,7 +37,7 @@ export function Card({
       {bare ? (
         children
       ) : (
-        <div className="overflow-hidden rounded-xl border border-line bg-surface">{children}</div>
+        <div className="overflow-hidden rounded-2xl border border-line bg-surface">{children}</div>
       )}
       {footnote !== undefined && <p className="mt-1.5 px-0.5 text-xs text-ink-muted">{footnote}</p>}
     </section>
@@ -97,7 +97,7 @@ export function Segmented<T extends string>({
         <button
           key={opt}
           className={cn(
-            "flex-1 cursor-pointer rounded-md px-2 py-1 text-center text-xs transition-colors",
+            "flex-1 cursor-pointer rounded-lg px-2 py-1 text-center text-xs transition-colors",
             opt === value
               ? "bg-surface font-medium text-ink shadow-sm"
               : "text-ink-muted hover:text-ink",

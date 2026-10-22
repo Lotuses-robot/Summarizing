@@ -49,7 +49,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
         {feedback !== null && (
           <p
             className={cn(
-              "mb-3 rounded-md border px-3 py-2 text-sm",
+              "mb-3 rounded-lg border px-3 py-2 text-sm",
               feedback.tone === "error"
                 ? "border-danger/40 bg-danger-soft text-danger"
                 : "border-line bg-canvas text-ink-muted",
@@ -94,7 +94,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
       {feedback !== null && (
         <p
           className={cn(
-            "mb-3 rounded-md border px-3 py-2 text-sm",
+            "mb-3 rounded-lg border px-3 py-2 text-sm",
             feedback.tone === "error"
               ? "border-danger/40 bg-danger-soft text-danger"
               : "border-line bg-canvas text-ink-muted",
@@ -111,7 +111,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
               key={item.id}
               className={cn(
                 // 同通知页：默认卡片底（surface），点开压深到 canvas（暗色下转深黑）
-                "group relative cursor-pointer overflow-hidden rounded-md border border-line bg-surface py-2 pl-5 pr-3 hover:bg-canvas",
+                "group relative cursor-pointer overflow-hidden border border-line bg-surface py-2 pl-5 pr-3 hover:bg-canvas",
                 expandedId === item.id && "bg-canvas",
               )}
               onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
@@ -181,7 +181,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
               </div>
               {expandedId === item.id && (
                 <div
-                  className="mt-2 max-h-[70dvh] overflow-y-auto rounded-md border border-line bg-surface"
+                  className="mt-2 max-h-[70dvh] overflow-y-auto rounded-lg border border-line bg-surface"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="bg-canvas/40">

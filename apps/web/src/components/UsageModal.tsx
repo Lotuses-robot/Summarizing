@@ -22,7 +22,7 @@ const RANGES: { id: UsageRange; label: string }[] = [
  *  数字按 K/M/B 压缩（最多 3 位有效数字），悬浮显示精确值——与公开面板同一套记法。 */
 function Stat({ label, value, note }: { label: string; value: number | null; note?: string }) {
   return (
-    <div className="flex flex-col items-center rounded-xl border border-line bg-canvas px-4 py-5">
+    <div className="flex flex-col items-center rounded-lg border border-line bg-canvas px-4 py-5">
       <div className="text-xs text-ink-muted">{label}</div>
       <div
         className={cn(

@@ -386,7 +386,7 @@ export function ChatPanel({
         )}
         <div className="relative">
           {image !== null && (
-            <div className="mb-1.5 flex items-center gap-2 rounded-md border border-line bg-canvas p-1.5">
+            <div className="mb-1.5 flex items-center gap-2 rounded-lg border border-line bg-canvas p-1.5">
               <img
                 src={image.previewUrl}
                 alt="待发送的图片"
@@ -424,7 +424,7 @@ export function ChatPanel({
             rows={3}
           />
           {mentionQuery !== null && matchingItems.length > 0 && (
-            <ul className="absolute bottom-full left-0 z-20 mb-1 max-h-48 w-full overflow-y-auto rounded-md border border-line bg-surface py-1 shadow-lg">
+            <ul className="absolute bottom-full left-0 z-20 mb-1 max-h-48 w-full overflow-y-auto rounded-lg border border-line bg-surface py-1 shadow-lg">
               {matchingItems.map((it, i) => (
                 <li key={it.id}>
                   <button

@@ -142,7 +142,7 @@ function RecordEditor({
     return (kk !== "" && vv === "") || (kk === "" && vv !== "");
   });
   return (
-    <div className="overflow-hidden rounded-lg border border-line">
+    <div className="overflow-hidden rounded-2xl border border-line">
       {rows.map(([k, v], i) => (
         <div
           key={i}
@@ -164,7 +164,7 @@ function RecordEditor({
               onBlur={() => onCommit(rows)}
             />
             <button
-              className="mr-1.5 inline-flex h-[1.5rem] w-[1.5rem] shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-muted opacity-0 transition hover:bg-danger-soft hover:text-danger focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
+              className="mr-1.5 inline-flex h-[1.5rem] w-[1.5rem] shrink-0 cursor-pointer items-center justify-center rounded-lg text-ink-muted opacity-0 transition hover:bg-danger-soft hover:text-danger focus:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100"
               title="删这一行"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
@@ -353,7 +353,7 @@ function SourceCard({ summary }: { summary: SourceSummary }) {
       {summary.hookPath !== null && (
         <Row label="接入地址" description={summary.guide} stacked>
           <div className="flex flex-wrap items-center gap-2">
-            <code className="min-w-0 break-all rounded-md border border-line bg-canvas px-2 py-1 text-xs">
+            <code className="min-w-0 break-all rounded-lg border border-line bg-canvas px-2 py-1 text-xs">
               {window.location.origin}
               {summary.hookPath}
             </code>

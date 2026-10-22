@@ -96,7 +96,7 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
     <div data-testid="run-detail" className="fit-text rounded-b-lg bg-surface px-4 pb-3.5 pt-2">
       <section>
         {/* 原文：保留换行 + 长 URL 框内断行（fit-text——不溢出这条灰底的框） */}
-        <p className="fit-text whitespace-pre-wrap rounded-md bg-canvas px-2.5 py-2 text-xs leading-relaxed">
+        <p className="fit-text whitespace-pre-wrap rounded-lg bg-canvas px-2.5 py-2 text-xs leading-relaxed">
           {detail.raw.content}
         </p>
       </section>
@@ -116,7 +116,7 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
                 <p className="text-xs leading-relaxed">{e.detail}</p>
                 {/* 模型这一轮的原话（最多 500 字，服务端截断）——「说了什么但没给过」一眼可查 */}
                 {thought !== null && (
-                  <p className="mt-1 whitespace-pre-wrap break-words rounded-md bg-canvas px-2 py-1 text-[11px] leading-relaxed text-ink-muted">
+                  <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-canvas px-2 py-1 text-[11px] leading-relaxed text-ink-muted">
                     {thought}
                   </p>
                 )}
@@ -436,7 +436,7 @@ export function PipelineView() {
           <button
             title="刷新"
             onClick={load}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
           >
             <RefreshCw size={14} />
           </button>
