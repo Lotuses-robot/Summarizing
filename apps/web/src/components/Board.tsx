@@ -190,19 +190,25 @@ function Row({
         className={cn(
           // bg-surface 必须实心：行本体不拖动时是透明的，底层手势提示会「透」到事项文字上
           // （用户 2026-10-22：「又跑上来祸害事项了，会遮挡到」）。拖动后由它遮住提示，只露出滑开的缝。
-          "relative z-10 cursor-pointer rounded-md border border-transparent bg-surface py-2 pl-5 pr-3 transition-transform duration-150 hover:bg-canvas",
-          // 删除的撤销窗口：边右移边糊掉（时长由下面 style 的 transitionDuration 给，
-          // 不从 className 拼——Tailwind 扫不到模板字符串里的类名）
-          pendingTrash &&
-            "pointer-events-none translate-x-[110%] opacity-0 blur-[3px] transition-all",
+          "relative z-10 cursor-pointer rounded-md border border-transparent bg-surface py-2 pl-5 pr-3 transition-all duration-150 hover:bg-canvas",
+          // 删除的撤销窗口：这里只管「不可点 + 淡出 + 变糊」；位移走内联 style（见下），
+          // 从手指松开的位置接着改，才不会先弹回原点再滑出（用户 2026-10-22：中间像停了一下）
+          pendingTrash && "pointer-events-none opacity-0 blur-[3px]",
           near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
           flash && "row-flash",
           active && "bg-canvas ring-1 ring-accent",
         )}
         style={{
           ...(rowBg ? { backgroundColor: rowBg } : {}),
-          // 撤销窗口的时长 = 撤销窗口本身：行在这 2 秒里慢慢滑出去糊掉，到点才写库
-          ...(pendingTrash ? { transitionDuration: `${UNDO_SECONDS}s` } : {}),
+          // 撤销窗口：位移、时长、缓动都内联给——行在这 2 秒里从松手处继续滑出去、糊掉，到点才写库。
+          // 缓动取标准 ease（前段快、尾段收），避免匀速直线那种「到末尾像卡住」的观感。
+          ...(pendingTrash
+            ? {
+                transform: "translateX(110%)",
+                transitionDuration: `${UNDO_SECONDS}s`,
+                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
+              }
+            : {}),
         }}
         onClick={handleRowClick}
       >

@@ -126,17 +126,28 @@ export function useSwipeActions({
     }
   };
 
-  /** 松手：过阈值即交给调用方（右/左），否则回弹。 */
+  /** 松手：过阈值即交给调用方（右/左），否则回弹。
+   *  ⚠️ 过阈值时**不把位移清零**：行停在手指松开的位置，由调用方接着往同一方向播完
+   *  （清零会让行先瞬间弹回原点再滑出去——肉眼就是「滑到一半停一下又接着滑」）。 */
   const finishDrag = (): void => {
     const d = dragRef.current;
     dragRef.current = null;
     const dx = dxRef.current;
     dxRef.current = 0;
-    resetDragVisuals();
     if (d === null) return;
     const threshold = d.width * cbRef.current.ratio;
-    if (dx >= threshold) cbRef.current.onSwipe("right");
-    else if (dx <= -threshold) cbRef.current.onSwipe("left");
+    const dir: SwipeDir | null = dx >= threshold ? "right" : dx <= -threshold ? "left" : null;
+    if (dir === null) {
+      resetDragVisuals(); // 没过阈值：回弹
+      return;
+    }
+    // 过阈值：保留当前位置，只摘掉拖动期间临时写的 transition/userSelect
+    if (bodyRef.current !== null) {
+      bodyRef.current.style.transition = "";
+      bodyRef.current.style.userSelect = "";
+    }
+    if (revealRef.current !== null) revealRef.current.style.display = "none";
+    cbRef.current.onSwipe(dir);
   };
 
   /** 手势被系统取消（pointercancel/touchcancel）：只回弹，不执行动作。 */
