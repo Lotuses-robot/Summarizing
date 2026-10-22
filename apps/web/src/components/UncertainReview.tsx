@@ -117,7 +117,7 @@ export function UncertainReview({
             <li
               key={it.id}
               className={cn(
-                "flex items-start gap-3 border border-line bg-surface px-3 py-2",
+                "flex items-start gap-3 rounded-md border border-line bg-surface px-3 py-2",
                 busy.has(it.id) && "opacity-50",
               )}
             >

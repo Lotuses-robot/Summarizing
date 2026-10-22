@@ -1,14 +1,11 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { itemName, type NoticeRow } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { pushEscLayer } from "../lib/escLayer";
+import { useSwipeActions } from "../lib/swipe";
+import { loadSwipeHintSeen, markSwipeHintSeen } from "../lib/appearance";
+import { GestureHint } from "./GestureHint";
 import { ItemBody } from "./board/ItemBody";
 import { fmtFullTime, fmtShortTime } from "../lib/time";
 
@@ -18,14 +15,6 @@ import { fmtFullTime, fmtShortTime } from "../lib/time";
 // 自动选择：进入 / 筛选变化 / 清除 / 稍后之后，选下一条未跳过的；轮询不抢焦点。
 // 拖动走直接 DOM 变换（不经 state）——ItemBody 内容重不参与逐帧重渲染，手感跟手。
 
-/** 单侧的滑动提示显隐（直接改 DOM 样式，不触发重渲染）。 */
-function setSideVisible(root: HTMLElement, side: "left" | "right", visible: boolean): void {
-  const el = root.querySelector<HTMLElement>(`[data-side='${side}']`);
-  if (el !== null) el.style.visibility = visible ? "visible" : "hidden";
-}
-
-/** 拖动阈值：卡片宽度的 35%。 */
-const SWIPE_RATIO = 0.35;
 /** 清除的撤销窗口（秒）。 */
 const UNDO_SECONDS = 2;
 
@@ -81,20 +70,11 @@ export function NoticePanel({
   const [pending, setPending] = useState<{ id: string; title: string; remaining: number } | null>(
     null,
   );
+  /** 首次手势提示：滑过一次 / 点过「知道了」即永久收起（本机记忆）。 */
+  const [hintVisible, setHintVisible] = useState(() => !loadSwipeHintSeen("notice"));
   /** 删除/撤销失败必须可见（红线「不许静默」）。 */
   const [actionError, setActionError] = useState<string | null>(null);
 
-  /** 拖动位移（px）：正 = 向右（清除），负 = 向左（稍后）。 */
-  const dxRef = useRef(0);
-  const cardBodyRef = useRef<HTMLDivElement | null>(null);
-  const revealRef = useRef<HTMLDivElement | null>(null);
-  /** 拖动会话：axis 起手时按前 8px 位移定方向——竖向 = 滚内容，不参与滑动手势。 */
-  const dragRef = useRef<{
-    startX: number;
-    startY: number;
-    width: number;
-    axis: "none" | "x" | "y";
-  } | null>(null);
   const pendingRef = useRef<typeof pending>(null);
   useEffect(() => {
     pendingRef.current = pending;
@@ -270,153 +250,20 @@ export function NoticePanel({
     }, 1000);
   }, []);
 
-  // ── 拖动：直接改写 DOM（不 setState），内容不参与逐帧重渲染 ──
-  // 鼠标/触控笔走 pointer 事件；触屏走原生 touch 事件——只靠 pointermove 时，浏览器会在手势
-  // 被识别成滚动/后退时半路 pointercancel（实测移动 28px 即被收走）；原生 touchmove 里
-  // preventDefault 才能把横向手势留下，竖向留给原生滚动。
-  /** 起手：记录起点与卡宽；交互元素上不启动拖动（点证据/链接/按钮要正常）。 */
-  const beginDrag = (target: EventTarget | null, x: number, y: number, width: number): boolean => {
-    if (pendingRef.current !== null || selectedRef.current === null) return false;
-    if (target instanceof Element && target.closest("button,a,summary,input,textarea,select")) {
-      return false;
-    }
-    dragRef.current = { startX: x, startY: y, width, axis: "none" };
-    dxRef.current = 0;
-    if (cardBodyRef.current !== null) {
-      cardBodyRef.current.style.transition = "none";
-      cardBodyRef.current.style.userSelect = "none"; // 拖动中别顺带选中文字
-    }
-    if (revealRef.current !== null) {
-      revealRef.current.style.display = "block";
-      setSideVisible(revealRef.current, "left", false);
-      setSideVisible(revealRef.current, "right", false);
-    }
-    return true;
-  };
-  /** 移动一帧：先定轴向（横向才拖动）；位移限制在 ±60% 卡宽；底层动作层随位移加深。 */
-  const moveDrag = (x: number, y: number): void => {
-    const d = dragRef.current;
-    if (d === null) return;
-    if (d.axis === "none") {
-      const ax = Math.abs(x - d.startX);
-      const ay = Math.abs(y - d.startY);
-      if (Math.max(ax, ay) < 8) return;
-      d.axis = ax > ay ? "x" : "y";
-    }
-    if (d.axis !== "x") return;
-    const limit = d.width * 0.6;
-    const dx = Math.max(-limit, Math.min(limit, x - d.startX));
-    dxRef.current = dx;
-    if (cardBodyRef.current !== null) {
-      cardBodyRef.current.style.transform = `translateX(${dx}px)`;
-    }
-    const strength = Math.min(1, Math.abs(dx) / Math.max(1, d.width * SWIPE_RATIO));
-    if (revealRef.current !== null) {
-      revealRef.current.style.opacity = String(0.35 + strength * 0.65);
-      // 只亮当前方向那一侧的提示（另一侧被卡片遮着，亮着也是死字）
-      setSideVisible(revealRef.current, "left", dx > 0);
-      setSideVisible(revealRef.current, "right", dx < 0);
-    }
-  };
-  /** 复位拖动期间写下的临时样式与底层动作层（只动 DOM，不改状态）。 */
-  const resetDragVisuals = (): void => {
-    if (cardBodyRef.current !== null) {
-      cardBodyRef.current.style.transition = "";
-      cardBodyRef.current.style.transform = "";
-      cardBodyRef.current.style.userSelect = "";
-    }
-    if (revealRef.current !== null) {
-      revealRef.current.style.display = "none";
-      // 下一次拖动重新按方向点亮（否则会继承上一次的可见性）
-      setSideVisible(revealRef.current, "left", false);
-      setSideVisible(revealRef.current, "right", false);
-    }
-  };
-  /** 松手：过阈值即执行（右=清除、左=稍后），否则回弹。 */
-  const finishDrag = (): void => {
-    const d = dragRef.current;
-    dragRef.current = null;
-    const dx = dxRef.current;
-    dxRef.current = 0;
-    resetDragVisuals();
-    if (d === null) return;
-    const row = selectedRef.current;
-    if (row === null) return;
-    const threshold = d.width * SWIPE_RATIO;
-    if (dx >= threshold)
-      startDelete(row); // 向右拖 = 清除
-    else if (dx <= -threshold) skip(row); // 向左拖 = 稍后
-  };
-  /** 手势被系统取消（pointercancel/touchcancel）：只回弹，不执行动作。 */
-  const abortDrag = (): void => {
-    dragRef.current = null;
-    dxRef.current = 0;
-    resetDragVisuals();
-  };
-  /** 触屏用的最新手势函数（原生监听只挂一次）。 */
-  const gestureRef = useRef({ beginDrag, moveDrag, finishDrag, abortDrag });
-  useEffect(() => {
-    gestureRef.current = { beginDrag, moveDrag, finishDrag, abortDrag };
+  /** 横滑：右滑 = 清除（延迟提交、可撤回），左滑 = 稍后（不写库）。手势机制与看板行同一份（lib/swipe）。 */
+  const swipe = useSwipeActions({
+    enabled: pending === null && selected !== null,
+    ratio: 0.35,
+    onSwipe: (dir) => {
+      const row = selected;
+      if (row === null) return;
+      // 会用了就不再提示
+      markSwipeHintSeen("notice");
+      setHintVisible(false);
+      if (dir === "right") startDelete(row);
+      else skip(row);
+    },
   });
-
-  // 触屏手势：touchmove 非 passive——判定为横向后 preventDefault，浏览器才不会把它当滚动/后退收走
-  useEffect(() => {
-    const el = cardBodyRef.current;
-    if (el === null) return;
-    /** 单指起手（多指 = 缩放等，不接管）。 */
-    const onTouchStart = (e: TouchEvent) => {
-      const t = e.touches[0];
-      if (t === undefined || e.touches.length > 1) return;
-      gestureRef.current.beginDrag(e.target, t.clientX, t.clientY, el.clientWidth);
-    };
-    /** 单指移动：定轴后横向 preventDefault；竖向不拦（原生滚动）。 */
-    const onTouchMove = (e: TouchEvent) => {
-      const t = e.touches[0];
-      if (t === undefined) return;
-      gestureRef.current.moveDrag(t.clientX, t.clientY);
-      if (dragRef.current !== null && dragRef.current.axis === "x") e.preventDefault();
-    };
-    /** 单指结束：与鼠标同一收尾。 */
-    const onTouchEnd = () => {
-      if (dragRef.current !== null) gestureRef.current.finishDrag();
-    };
-    /** 手势被系统收走（来电/系统导航等）：只回弹。 */
-    const onTouchCancel = () => {
-      if (dragRef.current !== null) gestureRef.current.abortDrag();
-    };
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd);
-    el.addEventListener("touchcancel", onTouchCancel);
-    return () => {
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-      el.removeEventListener("touchcancel", onTouchCancel);
-    };
-  }, []);
-
-  /** 鼠标/触控笔按下（触屏走上面的原生 touch 监听）。 */
-  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch") return;
-    if (!beginDrag(e.target, e.clientX, e.clientY, e.currentTarget.clientWidth)) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-  /** 鼠标/触控笔移动。 */
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch") return;
-    moveDrag(e.clientX, e.clientY);
-  };
-  /** 鼠标/触控笔松开。 */
-  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch") return;
-    finishDrag();
-  };
-  /** 鼠标/触控笔取消：只回弹，不动作。 */
-  const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "touch") return;
-    abortDrag();
-  };
 
   const emptyCardText =
     notices.length === 0
@@ -431,6 +278,15 @@ export function NoticePanel({
 
   return (
     <div className="page-x py-3">
+      {hintVisible && (
+        <GestureHint
+          text="右滑清除（进回收站，可撤回）· 左滑稍后（本次跳过）"
+          onDismiss={() => {
+            markSwipeHintSeen("notice");
+            setHintVisible(false);
+          }}
+        />
+      )}
       {actionError !== null && (
         <p className="mb-3 rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
           {actionError}
@@ -444,7 +300,7 @@ export function NoticePanel({
           {/* 底层：卡片滑开时露出——**右侧标「稍后」**（向左拖才露它）、**左侧标「清除」**（向右拖）。
               中文字提示（用户 2026-10-21：不挡内容，正好说明这一下会发生什么）。 */}
           <div
-            ref={revealRef}
+            ref={swipe.revealRef}
             aria-hidden
             className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-2xl bg-canvas"
             style={{ opacity: 0.35 }}
@@ -467,12 +323,9 @@ export function NoticePanel({
 
           {/* 卡片本体 */}
           <div
-            ref={cardBodyRef}
+            ref={swipe.bodyRef}
             className="relative z-10 touch-pan-y rounded-2xl border border-line bg-surface transition-transform duration-150"
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerCancel}
+            {...swipe.handlers}
           >
             {/* 左右缘固定位置的 ‹ ›：纯显示，不随下方信息内收而移动（用户 2026-10-19） */}
             {selected !== null && (
@@ -555,7 +408,7 @@ export function NoticePanel({
               <li key={r.item.id}>
                 <button
                   className={cn(
-                    "flex w-full cursor-pointer items-center gap-2 border border-transparent px-3 py-1.5 text-left text-sm hover:bg-canvas",
+                    "flex w-full cursor-pointer items-center gap-2 rounded-md border border-transparent px-3 py-1.5 text-left text-sm hover:bg-canvas",
                     isSelected && "border-line bg-canvas",
                   )}
                   onClick={() => {

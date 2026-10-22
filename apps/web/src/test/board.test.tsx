@@ -1,11 +1,33 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { wallClockToEpoch } from "@summarizing/shared";
 import { Board } from "../components/Board";
 import { doneFadeStrength } from "../lib/urgency";
 import { makeRow, view } from "./helpers/board-fixtures";
+import { fetchUrl, jsonResponse } from "./helpers/http";
 import "@testing-library/jest-dom/vitest";
+
+/** 在行上模拟一次触屏横滑（正 = 向右 → 移入回收站；负 = 向左 → 完成/撤销完成）。
+ *  happy-dom 没有布局，clientWidth 恒为 0——先给宽度，35% 阈值才有意义。 */
+function swipeRow(id: string, dx: number): void {
+  // 行本体 = li 的第二个子元素（第一个是底层手势提示层）
+  const li = document.getElementById(`row-${id}`);
+  const body = li?.children[1] ?? null;
+  if (!(body instanceof HTMLElement)) throw new Error("找不到行本体");
+  Object.defineProperty(body, "clientWidth", { configurable: true, value: 400 });
+  /** 某个横坐标上的「手指」——touch 事件只用到 clientX/clientY。 */
+  const at = (x: number) => ({ clientX: x, clientY: 40 });
+  /** 派发带 touches 的原生事件（组件用原生 touch 监听）。 */
+  const fire = (type: string, touches: { clientX: number; clientY: number }[]) => {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "touches", { value: touches });
+    fireEvent(body, ev);
+  };
+  fire("touchstart", [at(200)]);
+  fire("touchmove", [at(200 + dx)]);
+  fire("touchend", []);
+}
 
 describe("Board（三段看板，007）", () => {
   beforeEach(() => {
@@ -80,6 +102,68 @@ describe("Board（三段看板，007）", () => {
     expect(narrow[0]?.className).toContain("sm:hidden");
     // 标签才是可被挤掉的：它们都在 .row-meta 那个可压缩盒子里
     expect(screen.getByText("英语课").closest(".row-meta")).not.toBeNull();
+  });
+
+  it("右滑一行 → 移入回收站并浮出撤销条；点撤销走 restore", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = fetchUrl(input);
+        calls.push(url);
+        if (url.includes("/trash") || url.includes("/restore")) {
+          return Promise.resolve(jsonResponse({}));
+        }
+        return Promise.reject(new Error("测试环境无后端"));
+      }),
+    );
+    render(
+      <Board
+        board={view({
+          scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    swipeRow("s1", 200);
+    await act(async () => {});
+    expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(true);
+    // 删除一步到位（不弹确认），但给 5 秒撤销窗口
+    expect(screen.getByText("已移入回收站")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("撤销"));
+    await act(async () => {});
+    expect(calls.some((u) => u.endsWith("/api/items/s1/restore"))).toBe(true);
+  });
+
+  it("左滑一行 → 完成（不删）", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = fetchUrl(input);
+        calls.push(url);
+        if (url.includes("/complete")) return Promise.resolve(jsonResponse({}));
+        return Promise.reject(new Error("测试环境无后端"));
+      }),
+    );
+    render(
+      <Board
+        board={view({
+          scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    swipeRow("s1", -200);
+    await act(async () => {});
+    expect(calls.some((u) => u.endsWith("/api/items/s1/complete"))).toBe(true);
+    expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(false);
   });
 
   it("段头计数随筛选变：过滤后计数 = 显示条数（曾固定显示段内总数）", () => {

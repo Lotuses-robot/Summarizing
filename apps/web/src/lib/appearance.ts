@@ -8,6 +8,8 @@ const THEME_KEY = "summarizing.theme";
 const PALETTE_KEY = "summarizing.palette";
 const FONT_KEY = "summarizing.font";
 const DENSITY_KEY = "summarizing.density";
+/** 手势提示已读（按页面记：board / notice）——滑过一次就永久不再出现。 */
+const SWIPE_HINT_PREFIX = "summarizing.swipeHint.";
 
 // 段默认折叠：已完成（D-80；007 取消归档后只剩它）；其余段默认展开
 const DEFAULT_FOLDED: readonly string[] = ["done"];
@@ -60,6 +62,16 @@ export function loadChatOpen(): boolean {
 /** 记住对话面板开合。 */
 export function saveChatOpen(open: boolean): void {
   write(CHAT_OPEN_KEY, open ? "1" : "0");
+}
+
+/** 该页的手势提示是否已经看过（看过就永久不再显示）。 */
+export function loadSwipeHintSeen(page: string): boolean {
+  return read(SWIPE_HINT_PREFIX + page) === "1";
+}
+
+/** 记住该页的手势提示已读（滑过一次 / 点过「知道了」）。 */
+export function markSwipeHintSeen(page: string): void {
+  write(SWIPE_HINT_PREFIX + page, "1");
 }
 
 /** 读段折叠记忆（无记忆用默认：已完成折叠，D-80）。 */

@@ -10,6 +10,10 @@ import {
   type ItemRow,
 } from "@summarizing/shared";
 import { cn } from "../lib/cn";
+import { useSwipeActions } from "../lib/swipe";
+import { loadSwipeHintSeen, markSwipeHintSeen } from "../lib/appearance";
+import { GestureHint } from "./GestureHint";
+import { UndoBar } from "./UndoBar";
 import { loadSectionFold, saveSectionFold } from "../lib/appearance";
 import { pushEscLayer } from "../lib/escLayer";
 import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urgency";
@@ -117,153 +121,200 @@ function Row({
     return undefined;
   })();
 
+  /** 横滑：右滑 = 移入回收站，左滑 = 完成 / 撤销完成（与通知页同一套手势，lib/swipe 唯一实现）。
+   *  手势结束仍会来一次 click——用它吞掉，否则滑完会顺手把行展开。 */
+  const swipe = useSwipeActions({
+    enabled: true,
+    ratio: 0.35,
+    onSwipe: (dir) => {
+      if (dir === "right") onQuickAction(item.id, "trash");
+      else onQuickAction(item.id, item.status === "todo" ? "complete" : "reopen");
+    },
+  });
+  /** 行点击：拖动过就只复位、不展开。 */
+  const handleRowClick = () => {
+    if (swipe.movedRef.current) {
+      swipe.movedRef.current = false;
+      return;
+    }
+    onToggle();
+  };
+
   return (
-    <li
-      id={`row-${item.id}`}
-      className={cn(
-        "group relative cursor-pointer overflow-hidden border border-transparent py-2 pl-5 pr-3 hover:bg-canvas",
-        row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
-        near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
-        flash && "row-flash",
-        active && "bg-canvas ring-1 ring-accent",
-      )}
-      style={
-        rowBg
-          ? {
-              backgroundColor: rowBg,
-            }
-          : undefined
-      }
-      onClick={onToggle}
-    >
-      {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
+    <li id={`row-${item.id}`} className="group relative overflow-hidden rounded-md">
+      {/* 底层动作提示：右滑露出左边「移入回收站」、左滑露出右边「完成 / 撤销完成」。
+          提示只做「这一下会发生什么」，不可点——手势是唯一入口（与通知主卡同款）。 */}
+      <div
+        ref={swipe.revealRef}
+        aria-hidden
+        className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-md bg-canvas"
+        style={{ opacity: 0.35 }}
+      >
+        <span
+          data-side="left"
+          className="absolute left-4 top-1/2 flex -translate-y-1/2 items-center gap-1.5 text-sm font-medium text-ink-muted"
+          style={{ visibility: "hidden" }}
+        >
+          <span className="text-lg leading-none">‹</span>移入回收站
+        </span>
+        <span
+          data-side="right"
+          className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-1.5 text-sm font-medium text-ink-muted"
+          style={{ visibility: "hidden" }}
+        >
+          {item.status === "todo" ? "完成" : "撤销完成"}
+          <span className="text-lg leading-none">›</span>
+        </span>
+      </div>
+      {/* 行本体：背景/描边/闪示都在它身上，拖动时整体平移 */}
+      <div
+        ref={swipe.bodyRef}
+        {...swipe.handlers}
+        className={cn(
+          "relative z-10 cursor-pointer rounded-md border border-transparent py-2 pl-5 pr-3 transition-transform duration-150 hover:bg-canvas",
+          row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
+          near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
+          flash && "row-flash",
+          active && "bg-canvas ring-1 ring-accent",
+        )}
+        style={
+          rowBg
+            ? {
+                backgroundColor: rowBg,
+              }
+            : undefined
+        }
+        onClick={handleRowClick}
+      >
+        {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
           标签**横向滑动**查看（不再换行到第三行）；**没有 meta 的行不渲染第二行**——此前标题 basis-full
           让每行都占两行，没标签时第二行只剩隐形按钮，看起来就是一条空白行。
           DOM 顺序仍是「标题 → meta → 操作」；窄屏只靠 order 把操作提到第一行右端——sm 起 order 归位，
           恢复原单行阅读线（标题 → 相对 ddl → tags → 右缘操作）。 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-medium sm:flex-nowrap">
-        {/* 标题（+ 左缘推断条）：条挂在标题自己的盒子里、按标题行垂直居中——
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-medium sm:flex-nowrap">
+          {/* 标题（+ 左缘推断条）：条挂在标题自己的盒子里、按标题行垂直居中——
             桌面端（单行，行高被 chip 撑高）与窄屏（标题独占一行）都对齐第一行文本。
             条画在标题盒**外面**（-left-3.5），所以截断放在内层 span 上，别让 overflow 剪掉它。 */}
-        <span
-          className={cn(
-            "relative order-1 min-w-0 flex-1 sm:order-none sm:flex-initial",
-            item.status === "done" && "text-ink-muted line-through",
-          )}
-        >
-          {row.dueDateInferred && dueNote !== null && (
-            <span
-              aria-hidden
-              className="absolute -left-3.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-accent"
-              title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
-            />
-          )}
-          <span className="block truncate">{itemName(item.elements)}</span>
-        </span>
-        {dueLabel !== null && (
-          // 桌面端：到期时间独立成一位、**永不压缩**——「不够位置就挤标题和标签，别挤时间」
-          // （用户 2026-10-22）。窄屏那一份在下面可滑动的第二行里（sm:hidden / hidden sm:inline 互补）。
           <span
-            className={cn("hidden shrink-0 text-xs font-normal sm:inline", dueTone)}
-            title={dueTitle}
-          >
-            {dueLabel}
-          </span>
-        )}
-        {(dueText !== null || isNew || item.tags.length > 0) && (
-          // 窄屏 = 可横向滑动的第二行；桌面端 = 紧挨标题的一段标签，
-          // **flex-1 basis 0** 让它占满剩余空间：剩余空间为 0 时它先被压到零（标签先让位），
-          // 标题此后才截断——「先挤标签，再挤标题」（用户 2026-10-22）。
-          <span className="row-meta no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 sm:order-none sm:flex-1 sm:overflow-hidden">
-            {dueLabel !== null && (
-              // 窄屏这一份留在可滑动的第二行里；桌面那份在 meta **外面**（sm:hidden / hidden sm:inline）
-              <span
-                className={cn("shrink-0 text-xs font-normal sm:hidden", dueTone)}
-                title={dueTitle}
-              >
-                {dueLabel}
-              </span>
+            className={cn(
+              "relative order-1 min-w-0 flex-1 sm:order-none sm:flex-initial",
+              item.status === "done" && "text-ink-muted line-through",
             )}
-            {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}
-            {item.tags.map((t) => (
-              <button
-                key={t}
-                className={cn(
-                  "chip shrink-0 cursor-pointer hover:text-accent",
-                  // 多模态标签（D-104）：读图得来的内容——高亮区分，一眼可辨（不静默）
-                  t === MULTIMODAL_IMAGE_TAG && "border-accent/60 bg-accent/10 text-accent",
-                )}
-                title={
-                  t === MULTIMODAL_IMAGE_TAG
-                    ? "此事项含读图得来的内容（AI 从图片识别）"
-                    : `筛选标签「${t}」`
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onTag(t);
-                }}
-              >
-                {t}
-              </button>
-            ))}
+          >
+            {row.dueDateInferred && dueNote !== null && (
+              <span
+                aria-hidden
+                className="absolute -left-3.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-accent"
+                title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
+              />
+            )}
+            <span className="block truncate">{itemName(item.elements)}</span>
           </span>
-        )}
-        {/* 快捷动作：窄屏与标题同一行、居右（展开时常驻；非展开靠悬停，触屏由 .row-act 的
+          {dueLabel !== null && (
+            // 桌面端：到期时间独立成一位、**永不压缩**——「不够位置就挤标题和标签，别挤时间」
+            // （用户 2026-10-22）。窄屏那一份在下面可滑动的第二行里（sm:hidden / hidden sm:inline 互补）。
+            <span
+              className={cn("hidden shrink-0 text-xs font-normal sm:inline", dueTone)}
+              title={dueTitle}
+            >
+              {dueLabel}
+            </span>
+          )}
+          {(dueText !== null || isNew || item.tags.length > 0) && (
+            // 窄屏 = 可横向滑动的第二行；桌面端 = 紧挨标题的一段标签，
+            // **flex-1 basis 0** 让它占满剩余空间：剩余空间为 0 时它先被压到零（标签先让位），
+            // 标题此后才截断——「先挤标签，再挤标题」（用户 2026-10-22）。
+            <span className="row-meta no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 sm:order-none sm:flex-1 sm:overflow-hidden">
+              {dueLabel !== null && (
+                // 窄屏这一份留在可滑动的第二行里；桌面那份在 meta **外面**（sm:hidden / hidden sm:inline）
+                <span
+                  className={cn("shrink-0 text-xs font-normal sm:hidden", dueTone)}
+                  title={dueTitle}
+                >
+                  {dueLabel}
+                </span>
+              )}
+              {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}
+              {item.tags.map((t) => (
+                <button
+                  key={t}
+                  className={cn(
+                    "chip shrink-0 cursor-pointer hover:text-accent",
+                    // 多模态标签（D-104）：读图得来的内容——高亮区分，一眼可辨（不静默）
+                    t === MULTIMODAL_IMAGE_TAG && "border-accent/60 bg-accent/10 text-accent",
+                  )}
+                  title={
+                    t === MULTIMODAL_IMAGE_TAG
+                      ? "此事项含读图得来的内容（AI 从图片识别）"
+                      : `筛选标签「${t}」`
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTag(t);
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </span>
+          )}
+          {/* 快捷动作：窄屏与标题同一行、居右（展开时常驻；非展开靠悬停，触屏由 .row-act 的
             pointer-coarse 兜底常显）。容器钉 h-5（= 文字行高）：钮本身 24/32px 只向外溢出、
             不把这一行撑高——否则标题被居中到「钮的高度」，上下留白就不等了（用户 2026-10-22）。 */}
-        <span
-          className={cn(
-            "order-2 ml-auto flex h-5 shrink-0 items-center gap-1 text-xs font-normal text-ink-muted sm:order-none",
-            expanded && "row-actions-open",
-          )}
-        >
-          {item.status === "todo" && (
-            <button
-              className="row-act"
-              title="标完成"
-              onClick={(e) => {
-                e.stopPropagation();
-                onQuickAction(item.id, "complete");
-              }}
-            >
-              <Check size={13} />
-            </button>
-          )}
-          {item.status !== "todo" && (
-            <button
-              className="row-act"
-              title="恢复待办"
-              onClick={(e) => {
-                e.stopPropagation();
-                onQuickAction(item.id, "reopen");
-              }}
-            >
-              <Undo2 size={13} />
-            </button>
-          )}
-          <button
-            className="row-act"
-            title="删除（进回收站，可恢复）"
-            onClick={(e) => {
-              e.stopPropagation();
-              onQuickAction(item.id, "trash");
-            }}
+          <span
+            className={cn(
+              "order-2 ml-auto flex h-5 shrink-0 items-center gap-1 text-xs font-normal text-ink-muted sm:order-none",
+              expanded && "row-actions-open",
+            )}
           >
-            <Trash2 size={13} />
-          </button>
-        </span>
-      </div>
-      {expanded && (
-        // 滚动规（用户 2026-09-26 修订）：max-h + 内滚；不做 overscroll 锁——滚到底自然接页面滚动。
-        // 框内不放标题/收起按钮（用户 2026-09-27：框外行标题常驻、即收起入口，框内重复属冗余）；
-        // 展开体内点击在此掐掉冒泡，否则任何点击都会冒到行上触发收起。
-        <div
-          className="mt-2 max-h-[70dvh] overflow-y-auto rounded-lg border border-line bg-surface"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="bg-canvas/40">{children}</div>
+            {item.status === "todo" && (
+              <button
+                className="row-act"
+                title="标完成"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onQuickAction(item.id, "complete");
+                }}
+              >
+                <Check size={13} />
+              </button>
+            )}
+            {item.status !== "todo" && (
+              <button
+                className="row-act"
+                title="恢复待办"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onQuickAction(item.id, "reopen");
+                }}
+              >
+                <Undo2 size={13} />
+              </button>
+            )}
+            <button
+              className="row-act"
+              title="删除（进回收站，可恢复）"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAction(item.id, "trash");
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          </span>
         </div>
-      )}
+        {expanded && (
+          // 滚动规（用户 2026-09-26 修订）：max-h + 内滚；不做 overscroll 锁——滚到底自然接页面滚动。
+          // 框内不放标题/收起按钮（用户 2026-09-27：框外行标题常驻、即收起入口，框内重复属冗余）；
+          // 展开体内点击在此掐掉冒泡，否则任何点击都会冒到行上触发收起。
+          <div
+            className="mt-2 max-h-[70dvh] overflow-y-auto rounded-lg border border-line bg-surface"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-canvas/40">{children}</div>
+          </div>
+        )}
+      </div>
     </li>
   );
 }
@@ -370,6 +421,11 @@ export function Board({
   const [viewedLocally, setViewedLocally] = useState<ReadonlySet<string>>(new Set());
   /** 行内快捷动作失败必须可见（红线「不许静默」）。 */
   const [actionError, setActionError] = useState<string | null>(null);
+  /** 删除后的撤销窗口（5 秒）：仅记 id，文案固定「已移入回收站」——不把标题塞进浮条。 */
+  const [undoId, setUndoId] = useState<string | null>(null);
+  const undoTimer = useRef<number | null>(null);
+  /** 首次手势提示：滑过一次 / 点过「知道了」即永久收起（本机记忆）。 */
+  const [hintVisible, setHintVisible] = useState(() => !loadSwipeHintSeen("board"));
   const [folded, setFolded] = useState<Record<SectionKey, boolean>>(() => ({
     undated: loadSectionFold("undated"),
     scheduled: loadSectionFold("scheduled"),
@@ -486,10 +542,18 @@ export function Board({
         : action === "reopen"
           ? api.reopen(id)
           : api.trash(id);
+    // 用过一次（图标或手势）就不再需要手势提示
+    markSwipeHintSeen("board");
+    setHintVisible(false);
     void p
       .then(() => {
         setActionError(null);
         setExpandedId(null);
+        if (action === "trash") {
+          setUndoId(id);
+          if (undoTimer.current !== null) window.clearTimeout(undoTimer.current);
+          undoTimer.current = window.setTimeout(() => setUndoId(null), 5000);
+        }
         onRefresh();
       })
       .catch(() => {
@@ -502,6 +566,33 @@ export function Board({
         onRefresh();
       });
   };
+
+  /** 撤销刚才的删除：走回收站的同一入口（restore），失败如实说。 */
+  const undoTrash = () => {
+    const id = undoId;
+    setUndoId(null);
+    if (undoTimer.current !== null) {
+      window.clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+    if (id === null) return;
+    void api
+      .restore(id)
+      .then(() => {
+        setActionError(null);
+        onRefresh();
+      })
+      .catch(() => {
+        setActionError("撤销失败——这条还在回收站，可从回收站恢复");
+        onRefresh();
+      });
+  };
+  /** 卸载时清掉撤销计时器（浮条随组件消失，不该再回调）。 */
+  useEffect(() => {
+    return () => {
+      if (undoTimer.current !== null) window.clearTimeout(undoTimer.current);
+    };
+  }, []);
 
   /** 深链（05§三）：展开所在段 → 展开行 → 布局稳定后滚到行并短促高亮（清筛选由 App 统一做）。
    *  token 防同一条深链被看板轮询重放。 */
@@ -544,6 +635,15 @@ export function Board({
 
   return (
     <main className="page-x space-y-4 py-4">
+      {hintVisible && (
+        <GestureHint
+          text="右滑移入回收站 · 左滑完成（已完成的行左滑是撤销完成）"
+          onDismiss={() => {
+            markSwipeHintSeen("board");
+            setHintVisible(false);
+          }}
+        />
+      )}
       {actionError !== null && (
         <p className="rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
           {actionError}
@@ -568,6 +668,7 @@ export function Board({
           onQuickAction={quickAction}
         />
       ))}
+      {undoId !== null && <UndoBar text="已移入回收站" actionLabel="撤销" onAction={undoTrash} />}
     </main>
   );
 }
