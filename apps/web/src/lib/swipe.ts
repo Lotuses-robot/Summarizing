@@ -45,6 +45,9 @@ export function useSwipeActions({
   revealRef: RefObject<HTMLDivElement | null>;
   /** 本次按下是否真的横向拖过（用来吞掉拖动结束后的 click）。 */
   movedRef: RefObject<boolean>;
+  /** 让被拖动的元素立刻回到原位（清内联位移与临时 transition）。过阈值时钩子**故意不清位移**
+   *  （留给位移动画从松手处接），所以**不做位移动画的调用方要在动作开始时自己调它**。 */
+  resetPosition: () => void;
   handlers: {
     onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
@@ -239,6 +242,9 @@ export function useSwipeActions({
     bodyRef,
     revealRef,
     movedRef,
+    /** 让被拖动的元素立刻回到原位（清掉内联位移与临时 transition）。
+     *  过阈值时钩子**故意不清位移**（留给位移动画从松手处接），所以不用位移动画的调用方要自己调它。 */
+    resetPosition: resetDragVisuals,
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
   };
 }

@@ -184,6 +184,11 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
     swipeCard(200);
     expect(screen.getByText("已清除")).toBeInTheDocument();
+    // 卡片必须弹回原位：手势钩子过阈值时刻意不清位移（留给看板行做飞出动效），
+    // 通知卡用模糊遮罩、不做位移动画，得自己复位——否则会停在拖开的位置（实测「清除乱掉了」）
+    const card = screen.getByRole("heading", { level: 2 }).closest(".touch-pan-y");
+    if (!(card instanceof HTMLElement)) throw new Error("找不到通知主卡");
+    expect(card.style.transform).toBe("");
     expect(spy).not.toHaveBeenCalled(); // 还没到点
     await vi.advanceTimersByTimeAsync(2100);
     expect(spy).toHaveBeenCalledWith("n1");

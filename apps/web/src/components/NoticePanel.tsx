@@ -260,6 +260,9 @@ export function NoticePanel({
       // 会用了就不再提示
       markSwipeHintSeen("notice");
       setHintVisible(false);
+      // 通知卡用的是「模糊遮罩 + 倒计时环」，不是滑出动画：先把卡片弹回原位，
+      // 否则它会停在拖开的位置（手势钩子过阈值时刻意不清位移，留给看板行做飞出动效）
+      swipe.resetPosition();
       if (dir === "right") startDelete(row);
       else skip(row);
     },
