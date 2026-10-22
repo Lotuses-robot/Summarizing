@@ -163,9 +163,12 @@ function checkItem(
       if (state.status === "trashed") {
         return `itemId 在回收站（trashed）：${item.itemId}——不可写，要改先从回收站恢复`;
       }
-      // elements 不得动固定元素 name（改语义名走 create_item；防双 name 投毒）
-      if (item.elements.some((e) => e.label === "name")) {
-        return "update_item 不得修改 name 元素（语义名由创建时确定）";
+      // 语义名**可以改**（用户 2026-10-22：「有些时候必须要改标题」——比如当初看错了对象、
+      // 或者事情本身变了）。唯一的结构约束：一次只能给一个 name（upsert 按 label 覆盖，
+      // 所以改完仍然恰好一个；给两个就是自相矛盾，拒收）。
+      const names = item.elements.filter((e) => e.label === "name");
+      if (names.length > 1) {
+        return `update_item 的 elements 里 name 只能有一个（当前 ${names.length} 个）`;
       }
       for (const el of item.elements) {
         const err = checkElement(el);

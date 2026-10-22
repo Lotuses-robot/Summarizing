@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChangeList } from "@summarizing/shared";
-import { itemDueDate } from "@summarizing/shared";
+import { ChangeListSchema, itemDueDate, type ChangeList } from "@summarizing/shared";
 import { executeChanges } from "../executor/executor";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
@@ -109,15 +108,14 @@ describe("围栏行为校验", () => {
 });
 
 describe("围栏：固定元素防误用（第 2 轮审查）", () => {
-  it("update_item 的 elements 含 name → 拒收（防双 name）", () => {
-    const db = makeDb(":memory:");
-    // 直接塞版本（模拟已存在）
+  /** 造一个已有事项（直接塞版本，模拟已存在）。 */
+  function seedItem(db: ReturnType<typeof makeDb>, name = "A"): void {
     repo.appendItemVersion(db, {
       itemId: "i1",
       action: "create_item",
       detail: "seed",
       snapshot: {
-        elements: [{ label: "name", text: "A" }],
+        elements: [{ label: "name", text: name }],
         tags: [],
         status: "todo",
         kind: "task",
@@ -125,18 +123,48 @@ describe("围栏：固定元素防误用（第 2 轮审查）", () => {
       },
       by: { actor: "t", model: null },
     });
-    const r = runFence(db, seedFenceRaw(db), {
-      changes: [
-        {
-          action: "update_item",
-          itemId: "i1",
-          elements: [{ label: "name", text: "B", quotes: [] }],
-          tags: {},
-          resolveDoubt: false,
-        },
-      ],
-    });
-    expect(r.rejected[0]?.reason).toContain("name");
+  }
+
+  it("update_item 可改语义名（用户 2026-10-22：有些时候必须要改标题）", () => {
+    const db = makeDb(":memory:");
+    seedItem(db);
+    const r = runFence(
+      db,
+      seedFenceRaw(db),
+      ChangeListSchema.parse({
+        changes: [
+          {
+            action: "update_item",
+            itemId: "i1",
+            elements: [{ label: "name", text: "补交高数作业", quotes: [] }],
+          },
+        ],
+      }),
+    );
+    expect(r.rejected).toEqual([]);
+    expect(r.accepted).toHaveLength(1);
+  });
+
+  it("一次给两个 name → 拒收（自相矛盾，改完会有两个名字）", () => {
+    const db = makeDb(":memory:");
+    seedItem(db);
+    const r = runFence(
+      db,
+      seedFenceRaw(db),
+      ChangeListSchema.parse({
+        changes: [
+          {
+            action: "update_item",
+            itemId: "i1",
+            elements: [
+              { label: "name", text: "B", quotes: [] },
+              { label: "name", text: "C", quotes: [] },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(r.rejected[0]?.reason).toContain("name 只能有一个");
   });
 });
 

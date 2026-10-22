@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
-import { DIGEST_MAX_ROUNDS, itemDueDate, type Item, type RawInput } from "@summarizing/shared";
+import {
+  DIGEST_MAX_ROUNDS,
+  itemDueDate,
+  itemName,
+  type Item,
+  type RawInput,
+} from "@summarizing/shared";
 import {
   digestRawInput,
   kickDigest,
@@ -247,6 +253,57 @@ describe("agent0 消化管线", () => {
     expect(audit.some((n) => n.action === "digest_failed" && n.detail.includes("未处理"))).toBe(
       true,
     );
+  });
+
+  it("改语义名：update_item 给一个 name → 覆盖旧标题并留版本（D-122）", async () => {
+    const db = makeDb(":memory:");
+    const llmSeed = new FakeLlm();
+    llmSeed.push({
+      content: JSON.stringify({
+        changes: [
+          {
+            action: "create_item",
+            elements: [{ label: "name", text: "交高数作业", quotes: [] }],
+            tags: ["课程"],
+          },
+        ],
+      }),
+    });
+    const rawSeed = seedRaw(db);
+    await digestRawInput(db, llmSeed, makeAgentTools(db, ""), MODEL, rawSeed);
+    const existing = repo.deriveItems(db)[0];
+    if (!existing) throw new Error("既有事项未创建");
+
+    // 原信息把对象看错了：其实是「补交」——改标题（只给一个 name）
+    const llm = new FakeLlm();
+    llm.push({
+      content: JSON.stringify({
+        changes: [
+          {
+            action: "update_item",
+            itemId: existing.id,
+            elements: [{ label: "name", text: "补交高数作业", note: "原文写的是补交", quotes: [] }],
+          },
+        ],
+      }),
+    });
+    const raw2 = repo.insertRawInput(db, {
+      content: "上次没交，这次补交高数作业",
+      sourceType: "chat",
+      sourceIdentity: { sourceLabel: "自己" },
+      receivedAt: "2026-10-22T13:30:00",
+      eventTime: null,
+    });
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw2);
+
+    expect(result.state).toBe("digested");
+    const after = repo.deriveItem(db, existing.id);
+    if (!after) throw new Error("事项丢失");
+    expect(itemName(after.elements)).toBe("补交高数作业");
+    // 仍恰好一个 name（upsert 覆盖，不是新增）
+    expect(after.elements.filter((e) => e.label === "name")).toHaveLength(1);
+    // 版本史追加了这次更新
+    expect(repo.deriveHistory(db, existing.id).map((v) => v.action)).toContain("update_item");
   });
 
   it("create_item 省略 tags / update_item 省略 elements 同样合法（改动型字段缺席=没有）", async () => {
