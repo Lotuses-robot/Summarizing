@@ -67,9 +67,7 @@ export function NoticePanel({
   /** 本地已读：id → 标记时的 updatedAt（同一次更新内抑制重复上报）。 */
   const [viewedLocally, setViewedLocally] = useState<ReadonlyMap<string, string>>(new Map());
   /** 清除倒计时（延迟提交：到 0 才真正写库，撤回则什么都没发生）。 */
-  const [pending, setPending] = useState<{ id: string; title: string; remaining: number } | null>(
-    null,
-  );
+  const [pending, setPending] = useState<{ id: string; remaining: number } | null>(null);
   /** 首次手势提示：滑过一次 / 点过「知道了」即永久收起（本机记忆）。 */
   const [hintVisible, setHintVisible] = useState(() => !loadSwipeHintSeen("notice"));
   /** 删除/撤销失败必须可见（红线「不许静默」）。 */
@@ -233,7 +231,7 @@ export function NoticePanel({
   /** 开始清除：进入模糊 + 环形倒计时（延迟提交，可撤回）。 */
   const startDelete = useCallback((row: NoticeRow) => {
     setActionError(null);
-    setPending({ id: row.item.id, title: itemName(row.item.elements), remaining: UNDO_SECONDS });
+    setPending({ id: row.item.id, remaining: UNDO_SECONDS });
     if (timerRef.current !== null) window.clearInterval(timerRef.current);
     let remaining: number = UNDO_SECONDS;
     timerRef.current = window.setInterval(() => {
