@@ -33,8 +33,9 @@ export function useSwipeActions({
 }: {
   /** false 时完全不接手势（如正在撤销窗口里）。 */
   enabled: boolean;
-  /** 过阈值后触发（已回弹复位）；调用方自己决定要不要做异步动作。 */
-  onSwipe: (dir: SwipeDir) => void;
+  /** 过阈值后触发；info = 松手时的位移（px）与速度（px/ms，带方向）——
+   *  调用方据此让后续动画从当前速度接着走，而不是从静止重新起步。 */
+  onSwipe: (dir: SwipeDir, info: { dx: number; velocity: number }) => void;
   /** 阈值 = 容器宽度的比例。 */
   ratio: number;
 }): {
@@ -54,6 +55,8 @@ export function useSwipeActions({
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const revealRef = useRef<HTMLDivElement | null>(null);
   const movedRef = useRef(false);
+  /** 最近两次横向采样：松手时算释放速度（px/ms）。 */
+  const samplesRef = useRef<{ t: number; x: number }[]>([]);
   const dragRef = useRef<{
     startX: number;
     startY: number;
@@ -75,6 +78,7 @@ export function useSwipeActions({
     dragRef.current = { startX: x, startY: y, width, axis: "none" };
     dxRef.current = 0;
     movedRef.current = false;
+    samplesRef.current = [{ t: performance.now(), x }];
     if (bodyRef.current !== null) {
       bodyRef.current.style.transition = "none";
       bodyRef.current.style.userSelect = "none"; // 拖动中别顺带选中文字
@@ -101,6 +105,10 @@ export function useSwipeActions({
     const limit = d.width * DRAG_LIMIT_RATIO;
     const dx = Math.max(-limit, Math.min(limit, x - d.startX));
     dxRef.current = dx;
+    // 只留最近两个采样：更早的对速度没意义，还会把一次减速误算成匀速
+    const samples = samplesRef.current;
+    samples.push({ t: performance.now(), x });
+    if (samples.length > 2) samples.shift();
     if (bodyRef.current !== null) bodyRef.current.style.transform = `translateX(${dx}px)`;
     const strength = Math.min(1, Math.abs(dx) / Math.max(1, d.width * cbRef.current.ratio));
     if (revealRef.current !== null) {
@@ -141,13 +149,18 @@ export function useSwipeActions({
       resetDragVisuals(); // 没过阈值：回弹
       return;
     }
+    // 释放速度（px/ms，带方向）：最近两次采样的位移/时间差；采样不足或时间差为 0 → 0。
+    // 调用方用它给后续动画定初速——不交速度，动画就只能从静止起步，手感会「一顿」。
+    const [a, b] = samplesRef.current;
+    const velocity =
+      a !== undefined && b !== undefined && b.t > a.t ? (b.x - a.x) / (b.t - a.t) : 0;
     // 过阈值：保留当前位置，只摘掉拖动期间临时写的 transition/userSelect
     if (bodyRef.current !== null) {
       bodyRef.current.style.transition = "";
       bodyRef.current.style.userSelect = "";
     }
     if (revealRef.current !== null) revealRef.current.style.display = "none";
-    cbRef.current.onSwipe(dir);
+    cbRef.current.onSwipe(dir, { dx, velocity });
   };
 
   /** 手势被系统取消（pointercancel/touchcancel）：只回弹，不执行动作。 */

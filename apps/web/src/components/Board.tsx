@@ -138,16 +138,57 @@ function Row({
     return undefined;
   })();
 
+  /** 松手时的位移与速度（px / px·ms⁻¹）：撤销窗口的动画从这儿接着走，不重新起步。 */
+  const releaseRef = useRef({ dx: 0, velocity: 0 });
   /** 横滑：右滑 = 移入回收站，左滑 = 完成 / 撤销完成（与通知页同一套手势，lib/swipe 唯一实现）。
    *  手势结束仍会来一次 click——用它吞掉，否则滑完会顺手把行展开。 */
   const swipe = useSwipeActions({
     enabled: true,
     ratio: 0.35,
-    onSwipe: (dir) => {
+    onSwipe: (dir, info) => {
+      releaseRef.current = info;
       if (dir === "right") onQuickAction(item.id, "trash");
       else onQuickAction(item.id, item.status === "todo" ? "complete" : "reopen");
     },
   });
+  /** 撤销窗口的滑出动画：**接管松手速度**，再加速甩出去。
+   *  时长 = 剩余距离 ÷ 释放速度，缓动取初斜率恰为 1 的曲线（`cubic-bezier(.5,.5,1,1)`）——
+   *  于是起手速度正好等于松手速度（不突变），之后一路加速，读起来是「顺着你的劲儿甩出去」。 */
+  useEffect(() => {
+    if (!pendingTrash) return;
+    const el = swipe.bodyRef.current;
+    if (el === null) return;
+    const width = el.clientWidth > 0 ? el.clientWidth : 360;
+    const startX = releaseRef.current.dx;
+    const target = width * 1.1;
+    // 慢速松手也要有个底速，否则会「贴着屏幕慢慢挪」；快甩则封顶最短时长
+    const speed = Math.max(Math.abs(releaseRef.current.velocity), 0.35);
+    const duration = Math.min(900, Math.max(160, (target - startX) / speed));
+    const anim = el.animate(
+      [
+        { transform: `translateX(${startX}px)`, opacity: 1, filter: "blur(0px)" },
+        { transform: `translateX(${target}px)`, opacity: 0, filter: "blur(3px)" },
+      ],
+      { duration, easing: "cubic-bezier(0.5, 0.5, 1, 1)", fill: "forwards" },
+    );
+    // 取消是正常路径（撤销/卸载）：吞掉 finished 的 rejection，别让它变成未处理异常
+    void anim.finished.catch(() => undefined);
+    // 位移交给动画，内联值清掉——撤销时才能从动画停下的位置干净滑回
+    el.style.transform = "";
+    return () => {
+      const from = getComputedStyle(el).transform;
+      anim.cancel();
+      // 撤销：从当前位置滑回原处（不硬切）
+      const back = el.animate(
+        [
+          { transform: from, opacity: 0, filter: "blur(3px)" },
+          { transform: "translateX(0px)", opacity: 1, filter: "blur(0px)" },
+        ],
+        { duration: 180, easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+      );
+      void back.finished.catch(() => undefined);
+    };
+  }, [pendingTrash, swipe.bodyRef]);
   /** 行点击：拖动过就只复位、不展开。 */
   const handleRowClick = () => {
     if (swipe.movedRef.current) {
@@ -191,25 +232,14 @@ function Row({
           // bg-surface 必须实心：行本体不拖动时是透明的，底层手势提示会「透」到事项文字上
           // （用户 2026-10-22：「又跑上来祸害事项了，会遮挡到」）。拖动后由它遮住提示，只露出滑开的缝。
           "relative z-10 cursor-pointer rounded-md border border-transparent bg-surface py-2 pl-5 pr-3 transition-all duration-150 hover:bg-canvas",
-          // 删除的撤销窗口：这里只管「不可点 + 淡出 + 变糊」；位移走内联 style（见下），
-          // 从手指松开的位置接着改，才不会先弹回原点再滑出（用户 2026-10-22：中间像停了一下）
-          pendingTrash && "pointer-events-none opacity-0 blur-[3px]",
+          // 删除的撤销窗口：滑出/淡出/变糊都由上面那段 Web Animations 接管（速度从松手处接），
+          // 这里只负责「这 2 秒里别再点它」
+          pendingTrash && "pointer-events-none",
           near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
           flash && "row-flash",
           active && "bg-canvas ring-1 ring-accent",
         )}
-        style={{
-          ...(rowBg ? { backgroundColor: rowBg } : {}),
-          // 撤销窗口：位移、时长、缓动都内联给——行在这 2 秒里从松手处继续滑出去、糊掉，到点才写库。
-          // 缓动取标准 ease（前段快、尾段收），避免匀速直线那种「到末尾像卡住」的观感。
-          ...(pendingTrash
-            ? {
-                transform: "translateX(110%)",
-                transitionDuration: `${UNDO_SECONDS}s`,
-                transitionTimingFunction: "cubic-bezier(0.4, 0, 0.2, 1)",
-              }
-            : {}),
-        }}
+        style={rowBg ? { backgroundColor: rowBg } : undefined}
         onClick={handleRowClick}
       >
         {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
@@ -345,7 +375,7 @@ function Row({
         // 撤销钮是**行体的兄弟**：行体在滑出去变糊，这颗钮必须原地不动、也不跟着糊——
         // 这 2 秒里它是唯一该点的东西。
         <div className="absolute inset-0 z-20 flex items-center justify-center">
-          <UndoButton onClick={onCancelTrash} label="撤销删除" />
+          <UndoButton onClick={onCancelTrash} label="撤销删除" fadeSeconds={UNDO_SECONDS} />
         </div>
       )}
     </li>

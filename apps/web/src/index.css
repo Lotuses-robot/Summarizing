@@ -196,6 +196,11 @@
   .pop-in {
     animation: pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
   }
+  /* 撤销窗口的倒计时（2026-10-22）：撤销钮在这段时间里**逐渐变暗**，暗到底即提交。
+     时长由组件内联 animation-duration 给（= 撤销窗口），线性、不回弹。 */
+  .undo-fade {
+    animation: undo-fade linear forwards;
+  }
   /* 清除倒计时环（D-108）：挂载即整段线性排空（时长由组件内联 animation-duration 给；
      不能跟着每秒数字 tick 走 transition——第一秒会原地不动）。 */
   .ring-drain {
@@ -269,6 +274,16 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* 撤销钮渐暗：1 → 0.25（留一点可见度，别让人以为它消失了） */
+@keyframes undo-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.25;
   }
 }
 
