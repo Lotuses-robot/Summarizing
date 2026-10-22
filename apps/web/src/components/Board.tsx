@@ -642,6 +642,7 @@ export function Board({
     if (prev !== null && prev !== id) commitTrash(prev);
     clearTrashTimer();
     setPendingTrash(id);
+    // 钮暗到底就是提交时刻（没有额外停留）
     trashTimer.current = window.setTimeout(() => commitTrash(id), UNDO_SECONDS * 1000);
   };
 

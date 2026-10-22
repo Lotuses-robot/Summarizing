@@ -134,7 +134,7 @@ describe("Board（三段看板，007）", () => {
     expect(screen.getByTitle("撤销删除")).toBeInTheDocument();
     // 到点才真正删
     await act(async () => {
-      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 100);
+      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 50);
     });
     expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(true);
   });
@@ -164,7 +164,7 @@ describe("Board（三段看板，007）", () => {
     await act(async () => {});
     fireEvent.click(screen.getByTitle("撤销删除"));
     await act(async () => {
-      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 100);
+      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 50);
     });
     expect(calls.some((u) => u.includes("/trash"))).toBe(false);
     expect(screen.getByText("英语作业")).toBeInTheDocument();
