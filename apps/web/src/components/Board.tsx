@@ -93,6 +93,11 @@ function Row({
   const timeOverdue = !Number.isNaN(dueTs) && dueTs < Date.now();
   // 相对人话时间（Todoist 式）：非法日期退回短格式——不编造
   const dueRelative = dueText === null ? null : relativeDueText(dueText, new Date());
+  /** 时间字（相对人话或短格式）+ 色调 + 悬停全量：桌面与窄屏两处渲染共用**同一个来源**，
+   *  不会各说各话（用户 2026-10-22：桌面端别把到期时间挤掉）。 */
+  const dueLabel = dueText === null ? null : (dueRelative ?? fmtShortTime(dueText));
+  const dueTone = timeOverdue ? "text-danger" : near ? "text-accent" : "text-ink-muted";
+  const dueTitle = dueText === null ? "" : `到期 ${fmtShortTime(dueText)}`;
   // 越临近越强调（用户 2026-09-27 二轮：立方浓淡曲线，lib/urgency 唯一出处）——
   // 7h≈83% / 2d≈22% / 4.5d≈0.1%，临期急剧加深、远期几乎隐形；过期行另有淡红底语义（去框留底），不参与渐变
   const urgency = item.status === "todo" && !row.overdue ? urgencyStrength(dueTs, Date.now()) : 0;
@@ -148,24 +153,36 @@ function Row({
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium sm:flex-nowrap">
         <span
           className={cn(
-            "order-1 min-w-0 flex-1 truncate sm:order-none sm:flex-initial sm:basis-56 sm:grow",
+            // 桌面端：标题按内容取宽、**不撑满**（旧版 sm:grow 会把 ddl/标签顶到最右，
+            // 读起来像右对齐）；空间不够时先压缩 meta、最后才压标题（见下方 meta 的 flex-1）。
+            "order-1 min-w-0 flex-1 truncate sm:order-none sm:flex-initial",
             item.status === "done" && "text-ink-muted line-through",
           )}
         >
           {itemName(item.elements)}
         </span>
+        {dueLabel !== null && (
+          // 桌面端：到期时间独立成一位、**永不压缩**——「不够位置就挤标题和标签，别挤时间」
+          // （用户 2026-10-22）。窄屏那一份在下面可滑动的第二行里（sm:hidden / hidden sm:inline 互补）。
+          <span
+            className={cn("hidden shrink-0 text-xs font-normal sm:inline", dueTone)}
+            title={dueTitle}
+          >
+            {dueLabel}
+          </span>
+        )}
         {(dueText !== null || isNew || item.tags.length > 0) && (
-          // sm 起 `contents`：这层盒子消失，ddl/标签变回父级的直接子项——与改版前的单行阅读线逐像素一致
-          <span className="no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 sm:contents">
-            {dueText !== null && (
+          // 窄屏 = 可横向滑动的第二行；桌面端 = 紧挨标题的一段标签，
+          // **flex-1 basis 0** 让它占满剩余空间：剩余空间为 0 时它先被压到零（标签先让位），
+          // 标题此后才截断——「先挤标签，再挤标题」（用户 2026-10-22）。
+          <span className="row-meta no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 sm:order-none sm:flex-1 sm:overflow-hidden">
+            {dueLabel !== null && (
+              // 窄屏这一份留在可滑动的第二行里；桌面那份在 meta **外面**（sm:hidden / hidden sm:inline）
               <span
-                className={cn(
-                  "shrink-0 text-xs font-normal",
-                  timeOverdue ? "text-danger" : near ? "text-accent" : "text-ink-muted",
-                )}
-                title={`到期 ${fmtShortTime(dueText)}`}
+                className={cn("shrink-0 text-xs font-normal sm:hidden", dueTone)}
+                title={dueTitle}
               >
-                {dueRelative ?? fmtShortTime(dueText)}
+                {dueLabel}
               </span>
             )}
             {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}

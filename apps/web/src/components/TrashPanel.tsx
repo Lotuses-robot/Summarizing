@@ -119,12 +119,20 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
               {/* 与看板行同款两行封顶（2026-10-22 二次走查）：窄屏第一行 = 标题 + 恢复按钮，
                   第二行 = kind / 标签 / 删除时间（横向滑动查看，不换第三行）；sm 起恢复单行。 */}
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium sm:flex-nowrap">
-                <span className="order-1 min-w-0 flex-1 truncate text-ink-muted sm:order-none sm:flex-initial sm:basis-56 sm:grow">
+                <span className="order-1 min-w-0 flex-1 truncate text-ink-muted sm:order-none sm:flex-initial">
                   {itemName(item.elements)}
+                </span>
+                {/* 桌面端：删除时间独立成一位、**永不压缩**（与看板行的到期时间同一条优先级：
+                    空间不够先挤标签、再挤标题，别把时间挤掉）。窄屏那一份在下方可滑动行里。 */}
+                <span
+                  className="hidden shrink-0 text-xs font-normal text-ink-muted sm:inline"
+                  title={`删于 ${fmtFullTime(r.trashedAt)}`}
+                >
+                  删于 {fmtShortTime(r.trashedAt)}
                 </span>
                 <span
                   className={cn(
-                    "no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 text-xs font-normal text-ink-muted sm:contents",
+                    "row-meta no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 text-xs font-normal text-ink-muted sm:order-none sm:flex-1 sm:overflow-hidden",
                     // 展开时恢复按钮常驻（与看板行同一规则，用户 2026-10-22）
                     expandedId === item.id && "row-actions-open",
                   )}
@@ -132,14 +140,14 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
                   <span className="chip shrink-0 text-ink-muted">
                     {item.kind === "notice" ? "通知" : "事项"}
                   </span>
+                  <span className="shrink-0 sm:hidden" title={`删于 ${fmtFullTime(r.trashedAt)}`}>
+                    删于 {fmtShortTime(r.trashedAt)}
+                  </span>
                   {item.tags.map((t) => (
                     <span key={t} className="chip shrink-0 text-ink-muted">
                       {t}
                     </span>
                   ))}
-                  <span className="shrink-0" title={`删于 ${fmtFullTime(r.trashedAt)}`}>
-                    删于 {fmtShortTime(r.trashedAt)}
-                  </span>
                 </span>
                 <span className="order-2 ml-auto flex shrink-0 items-center gap-1 sm:order-none">
                   <button

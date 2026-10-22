@@ -171,6 +171,15 @@
   .page-x {
     @apply px-5 sm:px-6;
   }
+  /* 行内 meta（ddl / 标签）在桌面端可被压缩：右缘淡出，读作「还有更多」，
+     而不是被切成半个标签（2026-10-22 用户定：宁可挤掉标签，也别挤标题）。
+     窄屏不套用——那一条是横向滑动的，淡出会盖住可滑动的提示。 */
+  @media (width >= 40rem) {
+    .row-meta {
+      mask-image: linear-gradient(to right, black calc(100% - 2rem), transparent);
+      -webkit-mask-image: linear-gradient(to right, black calc(100% - 2rem), transparent);
+    }
+  }
   /* 横向滑动的标签条不放滚动条（2026-10-22 用户定）：滑动手势本身就是提示，
      滚动条在窄屏只有 4px 高却压出一截灰条，把行距撑得忽高忽低。 */
   .no-scrollbar {

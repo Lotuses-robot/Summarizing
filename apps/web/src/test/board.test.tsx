@@ -52,6 +52,36 @@ describe("Board（三段看板，007）", () => {
     expect(screen.getByText("已交表")).toBeInTheDocument();
   });
 
+  it("到期时间独立成一位：桌面端那份在可压缩的标签区之外（空间不够也不会被挤掉）", () => {
+    render(
+      <Board
+        board={view({
+          scheduled: [
+            makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
+          ],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 同一来源两处渲染（桌面独立位 + 窄屏可滑动行），title 相同
+    const dues = screen.getAllByTitle(/^到期 /);
+    expect(dues).toHaveLength(2);
+    // 桌面那份：不在 .row-meta 里、且 shrink-0（永不压缩）
+    const desktop = dues.filter((el) => el.closest(".row-meta") === null);
+    expect(desktop).toHaveLength(1);
+    expect(desktop[0]?.className).toContain("shrink-0");
+    expect(desktop[0]?.className).toContain("sm:inline");
+    // 窄屏那份：留在可横向滑动的第二行里
+    const narrow = dues.filter((el) => el.closest(".row-meta") !== null);
+    expect(narrow).toHaveLength(1);
+    expect(narrow[0]?.className).toContain("sm:hidden");
+    // 标签才是可被挤掉的：它们都在 .row-meta 那个可压缩盒子里
+    expect(screen.getByText("英语课").closest(".row-meta")).not.toBeNull();
+  });
+
   it("段头计数随筛选变：过滤后计数 = 显示条数（曾固定显示段内总数）", () => {
     const { rerender } = render(
       <Board
