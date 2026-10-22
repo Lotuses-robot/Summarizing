@@ -8,7 +8,7 @@ import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient } from "../shared/llm";
 import { recordUsage } from "../shared/usage";
-import { resolveUncertainWellFormed, parseChangeList } from "../executor/fence";
+import { resolveUncertainWellFormed, parseChangeListDetailed } from "../executor/fence";
 import { executeChanges } from "../executor/executor";
 
 // 存疑库清扫循环（D-85）：复核 open 条目——被取代/证伪/重复的丢弃留痕，仍有效的不动。
@@ -100,11 +100,19 @@ async function runSweep(
       const messages: ChatMsg[] = [{ role: "user", content: sweepBrief(entry) }];
       const turn = await llm.chat({ system: SWEEP_SYSTEM_PROMPT, messages, tools: [] });
       recordUsage(db, "agent0", modelTag, turn.usage);
-      // 解析走与 digest 同一份容错路径（parseModelJson：剥围栏/截取/校验）——不再有第三份实现
-      const parsed = parseChangeList(turn.content ?? "");
-      if (parsed === null) continue; // 解析失败：跳过（不清扫即保留，保守）
+      // 解析走与 digest 同一份容错路径（parseModelJsonDetailed：剥围栏/截取/校验，失败带原因）——不再有第三份实现
+      const parsed = parseChangeListDetailed(turn.content ?? "");
+      if (!parsed.ok) {
+        // 不静默（01§8.3）：解析失败=跳过（保守保留），但要留下**原因与模型原话**——
+        // 否则汇总只说「复核 N 条、处置 0 条」，用户看不出是模型没给清单还是给了但格式不对。
+        process.stderr.write(
+          `[sweep] 条目 ${entry.id} 的回复未被接受（${parsed.reason}），本条跳过：${(turn.content ?? "").slice(0, 300)}\n`,
+        );
+        continue;
+      }
+      const list = parsed.value;
       // 围栏：只保留指向本条目的 resolve_uncertain；形状规则（merged 必给去向）与 digest 围栏共用同一谓词
-      const allowed = parsed.changes.filter(
+      const allowed = list.changes.filter(
         (c): c is Extract<ChangeItem, { action: "resolve_uncertain" }> =>
           c.action === "resolve_uncertain" && c.id === entry.id && resolveUncertainWellFormed(c),
       );

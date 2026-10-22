@@ -202,7 +202,13 @@ describe("agent0 消化管线", () => {
     const retryChat = chatAt(llm, 1);
     const last = retryChat.messages.at(-1);
     if (last?.role !== "user") throw new Error("重试回喂消息缺失");
-    expect(last.content).toContain("不是合法的变更清单 JSON");
+    // 追问必须说清**具体哪里不合规**（只说不合法 → 模型原地重写同样的东西，实测连败六轮）
+    expect(last.content).toContain("没有被接受");
+    expect(last.content).toContain("字段不合规");
+    // 并且模型要能看见自己上一条写了什么（此前只在工具轮 push assistant，追问等于凭空指责）
+    const prev = retryChat.messages.at(-2);
+    if (prev?.role !== "assistant") throw new Error("上一轮模型输出没回填进对话");
+    expect(prev.content).toBe('{"changes":[{"action":"fly_to_moon"}]}');
   });
 
   it("⑥ 工具循环超轮数上限 → failed 留痕", async () => {
@@ -241,6 +247,98 @@ describe("agent0 消化管线", () => {
     expect(audit.some((n) => n.action === "digest_failed" && n.detail.includes("未处理"))).toBe(
       true,
     );
+  });
+
+  it("create_item 省略 tags / update_item 省略 elements 同样合法（改动型字段缺席=没有）", async () => {
+    const db = makeDb(":memory:");
+    // 1) create_item 不带 tags：应落成无标签事项，而不是被判非法
+    const llm1 = new FakeLlm();
+    llm1.push({
+      content: JSON.stringify({
+        changes: [
+          {
+            action: "create_item",
+            elements: [{ label: "name", text: "无标签的事项", quotes: [] }],
+          },
+        ],
+      }),
+    });
+    const raw1 = seedRaw(db);
+    const r1 = await digestRawInput(db, llm1, makeAgentTools(db, ""), MODEL, raw1);
+    expect(r1.state).toBe("digested");
+    const created = repo.deriveItems(db)[0];
+    if (!created) throw new Error("事项未创建");
+    expect(created.tags).toEqual([]);
+
+    // 2) update_item 只改标签、不写 elements：应只落标签改动
+    const llm2 = new FakeLlm();
+    llm2.push({
+      content: JSON.stringify({
+        changes: [{ action: "update_item", itemId: created.id, tags: { "": "新标签" } }],
+      }),
+    });
+    const raw2 = repo.insertRawInput(db, {
+      content: "给它打个新标签",
+      sourceType: "chat",
+      sourceIdentity: { sourceLabel: "自己" },
+      receivedAt: "2026-10-22T13:00:00",
+      eventTime: null,
+    });
+    const r2 = await digestRawInput(db, llm2, makeAgentTools(db, ""), MODEL, raw2);
+    expect(r2.state).toBe("digested");
+    expect(repo.deriveItem(db, created.id)?.tags).toEqual(["新标签"]);
+  });
+
+  it("update_item 省略 tags / resolveDoubt 也合法（只是改元素——2026-10-22 实测形态）", async () => {
+    const db = makeDb(":memory:");
+    const llmSeed = new FakeLlm();
+    llmSeed.push({
+      content: JSON.stringify({
+        changes: [
+          {
+            action: "create_item",
+            elements: [{ label: "name", text: "交高数作业", quotes: [] }],
+            tags: ["课程"],
+          },
+        ],
+      }),
+    });
+    const rawSeed = seedRaw(db);
+    await digestRawInput(db, llmSeed, makeAgentTools(db, ""), MODEL, rawSeed);
+    const existing = repo.deriveItems(db)[0];
+    if (!existing) throw new Error("既有事项未创建");
+
+    // 真实失败形态：只给 itemId + elements，**不带 tags / resolveDoubt**。
+    // 旧 schema 把两者当必填 → 整条拒收 → 模型连改六轮仍被拒（它其实答对了）。
+    const llm = new FakeLlm();
+    llm.push({
+      content: JSON.stringify({
+        changes: [
+          {
+            action: "update_item",
+            itemId: existing.id,
+            elements: [
+              { label: "地点", text: "田家炳报告厅", note: null, quotes: ["田家炳报告厅外景"] },
+            ],
+          },
+        ],
+      }),
+    });
+    const raw2 = repo.insertRawInput(db, {
+      content: "田家炳报告厅外景如上！",
+      sourceType: "nc",
+      sourceIdentity: { sourceLabel: "班级群" },
+      receivedAt: "2026-10-22T12:35:00",
+      eventTime: null,
+    });
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw2);
+
+    expect(result.state).toBe("digested");
+    const after = repo.deriveItem(db, existing.id);
+    if (!after) throw new Error("事项丢失");
+    expect(after.elements.some((e) => e.label === "地点" && e.text === "田家炳报告厅")).toBe(true);
+    // 缺席 = 没有改动：标签原样
+    expect(after.tags).toEqual(["课程"]);
   });
 
   it("⑧ 既有事项路径：update_item 用工具查到的真实 ID", async () => {

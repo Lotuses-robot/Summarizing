@@ -327,7 +327,9 @@ export const ChangeItemSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create_item"),
     elements: z.array(ElementInputSchema).min(1),
-    tags: z.array(z.string().min(1)),
+    // 缺席 = 没打标签（缺省 `[]`）：与「已建但无标签」是同一件事，执行器本就按空数组落库。
+    // 与 update_item 的 tags 同一条容错原则（2026-10-22 D-121）——必填只会让「没标签」被判成「写错了」。
+    tags: z.array(z.string().min(1)).default([]),
     kind: z.enum(["task", "notice"]).optional(), // 分类轴（007）：缺省 task；通知=notice（不得含 dueDate，围栏强制 FR-003）
     /** 存疑标记（⚠️ D-85 起停用：agent0 判不准走 park_uncertain，缺日期属「日期未知」不是存疑）。
      *  保留**可选**仅为兼容存量调用方；新产出恒缺省 = null（用户 2026-10-21 走查逮出：必填会让模型
@@ -338,11 +340,16 @@ export const ChangeItemSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("update_item"),
       itemId: z.string(),
-      elements: z.array(ElementInputSchema), // 按 label 覆盖/新增（upsert）——不删除
+      // 按 label 覆盖/新增（upsert）——不删除；缺席 = 不改元素（缺省 `[]`）：
+      // 只改标签/分类/解疑时不必写它——执行器对空 elements 直接跳过。
+      elements: z.array(ElementInputSchema).default([]),
       // 标签改动 map（旧→新）：`""→"新"` 增、`"旧"→""` 删、`"旧"→"新"` 改；两空非法（由 superRefine 拒）。
-      tags: z.record(z.string(), z.string()),
+      // **缺席 = 无标签改动**（缺省 `{}`）：这是改动 map 的「没有」义，不是替模型编造值——
+      // 下游执行器本就把空 map 当无操作（不落版本）。此前必填，模型只改元素时不写它 → 整条被 schema 拒，
+      // 连败六轮（2026-10-22 实测：模型给的清单其实完全合法，只是少了这两个字段）。
+      tags: z.record(z.string(), z.string()).default({}),
       kind: z.enum(["task", "notice"]).optional(), // 切换分类轴（007）：缺席=不改；ddl 形状约束由围栏强制（FR-014）
-      resolveDoubt: z.boolean(), // true = 同时解除存疑
+      resolveDoubt: z.boolean().default(false), // true = 同时解除存疑；缺席 = 不解除（同样是「没有」义）
     })
     .superRefine((item, ctx) => {
       // 改动 map 的每一项必须恰有一侧非空（不能两空——那是无意义指令）

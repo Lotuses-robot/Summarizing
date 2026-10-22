@@ -136,30 +136,29 @@ function Row({
       }
       onClick={onToggle}
     >
-      {/* 左缘状态条（用户 2026-09-27 定；D-89 修订）：仅保留推断条（存疑琥珀条随存疑段退场）；
-          2026-09-30 修：固定蓝 info → 主题色 accent（跟色板走）。
-          固定高度钉在标题行——不随展开体拉伸（否则展开行的条会巨长）。 */}
-      {row.dueDateInferred && dueNote !== null && (
-        <span
-          className="absolute left-1.5 top-2.5 h-5 w-1 rounded-full bg-accent"
-          title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
-        />
-      )}
       {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
           标签**横向滑动**查看（不再换行到第三行）；**没有 meta 的行不渲染第二行**——此前标题 basis-full
           让每行都占两行，没标签时第二行只剩隐形按钮，看起来就是一条空白行。
           DOM 顺序仍是「标题 → meta → 操作」；窄屏只靠 order 把操作提到第一行右端——sm 起 order 归位，
           恢复原单行阅读线（标题 → 相对 ddl → tags → 右缘操作）。 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium sm:flex-nowrap">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-medium sm:flex-nowrap">
+        {/* 标题（+ 左缘推断条）：条挂在标题自己的盒子里、按标题行垂直居中——
+            桌面端（单行，行高被 chip 撑高）与窄屏（标题独占一行）都对齐第一行文本。
+            条画在标题盒**外面**（-left-3.5），所以截断放在内层 span 上，别让 overflow 剪掉它。 */}
         <span
           className={cn(
-            // 桌面端：标题按内容取宽、**不撑满**（旧版 sm:grow 会把 ddl/标签顶到最右，
-            // 读起来像右对齐）；空间不够时先压缩 meta、最后才压标题（见下方 meta 的 flex-1）。
-            "order-1 min-w-0 flex-1 truncate sm:order-none sm:flex-initial",
+            "relative order-1 min-w-0 flex-1 sm:order-none sm:flex-initial",
             item.status === "done" && "text-ink-muted line-through",
           )}
         >
-          {itemName(item.elements)}
+          {row.dueDateInferred && dueNote !== null && (
+            <span
+              aria-hidden
+              className="absolute -left-3.5 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-accent"
+              title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
+            />
+          )}
+          <span className="block truncate">{itemName(item.elements)}</span>
         </span>
         {dueLabel !== null && (
           // 桌面端：到期时间独立成一位、**永不压缩**——「不够位置就挤标题和标签，别挤时间」
@@ -210,10 +209,11 @@ function Row({
           </span>
         )}
         {/* 快捷动作：窄屏与标题同一行、居右（展开时常驻；非展开靠悬停，触屏由 .row-act 的
-            pointer-coarse 兜底常显）。 */}
+            pointer-coarse 兜底常显）。容器钉 h-5（= 文字行高）：钮本身 24/32px 只向外溢出、
+            不把这一行撑高——否则标题被居中到「钮的高度」，上下留白就不等了（用户 2026-10-22）。 */}
         <span
           className={cn(
-            "order-2 ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted sm:order-none",
+            "order-2 ml-auto flex h-5 shrink-0 items-center gap-1 text-xs font-normal text-ink-muted sm:order-none",
             expanded && "row-actions-open",
           )}
         >

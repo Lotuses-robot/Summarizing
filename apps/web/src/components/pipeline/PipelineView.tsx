@@ -48,6 +48,19 @@ function eventDot(action: string): string {
   return "bg-zinc-400";
 }
 
+/** 事件 payload 的宽松读取（自由形状，读侧防御）：是对象才继续看字段。 */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+/** 从事件 payload 取模型这一轮的原话摘录（digest_trace 才有）——「模型到底说了什么不给过」，
+ *  让用户在流水里直接看见，不必翻服务器日志。坏形状一律当没有。 */
+function thoughtOf(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  const t = payload.thought;
+  return typeof t === "string" && t.trim() !== "" ? t : null;
+}
+
 /** 单批详情：原文 + 纯时间线（最新在上——与状态卡轨迹同向；节点色区分类型）。
  *  随父级轮询刷新：eventCount 变化（有新事件）即重拉——消化中展开的时间线不再冻结。 */
 function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
@@ -88,21 +101,30 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
         </p>
       </section>
       <div className="mt-3 space-y-0">
-        {events.map((e, i) => (
-          <div key={e.id} className="flex gap-3">
-            <div className="flex flex-col items-center pt-1">
-              <span
-                className={cn("h-2 w-2 shrink-0 rounded-full", eventDot(e.action))}
-                title={e.action}
-              />
-              {i < events.length - 1 && <span className="w-px flex-1 bg-line" />}
+        {events.map((e, i) => {
+          const thought = thoughtOf(e.payload);
+          return (
+            <div key={e.id} className="flex gap-3">
+              <div className="flex flex-col items-center pt-1">
+                <span
+                  className={cn("h-2 w-2 shrink-0 rounded-full", eventDot(e.action))}
+                  title={e.action}
+                />
+                {i < events.length - 1 && <span className="w-px flex-1 bg-line" />}
+              </div>
+              <div className="min-w-0 flex-1 pb-3">
+                <p className="text-xs leading-relaxed">{e.detail}</p>
+                {/* 模型这一轮的原话（最多 500 字，服务端截断）——「说了什么但没给过」一眼可查 */}
+                {thought !== null && (
+                  <p className="mt-1 whitespace-pre-wrap break-words rounded-md bg-canvas px-2 py-1 text-[11px] leading-relaxed text-ink-muted">
+                    {thought}
+                  </p>
+                )}
+                <p className="mt-0.5 text-[10px] text-ink-muted/60">{fmtTimeSec(e.at)}</p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1 pb-3">
-              <p className="text-xs leading-relaxed">{e.detail}</p>
-              <p className="mt-0.5 text-[10px] text-ink-muted/60">{fmtTimeSec(e.at)}</p>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

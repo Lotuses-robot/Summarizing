@@ -15,10 +15,13 @@ describe("urgencyStrength（待办临近渐强）", () => {
     expect(urgencyStrength(Number.NaN, NOW)).toBe(0);
   });
 
-  it("超窗（≥5 天）→ 0；12 小时 → 0.9³ = 0.729", () => {
+  it("超窗（≥24 小时）→ 0；12 小时 → 0.5³ = 0.125（窗口与「临近」描边同一条线）", () => {
+    // 用户 2026-10-22：「排期还有一段时间的也有绿色」——5 天窗在 30 小时外仍有底色，收窄到 24h
+    expect(urgencyStrength(NOW + 24 * HOUR, NOW)).toBe(0);
+    expect(urgencyStrength(NOW + 30 * HOUR, NOW)).toBe(0);
     expect(urgencyStrength(NOW + 5 * 24 * HOUR, NOW)).toBe(0);
-    expect(urgencyStrength(NOW + 6 * 24 * HOUR, NOW)).toBe(0);
-    expect(urgencyStrength(NOW + 12 * HOUR, NOW)).toBeCloseTo(0.9 ** 3, 10);
+    expect(urgencyStrength(NOW + 12 * HOUR, NOW)).toBeCloseTo(0.5 ** 3, 10);
+    expect(urgencyStrength(NOW + 6 * HOUR, NOW)).toBeCloseTo(0.75 ** 3, 10);
   });
 
   it("两条曲线共用同一封顶（单一出处）", () => {

@@ -17,7 +17,7 @@ import * as repo from "../storage/repo";
 import type { ChatMsg, LlmClient, ToolCall, LlmUsage } from "../shared/llm";
 import { UNCONFIGURED_MODEL_TAG } from "../shared/llm";
 import { recordUsage } from "../shared/usage";
-import { describeRejections, parseChangeList, runFence } from "../executor/fence";
+import { describeRejections, parseChangeListDetailed, runFence } from "../executor/fence";
 import { buildDigestPrompt } from "./prompt";
 import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
 import { executeChanges } from "../executor/executor";
@@ -90,22 +90,23 @@ export async function digestRawInput(
       // 修复调用失败本身也记 stderr（九轮评审：网关故障 ≠ 模型不修复，须可分辨）。
       const repaired = await requestRepair(llm, db, modelTag, rejected).catch((err) => {
         bestEffortLog(`[digest] 修复轮调用失败（raw=${raw.id}）：${errText(err)}`);
-        return null;
+        return { ok: false as const, reason: `调用失败：${errText(err)}` };
       });
-      if (repaired === null) {
-        // 修复轮跑过且失败——落流水与「从未尝试」可分辨（十轮评审）
+      if (!repaired.ok) {
+        // 修复轮跑过且失败——落流水与「从未尝试」可分辨（十轮评审）；
+        // **原因写清**（调用失败 / 没有 JSON / 字段不合规+路径），别让「网关/解析失败」一句话盖住三种情况
         appendPipelineEventBestEffort(
           db,
           raw.id,
           {
             action: "repair_round",
-            detail: "修复轮调用失败（网关/解析失败），拒收项维持原判",
-            payload: { rejected: rejected.length },
+            detail: `修复轮未产出可用清单（${repaired.reason}），拒收项维持原判`,
+            payload: { rejected: rejected.length, reason: repaired.reason },
           },
           by,
         );
       } else {
-        const second = runFence(db, raw, repaired);
+        const second = runFence(db, raw, repaired.list);
         // 修复轮常按「其余项保持原样」回吐全量清单——按 JSON 相等去重，防 create_item 双落库
         // （九轮评审）；其新增拒收同样留痕（九轮评审：被拒过就要有行可查）。
         const seenKeys = new Set([
@@ -501,17 +502,21 @@ async function elicitChangeList(
       }
       continue;
     }
-    const parsed = parseChangeList(turn.content ?? "");
-    if (parsed !== null) return { list: parsed, readMedia };
+    const parsed = parseChangeListDetailed(turn.content ?? "");
+    if (parsed.ok) return { list: parsed.value, readMedia };
     // 没拿到合法清单 = 这一轮空转了——留痕（含空回复 / 非法 JSON），流水里能看见它
     traceRound();
-    // 空回复的追问要说清「你什么都没回」——否则模型容易照着上一句再空一次（2026-10-22 实测）
+    /** 把这一轮的原样回复放回对话：**模型必须看见自己写了什么**才能改。旧实现只在
+     *  「有工具调用」时 push assistant，于是非法轮次的追问等于凭空指责——模型看不到上文，
+     *  只能把同样的散文再写一遍（2026-10-22 实测连败六轮）。
+     *  空回复不入（没内容可看，且部分网关对空 assistant 消息不友好）。 */
     const empty = (turn.content ?? "").trim() === "";
+    if (!empty) messages.push({ role: "assistant", content: turn.content });
     messages.push({
       role: "user",
       content: empty
         ? `你的上一条回复是空的（没有任何内容）。请按系统提示词【输出格式】输出一个 JSON 对象 {"changes":[...]}；这条信息若确实无需改动，就输出 {"changes":[]}。`
-        : `你的上一条输出不是合法的变更清单 JSON。请严格按系统提示词【输出格式】的字段表重新输出：只输出一个 JSON 对象 {"changes":[...]}，不要任何其他文字。`,
+        : `你的上一条输出没有被接受：${parsed.reason}。请对照系统提示词【输出格式】的字段表改成合法清单后再发一次——**只输出一个 JSON 对象 {"changes":[...]}，不要任何解释、标题或代码围栏之外的文字**；这条信息若确实无需改动，就输出 {"changes":[]}。`,
     });
   }
   throw new Error(
@@ -685,7 +690,7 @@ async function requestRepair(
   db: Db,
   modelTag: string,
   rejected: { item: ChangeList["changes"][number]; reason: string }[],
-): Promise<ChangeList | null> {
+): Promise<{ ok: true; list: ChangeList } | { ok: false; reason: string }> {
   const res = await llm.chat({
     system: buildDigestPrompt(repo.readRejectionRules(db)),
     tools: [],
@@ -697,7 +702,8 @@ async function requestRepair(
     ],
   });
   recordUsage(db, "agent0", modelTag, res.usage);
-  return parseChangeList(res.content ?? "");
+  const parsed = parseChangeListDetailed(res.content ?? "");
+  return parsed.ok ? { ok: true, list: parsed.value } : { ok: false, reason: parsed.reason };
 }
 
 /** 拼装给模型的原始信息简报——时间事实逐项给全（事件时间/提交时间/消化时间），
