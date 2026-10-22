@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, Trash2, Undo2 } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   dueDateElement,
   itemName,
@@ -59,8 +59,8 @@ const SECTION_META: {
 const NEAR_MS = 24 * 60 * 60_000; // 临近 = 24h 内到期（05§二 四点标记）
 
 /** 看板单行（用户 2026-09-27 行布局 v3，借鉴 Todoist/Things 3）：标题 → 相对人话 ddl → tags
- *  同一条阅读线内联（不用视线右缘远跳）；ddl 颜色编码（过期红/临近 accent/远灰），悬停给绝对时间；
- *  右缘只留状态点与新微标。悬停显形快捷按钮（勾=完成/恢复、删除）。
+ *  同一条阅读线内联（不用视线右缘远跳）；ddl 颜色编码（过期红/临近 accent/远灰），悬停给绝对时间。
+ *  行操作只有手势（右滑删除、左滑完成/撤销），行右缘不再放按钮（用户 2026-10-22）。
  *  点击整行 = 展开/收起详情（单开互斥由看板保证）；键盘 ↑↓ 选中行有底色。 */
 function Row({
   row,
@@ -199,7 +199,7 @@ function Row({
   };
 
   return (
-    <li id={`row-${item.id}`} className="group relative overflow-hidden rounded-md">
+    <li id={`row-${item.id}`} className="relative overflow-hidden rounded-md">
       {/* 底层动作提示：右滑露出左边「移入回收站」、左滑露出右边「完成 / 撤销完成」。
           提示只做「这一下会发生什么」，不可点——手势是唯一入口（与通知主卡同款）。 */}
       <div
@@ -242,11 +242,9 @@ function Row({
         style={rowBg ? { backgroundColor: rowBg } : undefined}
         onClick={handleRowClick}
       >
-        {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
-          标签**横向滑动**查看（不再换行到第三行）；**没有 meta 的行不渲染第二行**——此前标题 basis-full
-          让每行都占两行，没标签时第二行只剩隐形按钮，看起来就是一条空白行。
-          DOM 顺序仍是「标题 → meta → 操作」；窄屏只靠 order 把操作提到第一行右端——sm 起 order 归位，
-          恢复原单行阅读线（标题 → 相对 ddl → tags → 右缘操作）。 */}
+        {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题独占整行，第二行 = ddl / 「新」/ 标签；
+          **没有 meta 的行不渲染第二行**（此前标题 basis-full 让每行都占两行，没标签时第二行只剩空白）。
+          sm 起单行阅读线：标题 → 相对 ddl → tags。 */}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm font-medium sm:flex-nowrap">
           {/* 标题（+ 左缘推断条）：条挂在标题自己的盒子里、按标题行垂直居中——
             桌面端（单行，行高被 chip 撑高）与窄屏（标题独占一行）都对齐第一行文本。
@@ -280,7 +278,18 @@ function Row({
             // 窄屏 = 可横向滑动的第二行；桌面端 = 紧挨标题的一段标签，
             // **flex-1 basis 0** 让它占满剩余空间：剩余空间为 0 时它先被压到零（标签先让位），
             // 标题此后才截断——「先挤标签，再挤标题」（用户 2026-10-22）。
-            <span className="row-meta no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 sm:order-none sm:flex-1 sm:overflow-hidden">
+            <span
+              className={cn(
+                "row-meta no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 pr-1 sm:order-none sm:flex-1 sm:overflow-hidden",
+                // 收起态：标签条不滑动——横向手势要能穿过标签落到整行的拖动删除上（用户 2026-10-22）；
+                // 展开态：标签条自己横向滑动查看
+                expanded ? "overflow-x-auto" : "overflow-hidden",
+              )}
+              // 收起态下标签本身是按钮（起手会跳开手势）；这层标记让横拖穿过它归整行。
+              // 展开态反过来：整个标签条标记成「自己的」，横拖归标签横滑、不拖动行。
+              data-swipe-through={expanded ? undefined : ""}
+              data-swipe-own={expanded ? "" : undefined}
+            >
               {dueLabel !== null && (
                 // 窄屏这一份留在可滑动的第二行里；桌面那份在 meta **外面**（sm:hidden / hidden sm:inline）
                 <span
@@ -306,6 +315,11 @@ function Row({
                   }
                   onClick={(e) => {
                     e.stopPropagation();
+                    // 收起行里横拖是从标签上起手的（data-swipe-through）：拖完松手不该顺带筛选
+                    if (swipe.movedRef.current) {
+                      swipe.movedRef.current = false;
+                      return;
+                    }
                     onTag(t);
                   }}
                 >
@@ -314,50 +328,6 @@ function Row({
               ))}
             </span>
           )}
-          {/* 快捷动作：窄屏与标题同一行、居右（展开时常驻；非展开靠悬停，触屏由 .row-act 的
-            pointer-coarse 兜底常显）。容器钉 h-5（= 文字行高）：钮本身 24/32px 只向外溢出、
-            不把这一行撑高——否则标题被居中到「钮的高度」，上下留白就不等了（用户 2026-10-22）。 */}
-          <span
-            className={cn(
-              "order-2 ml-auto flex h-5 shrink-0 items-center gap-1 text-xs font-normal text-ink-muted sm:order-none",
-              expanded && "row-actions-open",
-            )}
-          >
-            {item.status === "todo" && (
-              <button
-                className="row-act"
-                title="标完成"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onQuickAction(item.id, "complete");
-                }}
-              >
-                <Check size={13} />
-              </button>
-            )}
-            {item.status !== "todo" && (
-              <button
-                className="row-act"
-                title="恢复待办"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onQuickAction(item.id, "reopen");
-                }}
-              >
-                <Undo2 size={13} />
-              </button>
-            )}
-            <button
-              className="row-act"
-              title="删除（进回收站，可恢复）"
-              onClick={(e) => {
-                e.stopPropagation();
-                onQuickAction(item.id, "trash");
-              }}
-            >
-              <Trash2 size={13} />
-            </button>
-          </span>
         </div>
         {expanded && (
           // 滚动规（用户 2026-09-26 修订）：max-h + 内滚；不做 overscroll 锁——滚到底自然接页面滚动。
@@ -609,8 +579,6 @@ export function Board({
     setExpandedId(expandedId === id ? null : id);
   };
 
-  /** 行悬停快捷动作：发状态请求 + 刷新看板；展开体随行换段，收起避免旧详情误导。
-   *  失败无按钮级提示（看板无 toast 机制）——刷新让看板如实呈现现状。 */
   /** 清掉撤销计时器。 */
   const clearTrashTimer = () => {
     if (trashTimer.current !== null) {
@@ -671,7 +639,7 @@ export function Board({
     };
   }, []);
 
-  /** 行内快捷动作：完成/撤销完成立刻写库；**删除先进撤销窗口**（不立刻落笔）。 */
+  /** 手势动作：完成/撤销完成立刻写库；**删除先进撤销窗口**（不立刻落笔）。 */
   const quickAction = (id: string, action: RowAction) => {
     // 用过一次（图标或手势）就不再需要手势提示
     markSwipeHintSeen("board");

@@ -166,6 +166,19 @@
   .bubble-in {
     animation: bubble-in 0.22s cubic-bezier(0.34, 1.4, 0.64, 1) both;
   }
+  /* 气泡收回（2026-10-22 用户：退场也要有收起的动画）：沉回钮里 + 淡出，是冒出那段的镜像 */
+  .bubble-out {
+    animation: bubble-out 0.16s cubic-bezier(0.4, 0, 0.7, 0.2) both;
+  }
+  /* 磨玻璃遮罩跟气泡一起冒出（2026-10-22）：同一段时长、只是淡入——
+     只做不透明度的线性过渡，不做位移，背景才不会跟着「弹」 */
+  .backdrop-in {
+    animation: backdrop-in 0.22s ease-out both;
+  }
+  /* 遮罩随气泡一起退场（淡出时长由内联 animationDuration 对齐最后一颗气泡） */
+  .backdrop-out {
+    animation: backdrop-out 0.22s ease-in both;
+  }
   /* 页面级横向留白（2026-10-22 移动端走查）：窄屏 20px——与底部悬浮导航的屏边留白同宽，
      正文和底栏落在同一条竖线上；桌面 24px——正文字号变大后 16px 会显得贴边。 */
   .page-x {
@@ -265,6 +278,26 @@
   }
 }
 
+/* 磨玻璃遮罩淡入：与气泡同时冒出，只过渡不透明度 */
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 磨玻璃遮罩淡出：与气泡收回同步（时长由内联 animationDuration 按气泡数给） */
+@keyframes backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 /* 气泡从下方冒出（窄屏底部导航）：位移 + 淡入，回弹由 easing 给 */
 @keyframes bubble-in {
   from {
@@ -274,6 +307,18 @@
   to {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* 气泡收回：沿冒出那条路沉回钮里——同一条轨迹、更短的时长（收比放利落） */
+@keyframes bubble-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.85);
   }
 }
 

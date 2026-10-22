@@ -73,11 +73,21 @@ export function useSwipeActions({
     cbRef.current = { enabled, onSwipe, ratio };
   });
 
-  /** 起手：交互元素上不启动拖动（点按钮/链接要正常）。 */
+  /** 起手：交互元素上不启动拖动（点按钮/链接要正常）。
+   *  两块标记改写这条默认：
+   *  - `data-swipe-through`（收起的行内标签条）：交互元素也让过——横拖归整行，
+   *    否则起手落在标签上就既滑不动标签、也滑不动行，成了死区；
+   *  - `data-swipe-own`（展开的行内标签条）：整个区域都不起手——那里横拖是标签自己的横滑。 */
   const beginDrag = (target: EventTarget | null, x: number, y: number, width: number): void => {
     if (!cbRef.current.enabled) return;
-    if (target instanceof Element && target.closest("button,a,summary,input,textarea,select"))
-      return;
+    if (target instanceof Element) {
+      if (target.closest("[data-swipe-own]") !== null) return;
+      if (
+        target.closest("button,a,summary,input,textarea,select") !== null &&
+        target.closest("[data-swipe-through]") === null
+      )
+        return;
+    }
     dragRef.current = { startX: x, startY: y, width, axis: "none" };
     dxRef.current = 0;
     movedRef.current = false;

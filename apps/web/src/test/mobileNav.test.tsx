@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MobileNav } from "../components/MobileNav";
 import "@testing-library/jest-dom/vitest";
@@ -121,55 +121,112 @@ describe("窄屏底部导航：三区结构（左独立 · 中胶囊 · 右独�
 });
 
 describe("窄屏底部导航：气泡开合（失焦消失）", () => {
-  it("再点同一钮 = 收起气泡", () => {
-    render(<MobileNav {...mkProps()} />);
-    fireEvent.click(screen.getByTitle("处理"));
-    expect(screen.getByTitle("存疑")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("处理"));
-    expect(screen.queryByTitle("存疑")).not.toBeInTheDocument();
+  it("再点同一钮 = 收起气泡（先播收回动画，放完才卸下）", () => {
+    vi.useFakeTimers();
+    try {
+      render(<MobileNav {...mkProps()} />);
+      fireEvent.click(screen.getByTitle("处理"));
+      expect(screen.getByTitle("存疑")).toBeInTheDocument();
+      fireEvent.click(screen.getByTitle("处理"));
+      // 退场中：气泡还在 DOM 上，但已切到收回动画、整列不再吃点击
+      const leaving = screen.getByTitle("存疑");
+      expect(leaving.className).toContain("bubble-out");
+      expect(leaving.parentElement?.className).toContain("pointer-events-none");
+      // 放完才真正从 DOM 卸下
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByTitle("存疑")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("换组 = 直接切到新组的气泡（旧组的不残留）", () => {
-    render(<MobileNav {...mkProps()} />);
-    fireEvent.click(screen.getByTitle("处理"));
-    fireEvent.click(screen.getByTitle("更多"));
-    expect(screen.getByTitle("用量")).toBeInTheDocument();
-    expect(screen.queryByTitle("存疑")).not.toBeInTheDocument();
+  it("换组 = 旧组先收回（不留残余），新组接着冒出", () => {
+    vi.useFakeTimers();
+    try {
+      render(<MobileNav {...mkProps()} />);
+      fireEvent.click(screen.getByTitle("处理"));
+      fireEvent.click(screen.getByTitle("更多"));
+      // 新组已开；旧组还在收（镜像动画，不是瞬间消失）
+      expect(screen.getByTitle("用量")).toBeInTheDocument();
+      expect(screen.getByTitle("存疑").className).toContain("bubble-out");
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByTitle("存疑")).not.toBeInTheDocument();
+      expect(screen.getByTitle("用量")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("选中二级项后气泡收起（不会留在屏幕上）", () => {
-    const p = mkProps();
-    render(<MobileNav {...p} />);
-    fireEvent.click(screen.getByTitle("更多"));
-    fireEvent.click(screen.getByTitle("关于"));
-    expect(p.onOpenAbout).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTitle("用量")).not.toBeInTheDocument();
+  it("选中二级项后气泡收起（先收回，再卸下）", () => {
+    vi.useFakeTimers();
+    try {
+      const p = mkProps();
+      render(<MobileNav {...p} />);
+      fireEvent.click(screen.getByTitle("更多"));
+      fireEvent.click(screen.getByTitle("关于"));
+      expect(p.onOpenAbout).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByTitle("用量")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("点导航之外的区域 → 收起", () => {
-    render(<MobileNav {...mkProps()} />);
-    fireEvent.click(screen.getByTitle("更多"));
-    expect(screen.getByTitle("用量")).toBeInTheDocument();
-    fireEvent.pointerDown(document.body);
-    expect(screen.queryByTitle("用量")).not.toBeInTheDocument();
+  it("点导航之外的区域 → 收起（播收回动画，放完才卸下）", () => {
+    vi.useFakeTimers();
+    try {
+      render(<MobileNav {...mkProps()} />);
+      fireEvent.click(screen.getByTitle("更多"));
+      expect(screen.getByTitle("用量")).toBeInTheDocument();
+      fireEvent.pointerDown(document.body);
+      expect(screen.getByTitle("用量").className).toContain("bubble-out");
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByTitle("用量")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("页面滚动 → 收起", () => {
-    render(<MobileNav {...mkProps()} />);
-    fireEvent.click(screen.getByTitle("更多"));
-    expect(screen.getByTitle("用量")).toBeInTheDocument();
-    fireEvent.scroll(window);
-    expect(screen.queryByTitle("用量")).not.toBeInTheDocument();
+    vi.useFakeTimers();
+    try {
+      render(<MobileNav {...mkProps()} />);
+      fireEvent.click(screen.getByTitle("更多"));
+      expect(screen.getByTitle("用量")).toBeInTheDocument();
+      fireEvent.scroll(window);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByTitle("用量")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("点直接入口（通知）时若有气泡开着，也会收起", () => {
-    const p = mkProps();
-    render(<MobileNav {...p} />);
-    fireEvent.click(screen.getByTitle("处理"));
-    expect(screen.getByTitle("存疑")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("通知"));
-    expect(p.onShowNotice).toHaveBeenCalledTimes(1);
-    expect(screen.queryByTitle("存疑")).not.toBeInTheDocument();
+    vi.useFakeTimers();
+    try {
+      const p = mkProps();
+      render(<MobileNav {...p} />);
+      fireEvent.click(screen.getByTitle("处理"));
+      expect(screen.getByTitle("存疑")).toBeInTheDocument();
+      fireEvent.click(screen.getByTitle("通知"));
+      expect(p.onShowNotice).toHaveBeenCalledTimes(1);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(screen.queryByTitle("存疑")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

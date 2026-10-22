@@ -10,8 +10,9 @@ import { UNDO_SECONDS } from "../lib/swipe";
 import "@testing-library/jest-dom/vitest";
 
 /** 在行上模拟一次触屏横滑（正 = 向右 → 移入回收站；负 = 向左 → 完成/撤销完成）。
- *  happy-dom 没有布局，clientWidth 恒为 0——先给宽度，35% 阈值才有意义。 */
-function swipeRow(id: string, dx: number): void {
+ *  happy-dom 没有布局，clientWidth 恒为 0——先给宽度，35% 阈值才有意义。
+ *  `from` 指定起手落在哪个后代上（测「标签条上的横拖归谁」）；缺省 = 行本体。 */
+function swipeRow(id: string, dx: number, from?: Element): void {
   // 行本体 = li 的第二个子元素（第一个是底层手势提示层）
   const li = document.getElementById(`row-${id}`);
   const body = li?.children[1] ?? null;
@@ -23,7 +24,7 @@ function swipeRow(id: string, dx: number): void {
   const fire = (type: string, touches: { clientX: number; clientY: number }[]) => {
     const ev = new Event(type, { bubbles: true, cancelable: true });
     Object.defineProperty(ev, "touches", { value: touches });
-    fireEvent(body, ev);
+    fireEvent(from ?? body, ev);
   };
   fire("touchstart", [at(200)]);
   fire("touchmove", [at(200 + dx)]);
@@ -196,6 +197,87 @@ describe("Board（三段看板，007）", () => {
     await act(async () => {});
     expect(calls.some((u) => u.endsWith("/api/items/s1/complete"))).toBe(true);
     expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(false);
+  });
+
+  it("收起行的标签条不拦手势：从标签上起手横拖，仍归整行（右滑删除）", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = fetchUrl(input);
+        calls.push(url);
+        if (url.includes("/trash")) return Promise.resolve(jsonResponse({}));
+        return Promise.reject(new Error("测试环境无后端"));
+      }),
+    );
+    render(
+      <Board
+        board={view({
+          scheduled: [
+            makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
+          ],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 起手落在标签按钮上（它是 button——默认会被手势钩子跳过）
+    swipeRow("s1", 200, screen.getByText("英语课"));
+    await act(async () => {
+      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 50);
+    });
+    expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(true);
+  });
+
+  it("展开行的标签条自己横滑：从标签条上起手不拖动整行；标签条在展开时可横滑、收起时不可", () => {
+    render(
+      <Board
+        board={view({
+          scheduled: [
+            makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
+          ],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    const meta = screen.getByText("英语课").closest(".row-meta");
+    if (!(meta instanceof HTMLElement)) throw new Error("找不到标签条");
+    // 收起：不横滑（横向手势要能穿过），并让标签上的横拖归整行
+    expect(meta.className).not.toContain("overflow-x-auto");
+    expect(meta.hasAttribute("data-swipe-through")).toBe(true);
+    expect(meta.hasAttribute("data-swipe-own")).toBe(false);
+    // 展开行（点行本体）
+    const li = document.getElementById("row-s1");
+    const body = li?.children[1];
+    if (!(body instanceof HTMLElement)) throw new Error("找不到行本体");
+    fireEvent.click(body);
+    const opened = screen.getByText("英语课").closest(".row-meta");
+    if (!(opened instanceof HTMLElement)) throw new Error("找不到标签条");
+    // 展开：自己横滑，且起手不从整行拖动开始（标记把按钮放行的例外撤掉）
+    expect(opened.className).toContain("overflow-x-auto");
+    expect(opened.hasAttribute("data-swipe-own")).toBe(true);
+    expect(opened.hasAttribute("data-swipe-through")).toBe(false);
+  });
+
+  it("行右缘不再有勾/删除按钮：行操作只有手势（用户 2026-10-22）", () => {
+    render(
+      <Board
+        board={view({
+          scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    expect(screen.queryByTitle("标完成")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("删除（进回收站，可恢复）")).not.toBeInTheDocument();
   });
 
   it("段头计数随筛选变：过滤后计数 = 显示条数（曾固定显示段内总数）", () => {
