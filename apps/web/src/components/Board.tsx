@@ -171,7 +171,9 @@ function Row({
         ref={swipe.bodyRef}
         {...swipe.handlers}
         className={cn(
-          "relative z-10 cursor-pointer rounded-md border border-transparent py-2 pl-5 pr-3 transition-transform duration-150 hover:bg-canvas",
+          // bg-surface 必须实心：行本体不拖动时是透明的，底层手势提示会「透」到事项文字上
+          // （用户 2026-10-22：「又跑上来祸害事项了，会遮挡到」）。拖动后由它遮住提示，只露出滑开的缝。
+          "relative z-10 cursor-pointer rounded-md border border-transparent bg-surface py-2 pl-5 pr-3 transition-transform duration-150 hover:bg-canvas",
           row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
           near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
           flash && "row-flash",

@@ -279,13 +279,15 @@ export function NoticePanel({
   return (
     <div className="page-x py-3">
       {hintVisible && (
-        <GestureHint
-          text="右滑清除（进回收站，可撤回）· 左滑稍后（本次跳过）"
-          onDismiss={() => {
-            markSwipeHintSeen("notice");
-            setHintVisible(false);
-          }}
-        />
+        <div className="mb-3">
+          <GestureHint
+            text="右滑清除（进回收站，可撤回）· 左滑稍后（本次跳过）"
+            onDismiss={() => {
+              markSwipeHintSeen("notice");
+              setHintVisible(false);
+            }}
+          />
+        </div>
       )}
       {actionError !== null && (
         <p className="mb-3 rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
