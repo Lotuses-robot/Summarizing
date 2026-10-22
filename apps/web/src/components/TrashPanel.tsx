@@ -44,7 +44,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
 
   if (rows.length === 0) {
     return (
-      <div className="px-4 py-8">
+      <div className="page-x py-8">
         {/* 清理结果可能在列表清空的同时产生（全清光/全失败）——先于空态渲染，不能被吞 */}
         {feedback !== null && (
           <p
@@ -64,7 +64,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
   }
 
   return (
-    <div className="px-4 py-3">
+    <div className="page-x py-3">
       <div className="mb-3 flex items-center gap-3">
         <span className="text-sm text-ink-muted">
           共 {rows.length} 条——删除超过 15 天的会被「一键清理」彻底清掉，原文档案不受影响
@@ -116,30 +116,32 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
               )}
               onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
             >
-              {/* 与看板行同款（2026-10-22 移动端走查）：窄屏标题独占一行，kind/标签/删除时间换行——
-                  否则标签一多标题被挤成零宽。 */}
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
-                <span className="min-w-0 basis-full truncate text-ink-muted sm:basis-56 sm:grow">
+              {/* 与看板行同款两行封顶（2026-10-22 二次走查）：窄屏第一行 = 标题 + 恢复按钮，
+                  第二行 = kind / 标签 / 删除时间（横向滑动查看，不换第三行）；sm 起恢复单行。 */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium sm:flex-nowrap">
+                <span className="order-1 min-w-0 flex-1 truncate text-ink-muted sm:order-none sm:flex-initial sm:basis-56 sm:grow">
                   {itemName(item.elements)}
                 </span>
-                <span className="chip shrink-0 text-ink-muted">
-                  {item.kind === "notice" ? "通知" : "事项"}
-                </span>
-                {item.tags.map((t) => (
-                  <span key={t} className="chip shrink-0 text-ink-muted">
-                    {t}
-                  </span>
-                ))}
                 <span
                   className={cn(
-                    "ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted",
+                    "no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 text-xs font-normal text-ink-muted sm:contents",
                     // 展开时恢复按钮常驻（与看板行同一规则，用户 2026-10-22）
                     expandedId === item.id && "row-actions-open",
                   )}
                 >
-                  <span title={`删于 ${fmtFullTime(r.trashedAt)}`}>
+                  <span className="chip shrink-0 text-ink-muted">
+                    {item.kind === "notice" ? "通知" : "事项"}
+                  </span>
+                  {item.tags.map((t) => (
+                    <span key={t} className="chip shrink-0 text-ink-muted">
+                      {t}
+                    </span>
+                  ))}
+                  <span className="shrink-0" title={`删于 ${fmtFullTime(r.trashedAt)}`}>
                     删于 {fmtShortTime(r.trashedAt)}
                   </span>
+                </span>
+                <span className="order-2 ml-auto flex shrink-0 items-center gap-1 sm:order-none">
                   <button
                     className="row-act"
                     title="从回收站恢复（回到删前的状态）"

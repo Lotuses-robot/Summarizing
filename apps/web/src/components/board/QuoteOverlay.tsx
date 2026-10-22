@@ -3,6 +3,7 @@ import { sourceIdentityLabel, type MediaMap, type RawInput } from "@summarizing/
 import { pushEscLayer } from "../../lib/escLayer";
 import { fmtFullTime } from "../../lib/time";
 import { MediaText } from "./MediaText";
+import { CloseButton } from "../CloseButton";
 
 /** 引文悬浮窗（05§三 ㉜）：显示所属批次完整原文并高亮引文那句；点遮罩 / Esc 关闭。
  *  高亮用 indexOf 精确定位，定位不到（引文与原文有空白差异）就整段平铺不高亮——如实展示不编造。
@@ -38,9 +39,7 @@ export function QuoteOverlay({
             批次 {rawInput.id.slice(0, 6)} · {fmtFullTime(rawInput.receivedAt)} ·{" "}
             {sourceIdentityLabel(rawInput.sourceIdentity)}
           </span>
-          <button className="btn shrink-0" onClick={onClose}>
-            关闭
-          </button>
+          <CloseButton onClick={onClose} label="关闭引文" className="-my-1 shrink-0" />
         </div>
         {/* whitespace-pre-wrap 保留原文换行；fit-text 让无空格长 URL 也在框内断行（不横向溢出） */}
         <div className="fit-text max-h-[70dvh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">

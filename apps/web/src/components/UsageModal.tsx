@@ -5,6 +5,7 @@ import { api } from "../api";
 import { pushEscLayer } from "../lib/escLayer";
 import { cn } from "../lib/cn";
 import { fmtCompact, fmtExact } from "../lib/format";
+import { CloseButton } from "./CloseButton";
 
 // 用量仪表盘（010）：活动栏左下角独立入口打开——**不进设置**（用户 2026-10-20 定：
 // 设置 = 声明式偏好，这里只是看数字）。三个大号数字：未命中输入 / 输出 / 缓存命中，互不重叠
@@ -84,10 +85,11 @@ export function UsageModal({ open, onClose }: { open: boolean; onClose: () => vo
         className="flex w-[min(520px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center gap-2 border-b border-line px-5 py-3">
+        <header className="flex items-center gap-2 border-b border-line py-2 pl-5 pr-2">
           <ChartColumn size={16} className="text-ink-muted" />
           <span className="font-semibold">用量</span>
           <span className="text-sm text-ink-muted">· token</span>
+          <CloseButton onClick={onClose} label="关闭用量" className="ml-auto" />
         </header>
 
         <div className="px-5 py-5">
@@ -133,12 +135,6 @@ export function UsageModal({ open, onClose }: { open: boolean; onClose: () => vo
             </>
           )}
         </div>
-
-        <footer className="flex justify-end border-t border-line px-5 py-3">
-          <button className="btn" onClick={onClose}>
-            关闭
-          </button>
-        </footer>
       </div>
     </div>
   );

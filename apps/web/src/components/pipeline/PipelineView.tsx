@@ -398,7 +398,7 @@ export function PipelineView() {
   }, [hasDigesting]);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-4">
+    <div className="page-x mx-auto max-w-3xl py-4">
       {/* ── 常驻状态卡（空闲也在——没卡片让人以为页面死了）── */}
       {runs !== null && <StatusCard runs={runs} traces={traces} now={now} flash={flash} />}
 

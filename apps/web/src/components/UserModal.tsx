@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Eye, EyeOff, LogOut, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
+import { Copy, Eye, EyeOff, LogOut, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import { errText, type MeView } from "@summarizing/shared";
 import { api } from "../api";
 import { pushEscLayer } from "../lib/escLayer";
 import { Card, Row, StatusSlot, useStatus } from "./settings/primitives";
+import { CloseButton } from "./CloseButton";
 
 // 用户卡（006）：账户事务的**独立落点**——不塞进设置弹层。
 // 理由（用户 2026-10-03 批评）：设置 = 声明式偏好（固定控件 + 改完即生效、无保存按钮）；
@@ -144,10 +145,11 @@ export function UserModal({
         className="flex max-h-[84dvh] w-[min(520px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center gap-2 border-b border-line px-5 py-3">
+        <header className="flex items-center gap-2 border-b border-line py-2 pl-5 pr-2">
           <UserRound size={16} className="text-ink-muted" />
           <span className="font-semibold">账户</span>
           <span className="text-sm text-ink-muted">· {me.username}</span>
+          <CloseButton onClick={onClose} label="关闭账户" className="ml-auto" />
         </header>
 
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
@@ -223,12 +225,6 @@ export function UserModal({
             </Row>
           </Card>
         </div>
-
-        <footer className="flex justify-end border-t border-line px-5 py-3">
-          <button className="btn" onClick={onClose}>
-            <Check size={14} /> 完成
-          </button>
-        </footer>
       </div>
     </div>
   );

@@ -12,6 +12,7 @@ import {
 } from "@summarizing/shared";
 import { api, setOnUnauthorized } from "./api";
 import { ActivityBar, type View } from "./components/ActivityBar";
+import { MobileNav } from "./components/MobileNav";
 import { AuthShell } from "./components/AuthShell";
 import { FilterBar, matchesFilter, type BoardFilter } from "./components/FilterBar";
 import { Board } from "./components/Board";
@@ -36,8 +37,10 @@ import { loadChatOpen, saveChatOpen } from "./lib/appearance";
 /** 全视图错误横幅（连接告警 / 存疑库过期——两条语义各有独立 state，仅标记共用）。 */
 function Banner({ text }: { text: string }) {
   return (
-    <div className="mx-4 mt-2 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
-      {text}
+    <div className="page-x mt-2">
+      <div className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+        {text}
+      </div>
     </div>
   );
 }
@@ -61,7 +64,7 @@ function TagBar({
   emptyText: string;
 }) {
   return (
-    <div className="px-4 pt-2">
+    <div className="page-x pt-2">
       <button
         className="flex cursor-pointer items-center gap-1 text-xs text-ink-muted hover:text-ink"
         onClick={onToggleOpen}
@@ -366,7 +369,7 @@ export default function App() {
 
   // 认证闸门（hooks 全部就位之后的分支渲染）
   if (!authChecked) {
-    return <p className="px-4 py-8 text-sm text-ink-muted">加载中…</p>;
+    return <p className="page-x py-8 text-sm text-ink-muted">加载中…</p>;
   }
   if (me === null) {
     return (
@@ -414,7 +417,11 @@ export default function App() {
         }}
       />
 
-      <div ref={mainRef} className="min-w-0 flex-1 overflow-y-auto">
+      {/* 窄屏底部给悬浮导航留白（胶囊 60 + 距底 20 + 安全区）——否则最后一行被盖住；sm 起竖栏不需要 */}
+      <div
+        ref={mainRef}
+        className="min-w-0 flex-1 overflow-y-auto pb-[calc(5.25rem+env(safe-area-inset-bottom))] sm:pb-0"
+      >
         {/* 全视图横幅（D-89 评审 C1：审核页也必须有错误面——不许拿旧数据/假空态说事） */}
         {error !== null && <Banner text={error} />}
         {noticesError !== null && <Banner text={noticesError} />}
@@ -424,7 +431,7 @@ export default function App() {
         {view === "notice" ? (
           <>
             {/* 通知页（007）：筛选栏与看板同款（tag + 文本），不另造机制 */}
-            <div className="flex items-center gap-2 px-4 pt-4">
+            <div className="page-x flex items-center gap-2 pt-4">
               <FilterBar filter={filter} allTags={noticeTags} onChange={setFilter} />
             </div>
             {/* 标签栏与看板同一组件：通知的标签同样可展开点选（同一套筛选语义） */}
@@ -452,12 +459,16 @@ export default function App() {
         ) : (
           <>
             {/* 顶部整栏筛选（token 堆左、搜索框占满）+ 对话开关 */}
-            <div className="flex items-center gap-2 px-4 pt-4">
+            <div className="page-x flex items-center gap-2 pt-4">
               <FilterBar filter={filter} allTags={allTags} onChange={setFilter} />
               <button
                 title={chatOpen ? "收起对话面板" : "打开对话面板"}
                 onClick={toggleChat}
-                className={cn("btn shrink-0", chatOpen && "border-accent/60 bg-accent-soft")}
+                // 窄屏隐藏：底部悬浮导航右端的「对话」钮已经承担同一动作（2026-10-22 用户定）
+                className={cn(
+                  "btn hidden shrink-0 sm:inline-flex",
+                  chatOpen && "border-accent/60 bg-accent-soft",
+                )}
               >
                 {chatOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
               </button>
@@ -474,26 +485,28 @@ export default function App() {
             />
 
             {board !== null && board.failedRawInputs.length > 0 && (
-              <div className="mx-4 mt-2 flex items-center gap-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
-                <span>
-                  有 {board.failedRawInputs.length} 条信息处理失败，已标「未处理」——原文没丢。
-                </span>
-                <button
-                  className="btn"
-                  disabled={retrying}
-                  onClick={() => {
-                    setRetrying(true);
-                    // allSettled：个别批次已被别处重试（409）不算失败——刷新看板如实呈现即可
-                    void Promise.allSettled(
-                      board.failedRawInputs.map((r) => api.retryRaw(r.id)),
-                    ).then(() => {
-                      window.setTimeout(loadBoard, 1500);
-                      setRetrying(false);
-                    });
-                  }}
-                >
-                  {retrying ? "重试中…" : "重试这批"}
-                </button>
+              <div className="page-x mt-2">
+                <div className="flex items-center gap-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
+                  <span>
+                    有 {board.failedRawInputs.length} 条信息处理失败，已标「未处理」——原文没丢。
+                  </span>
+                  <button
+                    className="btn"
+                    disabled={retrying}
+                    onClick={() => {
+                      setRetrying(true);
+                      // allSettled：个别批次已被别处重试（409）不算失败——刷新看板如实呈现即可
+                      void Promise.allSettled(
+                        board.failedRawInputs.map((r) => api.retryRaw(r.id)),
+                      ).then(() => {
+                        window.setTimeout(loadBoard, 1500);
+                        setRetrying(false);
+                      });
+                    }}
+                  >
+                    {retrying ? "重试中…" : "重试这批"}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -506,11 +519,41 @@ export default function App() {
                 onTagClick={toggleFilterTag}
               />
             ) : (
-              <p className="px-4 py-8 text-sm text-ink-muted">加载中…</p>
+              <p className="page-x py-8 text-sm text-ink-muted">加载中…</p>
             )}
           </>
         )}
       </div>
+
+      {/* 窄屏底部悬浮导航（2026-10-22）：左「更多」· 中「事项/通知/处理」一组胶囊 · 右「对话」；
+          宽屏用左侧竖栏。对话面板打开时整条隐藏——面板本身就是 fixed inset-0 全屏覆盖，
+          底栏留着会浮在它上面。 */}
+      {!chatOpen && (
+        <MobileNav
+          view={view}
+          uncertainCount={uncertain.length}
+          unreadNoticeCount={unreadNoticeCount}
+          onShowBoard={() => setView("board")}
+          onShowNotice={() => setView("notice")}
+          onShowUncertain={() => {
+            setView("uncertain");
+            loadUncertain();
+          }}
+          onShowPipeline={() => setView("pipeline")}
+          onShowTrash={() => {
+            setView("trash");
+            loadTrash();
+          }}
+          onOpenUsage={() => setUsageOpen(true)}
+          onOpenAccount={() => setAccountOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenAbout={() => {
+            setAboutUpgradeFrom(null);
+            setAboutOpen(true);
+          }}
+          onToggleChat={toggleChat}
+        />
+      )}
 
       {chatOpen && (
         <aside

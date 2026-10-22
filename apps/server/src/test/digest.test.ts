@@ -1114,6 +1114,70 @@ describe("多模态取图（fetch_image，2026-10-13）", () => {
     expect(events.filter((e) => e.action === "image_degraded")).toHaveLength(1);
   });
 
+  it("带图消息回空回复（不报错）→ 按带图失败降级剥图，不再空转烧完轮次预算", async () => {
+    const db = makeDb(":memory:");
+    // 实测形态（2026-10-22）：网关收到 image_url **不报错**，只回一个既无正文、也无工具调用的空 turn。
+    // 旧实现只把「抛错」当带图失败 → 图一直挂着、每轮都空回 → 报「超过 8 轮仍未产出合法变更清单」。
+    const calls: { hasImage: boolean }[] = [];
+    const llm: LlmClient = {
+      async chat(args) {
+        const hasImg = args.messages.some(
+          (m) =>
+            m.role === "user" &&
+            Array.isArray(m.content) &&
+            m.content.some((p) => p.type === "image_url"),
+        );
+        calls.push({ hasImage: hasImg });
+        if (hasImg) return { content: null, toolCalls: [], usage: null }; // 静默空回复
+        if (calls.length === 1) {
+          return {
+            content: null,
+            usage: null,
+            toolCalls: [
+              {
+                id: "t1",
+                name: "fetch_image",
+                argsJson: JSON.stringify({ url: "https://x/a.jpg" }),
+              },
+            ],
+          };
+        }
+        return { content: '{"changes":[]}', toolCalls: [], usage: null };
+      },
+    };
+    const raw = seedRaw(db);
+    const tools = toolsWithImage(db, { dataUrl: "data:image/jpeg;base64,AAAA" });
+    const result = await digestRawInput(db, llm, tools, MODEL, raw);
+
+    expect(result.state).toBe("digested"); // 不因空回复把整批烧成 failed
+    expect(calls.filter((c) => c.hasImage)).toHaveLength(1); // 只带图了一次
+    const events = repo.listPipelineEvents(db, raw.id);
+    const degraded = events.filter((e) => e.action === "image_degraded");
+    expect(degraded).toHaveLength(1);
+    expect(degraded[0]?.detail).toContain("空回复");
+  });
+
+  it("空转轮次逐轮留痕：空回复 / 非法 JSON 的轮次也出现在流水里（不再只记工具轮）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    llm.push({ content: null }); // 第 1 轮：空回复
+    llm.push({ content: "我看了一下，没什么要记的" }); // 第 2 轮：正文但不是合法清单
+    llm.push({ content: '{"changes":[]}' }); // 第 3 轮：收尾
+    const raw = seedRaw(db);
+    const result = await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
+
+    expect(result.state).toBe("digested");
+    const traces = repo.listPipelineEvents(db, raw.id).filter((e) => e.action === "digest_trace");
+    // 两轮空转各一条（收尾轮不留痕——它是成功那步，不该占轮次号）
+    expect(traces).toHaveLength(2);
+    expect(traces[0]?.detail).toContain("空回复");
+    expect(traces[1]?.detail).toContain("未通过变更清单校验");
+    expect(traces.map((t) => t.payload)).toMatchObject([
+      { round: 1, tools: [] },
+      { round: 2, tools: [] },
+    ]);
+  });
+
   it("取图预算按尝试计数：失败也耗预算——第 5 次取图直接拒、不再打网", async () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm();

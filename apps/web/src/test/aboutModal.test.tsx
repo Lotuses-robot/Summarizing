@@ -30,7 +30,7 @@ describe("AboutModal 组件渲染", () => {
     render(<AboutModal open onClose={() => {}} />);
     // 真实 CHANGELOG 至少含 v0.1.0（版本段标题渲染）
     expect(screen.getByText("v0.1.0")).toBeInTheDocument();
-    expect(screen.getByText("知道了")).toBeInTheDocument(); // 关闭按钮
+    expect(screen.getByTitle("关闭关于")).toBeInTheDocument(); // 圆形关闭钮
   });
 
   it("open=false 不渲染", () => {

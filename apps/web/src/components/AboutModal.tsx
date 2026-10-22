@@ -3,6 +3,7 @@ import changelogRaw from "../../../../CHANGELOG.md?raw";
 import { Markdown } from "../lib/markdown";
 import { parseChangelog } from "../lib/changelog";
 import { pushEscLayer } from "../lib/escLayer";
+import { CloseButton } from "./CloseButton";
 
 // 关于弹层（用户 2026-10-13 定）：活动栏 ⓘ 打开——产品名/一句话/版本 + 更新日志。
 // **不塞进设置**（设置 = 声明式偏好，展示型事务另立门户——同「用户卡」的先例）。
@@ -129,6 +130,8 @@ export function AboutModal({
       >
         {/* 头部（大仓库 README 风）：点阵底纹+主题光晕 → 超大图标（应用图标，与 favicon/PWA 同一份）→ 超大标题 → 基座 chips */}
         <header className="about-hero relative flex flex-col items-center px-6 pb-6 pt-6 text-center sm:pt-9">
+          {/* 关闭钮钉在右上角：圆形底 + 居中叉（2026-10-22 用户定的全站关法） */}
+          <CloseButton onClick={onClose} label="关闭关于" className="absolute right-2 top-2" />
           <img src="/favicon.svg" alt="" width={64} height={64} className="relative h-16 w-16" />
           <h2 className="relative mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
           <p className="relative mt-2 text-sm text-ink-muted">
@@ -164,12 +167,6 @@ export function AboutModal({
           </p>
           <ChangelogList />
         </div>
-
-        <footer className="flex justify-end border-t border-line px-5 py-3">
-          <button className="btn" onClick={onClose}>
-            知道了
-          </button>
-        </footer>
       </div>
     </div>
   );

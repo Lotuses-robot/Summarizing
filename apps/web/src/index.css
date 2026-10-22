@@ -153,6 +153,32 @@
   .row-flash {
     animation: row-flash 1.6s ease-out 1;
   }
+  /* 窄屏底部导航的毛玻璃底（2026-10-22）：半透明 + 模糊，浮在内容上仍能看清下面。
+     暗色下降低白度、提高边框对比——与 .card 的明暗约定同源。 */
+  .glass {
+    background-color: color-mix(in oklab, var(--surface) 82%, transparent);
+    backdrop-filter: blur(14px) saturate(1.4);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+    box-shadow: 0 6px 24px color-mix(in oklab, var(--ink) 12%, transparent);
+  }
+  /* 气泡冒头（2026-10-22）：从下往上弹出 + 淡入，错峰由内联 animation-delay 给 */
+  .bubble-in {
+    animation: bubble-in 0.22s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  }
+  /* 页面级横向留白（2026-10-22 移动端走查）：窄屏 20px——与底部悬浮导航的屏边留白同宽，
+     正文和底栏落在同一条竖线上；桌面 24px——正文字号变大后 16px 会显得贴边。 */
+  .page-x {
+    @apply px-5 sm:px-6;
+  }
+  /* 横向滑动的标签条不放滚动条（2026-10-22 用户定）：滑动手势本身就是提示，
+     滚动条在窄屏只有 4px 高却压出一截灰条，把行距撑得忽高忽低。 */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
   /* 消化完成闪示（走查 2026-10-10）：卡片淡入上浮一次 */
   .flash-in {
     animation: flash-in 0.35s ease-out 1;
@@ -222,6 +248,18 @@
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* 气泡从下方冒出（窄屏底部导航）：位移 + 淡入，回弹由 easing 给 */
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 

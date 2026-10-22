@@ -398,6 +398,8 @@ async function elicitChangeList(
   // 瞬时（429/超时），一失败就永久封杀会静默丢掉该批后续所有图片（审查 2026-10-14）。
   let degradedStreak = 0;
   let visionDisabled = false;
+  /** 最后一轮模型到底回了什么——预算耗尽时并进报错，免得只留一句「超过 8 轮」无从追。 */
+  let lastRoundSummary = "未发生任何一轮";
   /** 取一次取图额度：够则扣一次返回 null；否则返回拒因人话（回喂给模型、按纯文本继续）。
    *  守卫与扣减同一处（审查：曾分居两处各自判 `call.name === "fetch_image"`——防两处漂移）。 */
   const takeImageSlot = (): string | null => {
@@ -408,6 +410,13 @@ async function elicitChangeList(
   };
   for (let round = 0; round < DIGEST_MAX_ROUNDS; round++) {
     const turn = await chatWithImageFallback(llm, db, raw, modelTag, messages);
+    // 记下这一轮的形状（工具调用名 / 正文长度）——预算耗尽时它能说明是哪一步空转
+    lastRoundSummary =
+      turn.toolCalls.length > 0
+        ? `工具调用 ${turn.toolCalls.map((t) => t.name).join("、")}`
+        : (turn.content ?? "").trim() === ""
+          ? "空回复（无正文、无工具调用）"
+          : `正文 ${(turn.content ?? "").length} 字但非合法变更清单`;
     if (turn.degraded) {
       degradedStreak += 1;
       // 连续两次降级 = 模型确实读不了图 → 后续 fetch_image 直接拒（防死循环；单次降级不封杀）
@@ -421,13 +430,26 @@ async function elicitChangeList(
     } else {
       degradedStreak = 0; // 本轮没降级（含带图成功）→ 复位：不把「瞬时一次」记成「持续不可用」
     }
-    if (turn.toolCalls.length > 0) {
+    /** 本轮的形状描述（工具名 / 空回复 / 正文未过校验）——留痕与耗尽报错共用一句话。 */
+    const describeRound = (): string => {
+      const names = turn.toolCalls.map((t) => t.name);
+      if (names.length > 0) return names.join("、");
+      const text = (turn.content ?? "").trim();
+      return text === ""
+        ? "空回复（无正文、无工具调用）"
+        : `无工具调用（正文 ${text.length} 字，未通过变更清单校验）`;
+    };
+    /** **除成功收尾那一轮外，每一轮都留痕**（2026-10-22 用户定：「不能每一轮都记录下来吗」）。
+     *  旧实现只记「有工具调用」的轮次，于是空回复/非法 JSON 的轮次在流水里完全消失：
+     *  用户只看到第 1、2 轮，然后直接是「超过 8 轮仍未产出合法变更清单」，中间六轮为何空转无从追。
+     *  收尾轮不留（它不是一次失败的尝试，进度条的「第 N/8 轮」也不该把成功那步算成额外一轮）。 */
+    const traceRound = (): void => {
       traced += 1;
       try {
         repo.appendPipelineEvent(db, {
           rawInputId: raw.id,
           action: "digest_trace",
-          detail: `第 ${traced} 轮：${turn.toolCalls.map((t) => t.name).join("、")}`,
+          detail: `第 ${traced} 轮：${describeRound()}`,
           payload: {
             round: traced,
             thought: (turn.content ?? "").slice(0, 500),
@@ -442,6 +464,9 @@ async function elicitChangeList(
           `[digest] digest_trace 留痕失败（raw=${raw.id}，尽力而为）：${errText(traceErr)}`,
         );
       }
+    };
+    if (turn.toolCalls.length > 0) {
+      traceRound();
       messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
       const ctx = { sourceIdentity: raw.sourceIdentity, eventTime: raw.eventTime };
       const images: string[] = []; // 本轮的图片 data URL（稍后作 user 消息注入模型）
@@ -478,12 +503,20 @@ async function elicitChangeList(
     }
     const parsed = parseChangeList(turn.content ?? "");
     if (parsed !== null) return { list: parsed, readMedia };
+    // 没拿到合法清单 = 这一轮空转了——留痕（含空回复 / 非法 JSON），流水里能看见它
+    traceRound();
+    // 空回复的追问要说清「你什么都没回」——否则模型容易照着上一句再空一次（2026-10-22 实测）
+    const empty = (turn.content ?? "").trim() === "";
     messages.push({
       role: "user",
-      content: `你的上一条输出不是合法的变更清单 JSON。请严格按系统提示词【输出格式】的字段表重新输出：只输出一个 JSON 对象 {"changes":[...]}，不要任何其他文字。`,
+      content: empty
+        ? `你的上一条回复是空的（没有任何内容）。请按系统提示词【输出格式】输出一个 JSON 对象 {"changes":[...]}；这条信息若确实无需改动，就输出 {"changes":[]}。`
+        : `你的上一条输出不是合法的变更清单 JSON。请严格按系统提示词【输出格式】的字段表重新输出：只输出一个 JSON 对象 {"changes":[...]}，不要任何其他文字。`,
     });
   }
-  throw new Error(`工具循环超过 ${DIGEST_MAX_ROUNDS} 轮仍未产出合法变更清单`);
+  throw new Error(
+    `工具循环超过 ${DIGEST_MAX_ROUNDS} 轮仍未产出合法变更清单（最后一轮：${lastRoundSummary}）`,
+  );
 }
 
 /** 工具调用结果：text 是回喂模型的 JSON 文本；image 非空 = 该工具取回一张图（data URL），
@@ -588,9 +621,15 @@ function stripImages(messages: ChatMsg[]): ChatMsg[] {
   });
 }
 
-/** 调模型；若消息含图且调用抛错，则**剥图重试一次**——不预判原因（模型不支持图 / 请求过大 / 网关抖动
- *  都可能），只如实留痕原始错误。返回 degraded=true 表示本轮降级过——**剥图落回与置位归调用方**
- *  （helper 不改调用方数据；重试仍失败则抛出，外层标 failed）。 */
+/** 调模型；带图时若调用抛错**或返回静默空回复**，则**剥图重试一次**——不预判原因
+ *  （模型不支持图 / 请求过大 / 网关抖动），只如实留痕原因。
+ *
+ *  ⚠️ 「空回复」也算带图失败（2026-10-22 实测）：部分网关收到图不报错，只是回一个既无正文、
+ *  也无工具调用的空 turn。旧实现只把「抛错」当失败，于是图一直挂在消息里、每轮都空回、
+ *  直到轮次预算耗尽报「超过 8 轮仍未产出合法变更清单」——图明明是取到了的，坏在看完图之后。
+ *
+ *  返回 degraded=true 表示本轮降级过——**剥图落回与置位归调用方**（helper 不改调用方数据；
+ *  重试仍失败则抛出，外层标 failed）。 */
 async function chatWithImageFallback(
   llm: LlmClient,
   db: Db,
@@ -608,11 +647,12 @@ async function chatWithImageFallback(
     recordUsage(db, "agent0", modelTag, turn.usage);
     return turn;
   };
+  /** 静默空回复：既没正文也没工具调用——模型这一轮什么都没产出，重试才有意义。 */
+  const isEmptyTurn = (t: { content: string | null; toolCalls: ToolCall[] }): boolean =>
+    t.toolCalls.length === 0 && (t.content ?? "").trim() === "";
   if (!hasImage(messages)) return { ...counted(await llm.chat(args)), degraded: false };
-  try {
-    return { ...counted(await llm.chat(args)), degraded: false };
-  } catch (err) {
-    const msg = errText(err);
+  /** 剥图重试一次并留痕（抛错与空回复共用同一条降级路径）。 */
+  const retryWithoutImages = async (reason: string) => {
     // 先跑剥图重试，**成功后才留痕**——若重试也抛（429/5xx 等），本批整体 failed，
     // 不应留下「已剥图重试、本批不再注入图片」的假痕（审查 2026-10-14）
     const retried = counted(await llm.chat({ ...args, messages: stripImages(messages) }));
@@ -621,13 +661,22 @@ async function chatWithImageFallback(
       raw.id,
       {
         action: "image_degraded",
-        detail: `带图调用失败（${msg}），已剥图重试、本批不再注入图片`,
-        payload: { error: msg },
+        detail: `带图调用失败（${reason}），已剥图重试、本批不再注入图片`,
+        payload: { error: reason },
       },
       { actor: "agent0", model: modelTag },
     );
     return { ...retried, degraded: true };
+  };
+  let first: { content: string | null; toolCalls: ToolCall[]; usage: LlmUsage | null };
+  try {
+    first = await llm.chat(args);
+  } catch (err) {
+    return retryWithoutImages(errText(err));
   }
+  if (isEmptyTurn(first))
+    return retryWithoutImages("模型对带图消息返回了空回复（无正文、无工具调用）");
+  return { ...counted(first), degraded: false };
 }
 
 /** 围栏拒收后给模型一次修正机会（01§4.10④）：只回喂被拒项与原因。 */

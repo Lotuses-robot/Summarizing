@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { ImagePlus, Locate, X } from "lucide-react";
+import { CloseButton } from "../CloseButton";
 import {
   CHAT_HISTORY_ITEM_MAX_CHARS,
   CHAT_HISTORY_MAX_ITEMS,
@@ -302,11 +303,9 @@ export function ChatPanel({
 
   return (
     <section className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-line px-3 py-2 lg:hidden">
+      <div className="flex items-center justify-between border-b border-line py-1.5 pl-3 pr-1.5 lg:hidden">
         <span className="text-sm font-semibold">对话</span>
-        <button className="btn" onClick={onClose}>
-          关闭
-        </button>
+        <CloseButton onClick={onClose} label="关闭对话" />
       </div>
       <div
         ref={logRef}

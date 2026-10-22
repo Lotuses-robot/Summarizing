@@ -50,7 +50,8 @@ export function ActivityBar({
   onOpenAbout: () => void;
 }) {
   return (
-    <nav className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-2">
+    // 窄屏隐藏（<640px）：改用底部悬浮导航 MobileNav；这 48px 宽度全部还给内容区
+    <nav className="hidden w-12 shrink-0 flex-col items-center gap-1 border-r border-line bg-surface py-2 sm:flex">
       <button
         title={view === "board" ? "回到看板顶部" : "回看板"}
         onClick={onHome}

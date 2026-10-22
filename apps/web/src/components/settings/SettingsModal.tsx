@@ -7,7 +7,6 @@ import {
   Loader2,
   Palette as PaletteIcon,
   Rss,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import type { AiSettings, AiSettingsView, AiTestResult } from "@summarizing/shared";
@@ -18,6 +17,7 @@ import { PALETTES } from "../../lib/appearance";
 import { pushEscLayer } from "../../lib/escLayer";
 import { Card, Row, Segmented, StatusSlot, useStatus } from "./primitives";
 import { SourcesSection } from "./SourcesSection";
+import { CloseButton } from "../CloseButton";
 import {
   loadAppearance,
   updateAppearance,
@@ -362,7 +362,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       >
         <nav className="flex shrink-0 items-center gap-2 border-b border-line bg-canvas p-2 sm:w-36 sm:flex-col sm:items-stretch sm:gap-1 sm:border-b-0 sm:border-r sm:p-3">
           <span className="hidden px-2 pb-3 text-base font-semibold sm:block">设置</span>
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto sm:flex-col sm:items-stretch sm:gap-1 sm:overflow-visible">
+          {/* no-scrollbar：窄屏这排是横向滑动的，滚动条会横穿顶部把它衬得很突兀（用户 2026-10-22） */}
+          <div className="no-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto sm:flex-col sm:items-stretch sm:gap-1 sm:overflow-visible">
             {SECTIONS.map((s) => (
               <button
                 key={s.id}
@@ -379,9 +380,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </button>
             ))}
           </div>
-          <button className="btn shrink-0 sm:mt-auto" onClick={closeWithFlush}>
-            <X size={14} /> 关闭
-          </button>
+          <CloseButton
+            onClick={closeWithFlush}
+            label="关闭设置"
+            className="sm:mt-auto sm:self-start"
+          />
         </nav>
 
         <div

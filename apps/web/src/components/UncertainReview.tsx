@@ -98,7 +98,7 @@ export function UncertainReview({
   };
 
   return (
-    <section className="fit-text px-4 pb-8 pt-4">
+    <section className="fit-text page-x pb-8 pt-4">
       <h2 className="text-sm font-semibold">
         存疑库审核
         {items.length > 0 && (

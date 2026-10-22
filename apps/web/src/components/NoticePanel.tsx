@@ -430,7 +430,7 @@ export function NoticePanel({
     !r.viewed && viewedLocally.get(r.item.id) !== r.updatedAt;
 
   return (
-    <div className="px-4 py-3">
+    <div className="page-x py-3">
       {actionError !== null && (
         <p className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
           {actionError}

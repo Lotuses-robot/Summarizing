@@ -140,56 +140,63 @@ function Row({
           title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
         />
       )}
-      {/* 标题优先占位（2026-10-22 移动端走查）：窄屏下标题独占一行（basis-full）——此前标题是
-          唯一可收缩项，标签一多就被挤成零宽（截图里标题整条消失）。sm 起 ≥14rem 且吃满余量；
-          标签放不下时**换行**而不是继续挤标题。 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+      {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
+          标签**横向滑动**查看（不再换行到第三行）；**没有 meta 的行不渲染第二行**——此前标题 basis-full
+          让每行都占两行，没标签时第二行只剩隐形按钮，看起来就是一条空白行。
+          DOM 顺序仍是「标题 → meta → 操作」；窄屏只靠 order 把操作提到第一行右端——sm 起 order 归位，
+          恢复原单行阅读线（标题 → 相对 ddl → tags → 右缘操作）。 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium sm:flex-nowrap">
         <span
           className={cn(
-            "min-w-0 basis-full truncate sm:basis-56 sm:grow",
+            "order-1 min-w-0 flex-1 truncate sm:order-none sm:flex-initial sm:basis-56 sm:grow",
             item.status === "done" && "text-ink-muted line-through",
           )}
         >
           {itemName(item.elements)}
         </span>
-        {dueText !== null && (
-          <span
-            className={cn(
-              "shrink-0 text-xs font-normal",
-              timeOverdue ? "text-danger" : near ? "text-accent" : "text-ink-muted",
+        {(dueText !== null || isNew || item.tags.length > 0) && (
+          // sm 起 `contents`：这层盒子消失，ddl/标签变回父级的直接子项——与改版前的单行阅读线逐像素一致
+          <span className="no-scrollbar order-3 flex w-full min-w-0 items-center gap-x-2 overflow-x-auto pr-1 sm:contents">
+            {dueText !== null && (
+              <span
+                className={cn(
+                  "shrink-0 text-xs font-normal",
+                  timeOverdue ? "text-danger" : near ? "text-accent" : "text-ink-muted",
+                )}
+                title={`到期 ${fmtShortTime(dueText)}`}
+              >
+                {dueRelative ?? fmtShortTime(dueText)}
+              </span>
             )}
-            title={`到期 ${fmtShortTime(dueText)}`}
-          >
-            {dueRelative ?? fmtShortTime(dueText)}
+            {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}
+            {item.tags.map((t) => (
+              <button
+                key={t}
+                className={cn(
+                  "chip shrink-0 cursor-pointer hover:text-accent",
+                  // 多模态标签（D-104）：读图得来的内容——高亮区分，一眼可辨（不静默）
+                  t === MULTIMODAL_IMAGE_TAG && "border-accent/60 bg-accent/10 text-accent",
+                )}
+                title={
+                  t === MULTIMODAL_IMAGE_TAG
+                    ? "此事项含读图得来的内容（AI 从图片识别）"
+                    : `筛选标签「${t}」`
+                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onTag(t);
+                }}
+              >
+                {t}
+              </button>
+            ))}
           </span>
         )}
-        {isNew && <span className="chip shrink-0 border-accent/50 text-accent">新</span>}
-        {item.tags.map((t) => (
-          <button
-            key={t}
-            className={cn(
-              "chip shrink-0 cursor-pointer hover:text-accent",
-              // 多模态标签（D-104）：读图得来的内容——高亮区分，一眼可辨（不静默）
-              t === MULTIMODAL_IMAGE_TAG && "border-accent/60 bg-accent/10 text-accent",
-            )}
-            title={
-              t === MULTIMODAL_IMAGE_TAG
-                ? "此事项含读图得来的内容（AI 从图片识别）"
-                : `筛选标签「${t}」`
-            }
-            onClick={(e) => {
-              e.stopPropagation();
-              onTag(t);
-            }}
-          >
-            {t}
-          </button>
-        ))}
-        {/* 快捷动作：展开时**常驻**（用户 2026-10-22：展开后正是要操作的时候，不必再靠悬停）；
-            非展开态维持悬停显形，触屏由 .row-act 的 pointer-coarse 兜底常显。 */}
+        {/* 快捷动作：窄屏与标题同一行、居右（展开时常驻；非展开靠悬停，触屏由 .row-act 的
+            pointer-coarse 兜底常显）。 */}
         <span
           className={cn(
-            "ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted",
+            "order-2 ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted sm:order-none",
             expanded && "row-actions-open",
           )}
         >
@@ -510,7 +517,7 @@ export function Board({
 
   if (allRows.length === 0) {
     return (
-      <main className="p-4">
+      <main className="page-x py-4">
         <div className="card text-sm text-ink-muted">
           还没有任何事项。有新信息随时丢进来，agent0 会自己理成事项。
         </div>
@@ -519,7 +526,7 @@ export function Board({
   }
 
   return (
-    <main className="space-y-4 p-4">
+    <main className="page-x space-y-4 py-4">
       {actionError !== null && (
         <p className="rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
           {actionError}
