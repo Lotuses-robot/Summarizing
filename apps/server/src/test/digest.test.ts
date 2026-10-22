@@ -1233,6 +1233,70 @@ describe("record_note 批次留痕（2026-10-19 拒收复盘）", () => {
   });
 });
 
+describe("简报里的时刻（2026-10-22：agent0 得知道「现在」与对话提交时刻）", () => {
+  /** 造一条批次并跑完消化，返回第一次调用的 user 简报。 */
+  async function briefOf(args: {
+    content: string;
+    sourceType: string;
+    receivedAt: string;
+    eventTime: string | null;
+  }): Promise<string> {
+    const db = makeDb(":memory:");
+    const stored = repo.insertRawInput(db, {
+      content: args.content,
+      sourceType: args.sourceType,
+      sourceIdentity: { sourceLabel: "夹具" },
+      receivedAt: args.receivedAt,
+      eventTime: args.eventTime,
+    });
+    const llm = new FakeLlm();
+    llm.push({ content: '{"changes":[]}' });
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, stored);
+    // 首条简报恒为纯文本（图片走后续 user 消息）——非字符串形态说明夹具坏了
+    const first = chatAt(llm, 0).messages[0]?.content;
+    return typeof first === "string" ? first : "";
+  }
+
+  it("对话批次：给「提交时间」并声明相对日期以它为锚，同时给「消化时间」", async () => {
+    const brief = await briefOf({
+      content: "明天下午三点开会",
+      sourceType: "chat",
+      receivedAt: "2026-10-22T09:30:00",
+      eventTime: null,
+    });
+    expect(brief).toContain("提交时间：2026-10-22T09:30:00");
+    expect(brief).toContain("以此为锚");
+    expect(brief).toContain("消化时间：");
+  });
+
+  it("非对话批次：仍不给「提交时间」，事件时间缺失时保留「禁止按接收时间兜底」", async () => {
+    const brief = await briefOf({
+      content: PASTE,
+      sourceType: "paste",
+      receivedAt: "2026-09-24T10:00:00",
+      eventTime: null,
+    });
+    expect(brief).toContain("接收时间：2026-09-24T10:00:00");
+    expect(brief).not.toContain("提交时间：");
+    expect(brief).toContain("禁止按接收时间兜底");
+  });
+
+  it("消化时间是当下墙钟（与 nowWallClock 同口径，秒级）", async () => {
+    const before = nowWallClock();
+    const brief = await briefOf({
+      content: PASTE,
+      sourceType: "paste",
+      receivedAt: "2026-09-24T10:00:00",
+      eventTime: null,
+    });
+    const after = nowWallClock();
+    const m = /消化时间：(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/.exec(brief);
+    expect(m).not.toBeNull();
+    const at = m?.[1] ?? "";
+    expect(at >= before && at <= after).toBe(true);
+  });
+});
+
 describe("读后留存联动（009 刀 4：读过未引用 3 天 / 被引用 90 天）", () => {
   const IMG_URL = "https://qq.example/a.jpg";
 

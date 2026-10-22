@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import type { FastifyInstance } from "fastify";
 import { DashboardSnapshotSchema } from "@summarizing/shared";
@@ -11,11 +12,18 @@ import { readUserDbStats } from "../storage/stats";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 import { setAccountStatus } from "../storage/registry";
+import { nowWallClock } from "../shared/time";
 
 // 公开状态面板（011）：公开可读、白名单、聚合正确、只读不改库、降级与排行。
 // 断言一律走真实入口（inject）——不偷看内部对象；唯一直接读库的场景是「没有写库」的证明。
 
 afterEach(cleanupAllTestAccounts);
+
+/** 仓库根（CHANGELOG 在根，cwd 会随 `npm -w` / 直接跑文件而变——按本文件位置推出，与 cwd 无关）。 */
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+
+/** 「今天」的北京墙钟戳：夹具用它造今日批次——写死日期会随日历日流逝过期（2026-10-22 事故）。 */
+const today = (): string => nowWallClock();
 
 /** 临时目录（脏形状用例造库文件用；afterEach 清）。 */
 const dirs: string[] = [];
@@ -31,13 +39,13 @@ function tmpDir(): string {
   return d;
 }
 
-/** 造一条原始批次（时间可指定）。 */
+/** 造一条原始批次（时间可指定；缺省 = 现在——「今天」的用例不会随日历日流逝过期）。 */
 function seedRaw(db: ReturnType<typeof makeDb>, content: string, receivedAt?: string) {
   return repo.insertRawInput(db, {
     content,
     sourceType: "paste",
     sourceIdentity: { sourceLabel: "s" },
-    receivedAt: receivedAt ?? "2026-10-21T10:00:00",
+    receivedAt: receivedAt ?? today(),
     eventTime: null,
   });
 }
@@ -573,7 +581,7 @@ describe("版本号", () => {
   it("开发态无构建注入 → dev；构建脚本能从 CHANGELOG 读出当前版本", async () => {
     const { appVersion } = await import("../shared/version");
     expect(appVersion()).toBe("dev");
-    const changelog = readFileSync(path.join(process.cwd(), "CHANGELOG.md"), "utf8");
+    const changelog = readFileSync(path.join(repoRoot, "CHANGELOG.md"), "utf8");
     const versionMatch = /^## \[v(\d+\.\d+\.\d+)\]/m.exec(changelog);
     expect(versionMatch?.[1]).toBeTruthy();
   });

@@ -120,15 +120,15 @@ export function AboutModal({
   const version = currentVersion();
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[10vh_1rem_1rem]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[5dvh_0.75rem_0.75rem] sm:p-[10vh_1rem_1rem]"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[80vh] w-[min(540px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
+        className="flex max-h-[85dvh] w-[min(540px,94vw)] flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部（大仓库 README 风）：点阵底纹+主题光晕 → 超大图标（应用图标，与 favicon/PWA 同一份）→ 超大标题 → 基座 chips */}
-        <header className="about-hero relative flex flex-col items-center px-6 pb-6 pt-9 text-center">
+        <header className="about-hero relative flex flex-col items-center px-6 pb-6 pt-6 text-center sm:pt-9">
           <img src="/favicon.svg" alt="" width={64} height={64} className="relative h-16 w-16" />
           <h2 className="relative mt-4 text-3xl font-bold tracking-tight">Summarizing</h2>
           <p className="relative mt-2 text-sm text-ink-muted">

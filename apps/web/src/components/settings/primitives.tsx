@@ -45,7 +45,8 @@ export function Card({
 }
 
 /** 设置行：左标签（可带灰描述）、右控件——控件右对齐成列；stacked = 控件换行全宽（复杂编辑器用）。
- *  children 无控件时可省（纯提示行，如「读取中…」）。 */
+ *  **窄屏（<640）一律上下堆叠**：左右布局在手机宽度下只剩几十像素给标签，文字被压成单字
+ *  （2026-10-22 移动端走查）。children 无控件时可省（纯提示行，如「读取中…」）。 */
 export function Row({
   label,
   description,
@@ -54,7 +55,7 @@ export function Row({
 }: {
   label: ReactNode;
   description?: ReactNode;
-  /** true = 控件另起一行占满宽度（如键值对行编辑器）；默认左右布局。 */
+  /** true = 控件另起一行占满宽度（如键值对行编辑器）；默认左右布局（宽屏）。 */
   stacked?: boolean;
   children?: ReactNode;
 }) {
@@ -62,16 +63,17 @@ export function Row({
     <div
       className={cn(
         "border-t border-line px-4 py-2.5 first:border-t-0",
-        !stacked && "flex min-h-11 items-center justify-between gap-6",
+        !stacked &&
+          "flex flex-col items-stretch gap-2 sm:min-h-11 sm:flex-row sm:items-center sm:justify-between sm:gap-6",
       )}
     >
-      <div className={cn("min-w-0", !stacked && "flex-1")}>
+      <div className={cn("min-w-0", !stacked && "sm:flex-1")}>
         <p className="text-sm">{label}</p>
         {description !== undefined && (
           <div className="mt-0.5 text-xs text-ink-muted">{description}</div>
         )}
       </div>
-      <div className={cn(stacked ? "mt-2" : "max-w-full shrink-0")}>{children}</div>
+      <div className={cn(stacked ? "mt-2" : "max-w-full sm:shrink-0")}>{children}</div>
     </div>
   );
 }

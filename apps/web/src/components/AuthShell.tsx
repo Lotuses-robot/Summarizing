@@ -44,7 +44,7 @@ export function AuthShell({
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 px-4">
       {notice !== null && (
         <p className="w-full max-w-sm rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-sm text-warn">
           {notice}

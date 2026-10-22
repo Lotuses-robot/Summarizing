@@ -137,11 +137,11 @@ export function UserModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[10vh_1rem_1rem]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[5dvh_0.75rem_0.75rem] sm:p-[10vh_1rem_1rem]"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[84vh] w-[min(520px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
+        className="flex max-h-[84dvh] w-[min(520px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center gap-2 border-b border-line px-5 py-3">

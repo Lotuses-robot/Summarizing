@@ -140,10 +140,13 @@ function Row({
           title={`推断：${dueText ?? ""} · 依据：${dueNote}`}
         />
       )}
-      <div className="flex items-center gap-2 text-sm font-medium">
+      {/* 标题优先占位（2026-10-22 移动端走查）：窄屏下标题独占一行（basis-full）——此前标题是
+          唯一可收缩项，标签一多就被挤成零宽（截图里标题整条消失）。sm 起 ≥14rem 且吃满余量；
+          标签放不下时**换行**而不是继续挤标题。 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
         <span
           className={cn(
-            "min-w-0 truncate",
+            "min-w-0 basis-full truncate sm:basis-56 sm:grow",
             item.status === "done" && "text-ink-muted line-through",
           )}
         >
@@ -182,7 +185,14 @@ function Row({
             {t}
           </button>
         ))}
-        <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
+        {/* 快捷动作：展开时**常驻**（用户 2026-10-22：展开后正是要操作的时候，不必再靠悬停）；
+            非展开态维持悬停显形，触屏由 .row-act 的 pointer-coarse 兜底常显。 */}
+        <span
+          className={cn(
+            "ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted",
+            expanded && "row-actions-open",
+          )}
+        >
           {item.status === "todo" && (
             <button
               className="row-act"
@@ -224,7 +234,7 @@ function Row({
         // 框内不放标题/收起按钮（用户 2026-09-27：框外行标题常驻、即收起入口，框内重复属冗余）；
         // 展开体内点击在此掐掉冒泡，否则任何点击都会冒到行上触发收起。
         <div
-          className="mt-2 max-h-[70vh] overflow-y-auto rounded-md border border-line bg-surface"
+          className="mt-2 max-h-[70dvh] overflow-y-auto rounded-md border border-line bg-surface"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="bg-canvas/40">{children}</div>

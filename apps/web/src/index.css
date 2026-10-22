@@ -132,9 +132,14 @@
   .chip-link {
     @apply border-accent/40 text-accent hover:bg-accent-soft;
   }
-  /* 行悬停快捷动作（勾/恢复/删除）：平时隐身，行悬停或键盘聚焦显形 */
+  /* 行悬停快捷动作（勾/恢复/删除）：平时隐身，行悬停/键盘聚焦/**行展开时**显形。
+   *  触屏没有悬停——展开行即入口（2026-10-22 移动端走查）；命中区在手指设备上放大到 32px。 */
   .row-act {
-    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-ink-muted opacity-0 transition hover:bg-accent-soft hover:text-accent group-hover:opacity-100 focus-visible:opacity-100;
+    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-ink-muted opacity-0 transition pointer-coarse:h-8 pointer-coarse:w-8 hover:bg-accent-soft hover:text-accent group-hover:opacity-100 focus-visible:opacity-100;
+  }
+  /* 展开态的快捷动作常驻（用户 2026-10-22）：展开正是要操作的时候，不必再靠悬停找按钮 */
+  .row-actions-open .row-act {
+    opacity: 1;
   }
   .input {
     @apply w-full rounded-md border border-line bg-surface px-2.5 py-1.5 text-sm text-ink focus:border-accent focus:outline-none;

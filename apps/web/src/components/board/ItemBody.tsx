@@ -34,7 +34,7 @@ import { QuoteOverlay } from "./QuoteOverlay";
 import { MediaText } from "./MediaText";
 
 /** 事项展开体（D-80 手风琴内容）：基本信息开 / 信息元素平铺引文收 / 版本史收只显计数。
- *  滚动四铁规（内滚隔离/sticky/70vh）由父级的展开容器承担，这里只管内容。 */
+ *  滚动四铁规（内滚隔离/sticky/70dvh）由父级的展开容器承担，这里只管内容。 */
 export function ItemBody({
   id,
   variant = "default",

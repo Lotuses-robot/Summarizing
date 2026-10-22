@@ -30,7 +30,7 @@ export function QuoteOverlay({
     // 遮罩点击 = 关闭；内层 stopPropagation 让阅读区的点击不冒泡
     <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose}>
       <div
-        className="mx-auto mt-[10vh] w-[min(640px,92vw)] rounded-lg border border-line bg-surface p-4 shadow-xl"
+        className="mx-auto mt-[5dvh] w-[min(640px,92vw)] rounded-lg border border-line bg-surface p-4 shadow-xl sm:mt-[10vh]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-muted">
@@ -43,7 +43,7 @@ export function QuoteOverlay({
           </button>
         </div>
         {/* whitespace-pre-wrap 保留原文换行；fit-text 让无空格长 URL 也在框内断行（不横向溢出） */}
-        <div className="fit-text max-h-[70vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+        <div className="fit-text max-h-[70dvh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
           {idx >= 0 ? (
             <>
               <MediaText text={rawInput.content.slice(0, idx)} mediaMap={mediaMap} />

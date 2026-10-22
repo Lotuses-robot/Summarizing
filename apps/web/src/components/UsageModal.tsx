@@ -77,7 +77,7 @@ export function UsageModal({ open, onClose }: { open: boolean; onClose: () => vo
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[12vh_1rem_1rem]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[6dvh_0.75rem_0.75rem] sm:p-[12vh_1rem_1rem]"
       onClick={onClose}
     >
       <div

@@ -382,7 +382,8 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    // h-dvh：手机浏览器地址栏伸缩时 100vh 会把底部输入区顶出屏幕（2026-10-22 移动端走查）
+    <div className="flex h-dvh overflow-hidden">
       <ActivityBar
         view={view}
         uncertainCount={uncertain.length}

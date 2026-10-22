@@ -524,7 +524,7 @@ export function NoticePanel({
                   </div>
                 </div>
                 {/* 内容整体右移 10px：标题不缩进、标题下的信息轻内收（用户 2026-10-19） */}
-                <div className="max-h-[60vh] overflow-y-auto pl-2.5">
+                <div className="max-h-[60dvh] overflow-y-auto pl-2.5">
                   <ItemBody id={selected.item.id} variant="reader" />
                 </div>
               </div>
@@ -572,8 +572,11 @@ export function NoticePanel({
                     aria-label={isUnread(r) ? "未读" : "已读"}
                   />
                   <span className="min-w-0 flex-1 truncate">{itemName(r.item.elements)}</span>
+                  {/* 来源标签窄屏让位标题（2026-10-22 移动端走查）：主卡里本就有来源，列表只做索引 */}
                   {r.sourceLabel !== null && (
-                    <span className="shrink-0 text-xs text-ink-muted">{r.sourceLabel}</span>
+                    <span className="hidden shrink-0 text-xs text-ink-muted sm:inline">
+                      {r.sourceLabel}
+                    </span>
                   )}
                   <span
                     className="shrink-0 text-xs text-ink-muted"

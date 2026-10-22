@@ -116,8 +116,12 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
               )}
               onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
             >
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <span className="min-w-0 truncate text-ink-muted">{itemName(item.elements)}</span>
+              {/* 与看板行同款（2026-10-22 移动端走查）：窄屏标题独占一行，kind/标签/删除时间换行——
+                  否则标签一多标题被挤成零宽。 */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium">
+                <span className="min-w-0 basis-full truncate text-ink-muted sm:basis-56 sm:grow">
+                  {itemName(item.elements)}
+                </span>
                 <span className="chip shrink-0 text-ink-muted">
                   {item.kind === "notice" ? "通知" : "事项"}
                 </span>
@@ -126,7 +130,13 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
                     {t}
                   </span>
                 ))}
-                <span className="ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted">
+                <span
+                  className={cn(
+                    "ml-auto flex shrink-0 items-center gap-1 text-xs font-normal text-ink-muted",
+                    // 展开时恢复按钮常驻（与看板行同一规则，用户 2026-10-22）
+                    expandedId === item.id && "row-actions-open",
+                  )}
+                >
                   <span title={`删于 ${fmtFullTime(r.trashedAt)}`}>
                     删于 {fmtShortTime(r.trashedAt)}
                   </span>
@@ -161,7 +171,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
               </div>
               {expandedId === item.id && (
                 <div
-                  className="mt-2 max-h-[70vh] overflow-y-auto rounded-md border border-line bg-surface"
+                  className="mt-2 max-h-[70dvh] overflow-y-auto rounded-md border border-line bg-surface"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="bg-canvas/40">

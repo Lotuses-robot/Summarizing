@@ -388,7 +388,9 @@ async function elicitChangeList(
   modelTag: string,
   raw: RawInput,
 ): Promise<{ list: ChangeList; readMedia: Map<string, string> }> {
-  const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw) }];
+  // 消化开始时刻（本轮对话全程不变）：给模型一个明确的「现在」——补年份、判是否已过期都要它
+  const digestAt = nowWallClock();
+  const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw, digestAt) }];
   const readMedia = new Map<string, string>();
   let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
   let imageBudget = MAX_IMAGE_FETCHES; // 本批取图预算（防模型反复取图撑爆上下文/带宽）
@@ -649,16 +651,28 @@ async function requestRepair(
   return parseChangeList(res.content ?? "");
 }
 
-/** 拼装给模型的原始信息简报——事件时间显式给出，防相对日期被锚到接收时间。 */
-function buildUserBrief(raw: RawInput): string {
+/** 拼装给模型的原始信息简报——时间事实逐项给全（事件时间/提交时间/消化时间），
+ *  相对日期与补年份才有据可锚（见 prompt.ts【ddl 推断】）。
+ *  - 对话来源（chat）：前台提交即用户亲口说的时刻，是**有据锚点**；
+ *  - 其余来源（粘贴/信源）：接收时间仍禁止当锚（积压粘贴是常态，01§5.3）。 */
+function buildUserBrief(raw: RawInput, now: string): string {
+  const isChat = raw.sourceType === "chat";
   return [
     "[原始信息]",
     `批次 id：${raw.id}`,
     `内容（逐字）：${raw.content}`,
     `来源类型：${raw.sourceType}`,
     `来源身份：${JSON.stringify(raw.sourceIdentity)}`,
-    `事件时间：${raw.eventTime ?? "未知（相对日期无锚，禁止按接收时间兜底）"}`,
-    `接收时间：${raw.receivedAt}`,
+    `事件时间：${
+      raw.eventTime ??
+      (isChat
+        ? "未知（对话即时输入；相对日期以「提交时间」为锚）"
+        : "未知（相对日期无锚，禁止按接收时间兜底）")
+    }`,
+    isChat
+      ? `提交时间：${raw.receivedAt}（前台提交这条的原话，即用户说完的时刻——「明天/下周」以此为锚）`
+      : `接收时间：${raw.receivedAt}`,
+    `消化时间：${now}（现在是这个时刻——判「今年」与是否已过期用它）`,
     "",
     "请处理这条信息（按系统规则产出变更清单）。",
   ].join("\n");

@@ -351,31 +351,35 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[7vh_1rem_1rem]"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-[4dvh_0.75rem_0.75rem] sm:p-[7vh_1rem_1rem]"
       onClick={closeWithFlush}
     >
       <div
-        className="flex max-h-[86vh] w-[min(860px,94vw)] overflow-hidden rounded-xl border border-line bg-surface shadow-xl"
+        // 窄屏（<640）：左栏改为**顶部横排**——竖栏占 144px 会把内容区挤到 200px 上下，
+        // 标签/输入框全被压扁（2026-10-22 移动端走查）。宽屏仍是左导航 + 右内容。
+        className="flex max-h-[86dvh] w-[min(860px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-xl sm:flex-row"
         onClick={(e) => e.stopPropagation()}
       >
-        <nav className="flex w-36 shrink-0 flex-col border-r border-line bg-canvas p-3">
-          <span className="px-2 pb-3 text-base font-semibold">设置</span>
-          {SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-left text-sm",
-                activeSection === s.id
-                  ? "bg-accent-soft font-medium text-accent"
-                  : "text-ink-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/10",
-              )}
-              onClick={() => goToSection(s.id)}
-            >
-              <s.icon size={15} />
-              {s.label}
-            </button>
-          ))}
-          <button className="btn mt-auto" onClick={closeWithFlush}>
+        <nav className="flex shrink-0 items-center gap-2 border-b border-line bg-canvas p-2 sm:w-36 sm:flex-col sm:items-stretch sm:gap-1 sm:border-b-0 sm:border-r sm:p-3">
+          <span className="hidden px-2 pb-3 text-base font-semibold sm:block">设置</span>
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto sm:flex-col sm:items-stretch sm:gap-1 sm:overflow-visible">
+            {SECTIONS.map((s) => (
+              <button
+                key={s.id}
+                className={cn(
+                  "flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md px-2 py-2 text-left text-sm",
+                  activeSection === s.id
+                    ? "bg-accent-soft font-medium text-accent"
+                    : "text-ink-muted hover:bg-black/5 hover:text-ink dark:hover:bg-white/10",
+                )}
+                onClick={() => goToSection(s.id)}
+              >
+                <s.icon size={15} />
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <button className="btn shrink-0 sm:mt-auto" onClick={closeWithFlush}>
             <X size={14} /> 关闭
           </button>
         </nav>
@@ -383,7 +387,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         <div
           ref={contentRef}
           // min-h-0 保 flex 子项可滚（弹层 max-h 自限高，内容超出即在本区滚动）
-          className="min-h-0 min-w-0 flex-1 space-y-7 overflow-y-auto px-6 py-5"
+          className="min-h-0 min-w-0 flex-1 space-y-7 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5"
         >
           <Card
             id={SECTION_DOM.appearance}
