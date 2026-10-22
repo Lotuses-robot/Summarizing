@@ -3,9 +3,10 @@ import { itemName, type NoticeRow } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { pushEscLayer } from "../lib/escLayer";
-import { useSwipeActions } from "../lib/swipe";
+import { UNDO_SECONDS, useSwipeActions } from "../lib/swipe";
 import { loadSwipeHintSeen, markSwipeHintSeen } from "../lib/appearance";
 import { GestureHint } from "./GestureHint";
+import { UndoButton } from "./UndoButton";
 import { ItemBody } from "./board/ItemBody";
 import { fmtFullTime, fmtShortTime } from "../lib/time";
 
@@ -16,7 +17,6 @@ import { fmtFullTime, fmtShortTime } from "../lib/time";
 // 拖动走直接 DOM 变换（不经 state）——ItemBody 内容重不参与逐帧重渲染，手感跟手。
 
 /** 清除的撤销窗口（秒）。 */
-const UNDO_SECONDS = 2;
 
 /** 环形倒计时：挂载瞬间起整段线性排空（数字每秒递减）；pathLength 归一使弧长与半径解耦。 */
 function CountdownRing({ remaining, total }: { remaining: number; total: number }) {
@@ -392,9 +392,7 @@ export function NoticePanel({
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface/40 backdrop-blur-md">
                 <p className="text-sm font-medium text-ink">已清除</p>
                 <CountdownRing remaining={pending.remaining} total={UNDO_SECONDS} />
-                <button className="btn" onClick={cancelDelete}>
-                  撤 回
-                </button>
+                <UndoButton onClick={cancelDelete} label="撤回清除" />
               </div>
             )}
           </div>

@@ -189,12 +189,13 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     expect(spy).toHaveBeenCalledWith("n1");
   });
 
-  it("撤回：倒计时内点「撤回」→ 什么都不发生", async () => {
+  it("撤回：倒计时内点撤销钮 → 什么都不发生", async () => {
     vi.useFakeTimers();
     const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
     render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
     swipeCard(200);
-    fireEvent.click(screen.getByText("撤 回"));
+    // 撤销是圆形图标钮（2026-10-22：文字「撤回」改成图标）
+    fireEvent.click(screen.getByTitle("撤回清除"));
     await vi.advanceTimersByTimeAsync(2100);
     expect(spy).not.toHaveBeenCalled();
     expect(screen.queryByText("已清除")).not.toBeInTheDocument();

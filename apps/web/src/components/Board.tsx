@@ -10,12 +10,16 @@ import {
   type ItemRow,
 } from "@summarizing/shared";
 import { cn } from "../lib/cn";
-import { useSwipeActions } from "../lib/swipe";
-import { loadSwipeHintSeen, markSwipeHintSeen } from "../lib/appearance";
-import { GestureHint } from "./GestureHint";
-import { UndoBar } from "./UndoBar";
-import { loadSectionFold, saveSectionFold } from "../lib/appearance";
+import { UNDO_SECONDS, useSwipeActions } from "../lib/swipe";
+import {
+  loadSectionFold,
+  loadSwipeHintSeen,
+  markSwipeHintSeen,
+  saveSectionFold,
+} from "../lib/appearance";
 import { pushEscLayer } from "../lib/escLayer";
+import { GestureHint } from "./GestureHint";
+import { UndoButton } from "./UndoButton";
 import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urgency";
 import { fmtShortTime } from "../lib/time";
 import { matchesFilter, type BoardFilter } from "./FilterBar";
@@ -67,6 +71,8 @@ function Row({
   onToggle,
   onTag,
   onQuickAction,
+  pendingTrash,
+  onCancelTrash,
   children,
 }: {
   row: ItemRow;
@@ -77,6 +83,10 @@ function Row({
   onToggle: () => void;
   onTag: (tag: string) => void;
   onQuickAction: (id: string, action: RowAction) => void;
+  /** 本行处于删除的撤销窗口里（行右移+模糊消失，中央一颗撤销钮）。 */
+  pendingTrash: boolean;
+  /** 撤销本行的删除。 */
+  onCancelTrash: () => void;
   children: ReactNode;
 }) {
   const { item } = row;
@@ -112,6 +122,13 @@ function Row({
   /** 行背景色：待办临近渐强 / 已完成淡出——全部从主题强调色出（跟色板走）；
    *  封顶同档（TINT_CAP_PERCENT）——「刚完成最亮」由此成立（走查修订 2026-09-30）。 */
   const rowBg = (() => {
+    // 逾期淡红底：与 surface 混成**不透明**色——`bg-danger-soft/40` 带 alpha，行本体滑开时
+    // 会透出底层手势提示（用户 2026-10-22：「过期的红色背景好像还是透明的」）。
+    // ⚠️ 只能用 `--danger`（真变量）套两层 mix：`--danger-soft` 不存在（theme 里只有
+    // `--color-danger-soft` 这个给 utility 用的别名），直接 var 它会 invalid → 算成透明。
+    if (row.overdue) {
+      return "color-mix(in oklab, color-mix(in oklab, var(--danger) 11%, var(--surface)) 40%, var(--surface))";
+    }
     if (item.status === "done" && doneFade > 0) {
       return `color-mix(in oklab, var(--accent) ${Math.round(doneFade * TINT_CAP_PERCENT)}%, var(--surface))`;
     }
@@ -174,18 +191,19 @@ function Row({
           // bg-surface 必须实心：行本体不拖动时是透明的，底层手势提示会「透」到事项文字上
           // （用户 2026-10-22：「又跑上来祸害事项了，会遮挡到」）。拖动后由它遮住提示，只露出滑开的缝。
           "relative z-10 cursor-pointer rounded-md border border-transparent bg-surface py-2 pl-5 pr-3 transition-transform duration-150 hover:bg-canvas",
-          row.overdue && "bg-danger-soft/40", // 逾期轻提示：淡红底（用户 2026-09-27：去框留底）
+          // 删除的撤销窗口：边右移边糊掉（时长由下面 style 的 transitionDuration 给，
+          // 不从 className 拼——Tailwind 扫不到模板字符串里的类名）
+          pendingTrash &&
+            "pointer-events-none translate-x-[110%] opacity-0 blur-[3px] transition-all",
           near ? "border-accent/60" : "", // 仅临近 24h 描边（主题强调色系，跟色板走）
           flash && "row-flash",
           active && "bg-canvas ring-1 ring-accent",
         )}
-        style={
-          rowBg
-            ? {
-                backgroundColor: rowBg,
-              }
-            : undefined
-        }
+        style={{
+          ...(rowBg ? { backgroundColor: rowBg } : {}),
+          // 撤销窗口的时长 = 撤销窗口本身：行在这 2 秒里慢慢滑出去糊掉，到点才写库
+          ...(pendingTrash ? { transitionDuration: `${UNDO_SECONDS}s` } : {}),
+        }}
         onClick={handleRowClick}
       >
         {/* 两行封顶（2026-10-22 二次走查，用户定）：窄屏第一行 = 标题 + 操作按钮，第二行 = ddl / 「新」/ 标签，
@@ -317,6 +335,13 @@ function Row({
           </div>
         )}
       </div>
+      {pendingTrash && (
+        // 撤销钮是**行体的兄弟**：行体在滑出去变糊，这颗钮必须原地不动、也不跟着糊——
+        // 这 2 秒里它是唯一该点的东西。
+        <div className="absolute inset-0 z-20 flex items-center justify-center">
+          <UndoButton onClick={onCancelTrash} label="撤销删除" />
+        </div>
+      )}
     </li>
   );
 }
@@ -338,6 +363,8 @@ function Section({
   onToggleExpand,
   onTag,
   onQuickAction,
+  pendingTrashId,
+  onCancelTrash,
 }: {
   title: string;
   rows: ItemRow[];
@@ -353,6 +380,10 @@ function Section({
   onToggleExpand: (id: string) => void;
   onTag: (tag: string) => void;
   onQuickAction: (id: string, action: RowAction) => void;
+  /** 正在撤销窗口里的行 id（该行滑出模糊、中央显示撤销钮）。 */
+  pendingTrashId: string | null;
+  /** 撤销该行的删除。 */
+  onCancelTrash: () => void;
 }) {
   return (
     <section className="rounded-2xl border border-line bg-surface p-3">
@@ -390,6 +421,8 @@ function Section({
                   onToggle={() => onToggleExpand(row.item.id)}
                   onTag={onTag}
                   onQuickAction={onQuickAction}
+                  pendingTrash={pendingTrashId === row.item.id}
+                  onCancelTrash={onCancelTrash}
                 >
                   {expandedId === row.item.id && <ItemBody id={row.item.id} />}
                 </Row>
@@ -423,9 +456,14 @@ export function Board({
   const [viewedLocally, setViewedLocally] = useState<ReadonlySet<string>>(new Set());
   /** 行内快捷动作失败必须可见（红线「不许静默」）。 */
   const [actionError, setActionError] = useState<string | null>(null);
-  /** 删除后的撤销窗口（5 秒）：仅记 id，文案固定「已移入回收站」——不把标题塞进浮条。 */
-  const [undoId, setUndoId] = useState<string | null>(null);
-  const undoTimer = useRef<number | null>(null);
+  /** 待提交的删除（撤销窗口内）：行会边右移边糊掉消失，**行中央始终有一颗撤销钮**。
+   *  到点才写库——与通知主卡同一套「先给反悔、后落笔」（用户 2026-10-22：不做底部悬浮条）。 */
+  const [pendingTrash, setPendingTrash] = useState<string | null>(null);
+  const trashTimer = useRef<number | null>(null);
+  const pendingTrashRef = useRef<string | null>(null);
+  useEffect(() => {
+    pendingTrashRef.current = pendingTrash;
+  }, [pendingTrash]);
   /** 首次手势提示：滑过一次 / 点过「知道了」即永久收起（本机记忆）。 */
   const [hintVisible, setHintVisible] = useState(() => !loadSwipeHintSeen("board"));
   const [folded, setFolded] = useState<Record<SectionKey, boolean>>(() => ({
@@ -537,64 +575,87 @@ export function Board({
 
   /** 行悬停快捷动作：发状态请求 + 刷新看板；展开体随行换段，收起避免旧详情误导。
    *  失败无按钮级提示（看板无 toast 机制）——刷新让看板如实呈现现状。 */
-  const quickAction = (id: string, action: RowAction) => {
-    const p =
-      action === "complete"
-        ? api.complete(id)
-        : action === "reopen"
-          ? api.reopen(id)
-          : api.trash(id);
-    // 用过一次（图标或手势）就不再需要手势提示
-    markSwipeHintSeen("board");
-    setHintVisible(false);
-    void p
+  /** 清掉撤销计时器。 */
+  const clearTrashTimer = () => {
+    if (trashTimer.current !== null) {
+      window.clearTimeout(trashTimer.current);
+      trashTimer.current = null;
+    }
+  };
+
+  /** 真正删掉（写库 → 刷新）。失败如实说，行留在原地。 */
+  const commitTrash = (id: string) => {
+    clearTrashTimer();
+    setPendingTrash(null);
+    void api
+      .trash(id)
       .then(() => {
         setActionError(null);
         setExpandedId(null);
-        if (action === "trash") {
-          setUndoId(id);
-          if (undoTimer.current !== null) window.clearTimeout(undoTimer.current);
-          undoTimer.current = window.setTimeout(() => setUndoId(null), 5000);
-        }
         onRefresh();
       })
       .catch(() => {
-        // 失败必须可见（红线「不许静默」）：否则用户分不清「没点中」与「删失败了」
-        setActionError(
-          action === "trash"
-            ? "删除失败——这条还在，请稍后重试"
-            : "操作失败——状态没有改变，请稍后重试",
-        );
+        setActionError("删除失败——这条还在，请稍后重试");
         onRefresh();
       });
   };
 
-  /** 撤销刚才的删除：走回收站的同一入口（restore），失败如实说。 */
-  const undoTrash = () => {
-    const id = undoId;
-    setUndoId(null);
-    if (undoTimer.current !== null) {
-      window.clearTimeout(undoTimer.current);
-      undoTimer.current = null;
+  /** 开始撤销窗口：先把上一个待删的提交掉（同时只能有一条在飞）。 */
+  const startTrash = (id: string) => {
+    const prev = pendingTrashRef.current;
+    if (prev !== null && prev !== id) commitTrash(prev);
+    clearTrashTimer();
+    setPendingTrash(id);
+    trashTimer.current = window.setTimeout(() => commitTrash(id), UNDO_SECONDS * 1000);
+  };
+
+  /** 撤销：清计时器、行复原，一个字节都不写库。 */
+  const cancelTrash = useCallback(() => {
+    if (trashTimer.current !== null) {
+      window.clearTimeout(trashTimer.current);
+      trashTimer.current = null;
     }
-    if (id === null) return;
-    void api
-      .restore(id)
+    setPendingTrash(null);
+  }, []);
+
+  /** Esc 只撤退撤销窗口，不惊动页面层。 */
+  const trashPending = pendingTrash !== null;
+  useEffect(() => {
+    if (!trashPending) return;
+    return pushEscLayer(cancelTrash);
+  }, [trashPending, cancelTrash]);
+
+  /** 卸载（离开看板/切视图）时：未到点的删除**立即提交**——意图已表达，不静默丢弃。 */
+  useEffect(() => {
+    return () => {
+      clearTrashTimer();
+      const id = pendingTrashRef.current;
+      if (id !== null) void api.trash(id).catch(() => undefined);
+    };
+  }, []);
+
+  /** 行内快捷动作：完成/撤销完成立刻写库；**删除先进撤销窗口**（不立刻落笔）。 */
+  const quickAction = (id: string, action: RowAction) => {
+    // 用过一次（图标或手势）就不再需要手势提示
+    markSwipeHintSeen("board");
+    setHintVisible(false);
+    // 删除不立刻落笔：进撤销窗口，行滑出糊掉、中央那颗撤回钮还能救回来
+    if (action === "trash") {
+      startTrash(id);
+      return;
+    }
+    void (action === "complete" ? api.complete(id) : api.reopen(id))
       .then(() => {
         setActionError(null);
+        setExpandedId(null);
         onRefresh();
       })
       .catch(() => {
-        setActionError("撤销失败——这条还在回收站，可从回收站恢复");
+        // 失败必须可见（红线「不许静默」）：否则用户分不清「没点中」与「删失败了」
+        setActionError("操作失败——状态没有改变，请稍后重试");
         onRefresh();
       });
   };
-  /** 卸载时清掉撤销计时器（浮条随组件消失，不该再回调）。 */
-  useEffect(() => {
-    return () => {
-      if (undoTimer.current !== null) window.clearTimeout(undoTimer.current);
-    };
-  }, []);
 
   /** 深链（05§三）：展开所在段 → 展开行 → 布局稳定后滚到行并短促高亮（清筛选由 App 统一做）。
    *  token 防同一条深链被看板轮询重放。 */
@@ -668,9 +729,10 @@ export function Board({
           onToggleExpand={toggleExpand}
           onTag={onTagClick}
           onQuickAction={quickAction}
+          pendingTrashId={pendingTrash}
+          onCancelTrash={cancelTrash}
         />
       ))}
-      {undoId !== null && <UndoBar text="已移入回收站" actionLabel="撤销" onAction={undoTrash} />}
     </main>
   );
 }

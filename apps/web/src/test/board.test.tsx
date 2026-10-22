@@ -6,6 +6,7 @@ import { Board } from "../components/Board";
 import { doneFadeStrength } from "../lib/urgency";
 import { makeRow, view } from "./helpers/board-fixtures";
 import { fetchUrl, jsonResponse } from "./helpers/http";
+import { UNDO_SECONDS } from "../lib/swipe";
 import "@testing-library/jest-dom/vitest";
 
 /** 在行上模拟一次触屏横滑（正 = 向右 → 移入回收站；负 = 向左 → 完成/撤销完成）。
@@ -104,16 +105,14 @@ describe("Board（三段看板，007）", () => {
     expect(screen.getByText("英语课").closest(".row-meta")).not.toBeNull();
   });
 
-  it("右滑一行 → 移入回收站并浮出撤销条；点撤销走 restore", async () => {
+  it("右滑一行 → 进入撤销窗口（不立刻写库），到点才 trash", async () => {
     const calls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = fetchUrl(input);
         calls.push(url);
-        if (url.includes("/trash") || url.includes("/restore")) {
-          return Promise.resolve(jsonResponse({}));
-        }
+        if (url.includes("/trash")) return Promise.resolve(jsonResponse({}));
         return Promise.reject(new Error("测试环境无后端"));
       }),
     );
@@ -130,12 +129,45 @@ describe("Board（三段看板，007）", () => {
     );
     swipeRow("s1", 200);
     await act(async () => {});
+    // 撤销窗口内：一个字节都不写库，行中央有撤销钮
+    expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(false);
+    expect(screen.getByTitle("撤销删除")).toBeInTheDocument();
+    // 到点才真正删
+    await act(async () => {
+      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 100);
+    });
     expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(true);
-    // 删除一步到位（不弹确认），但给 5 秒撤销窗口
-    expect(screen.getByText("已移入回收站")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("撤销"));
+  });
+
+  it("撤销窗口里点撤销 → 不写库、行留在原地", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = fetchUrl(input);
+        calls.push(url);
+        return Promise.reject(new Error("测试环境无后端"));
+      }),
+    );
+    render(
+      <Board
+        board={view({
+          scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    swipeRow("s1", 200);
     await act(async () => {});
-    expect(calls.some((u) => u.endsWith("/api/items/s1/restore"))).toBe(true);
+    fireEvent.click(screen.getByTitle("撤销删除"));
+    await act(async () => {
+      vi.advanceTimersByTime(UNDO_SECONDS * 1000 + 100);
+    });
+    expect(calls.some((u) => u.includes("/trash"))).toBe(false);
+    expect(screen.getByText("英语作业")).toBeInTheDocument();
   });
 
   it("左滑一行 → 完成（不删）", async () => {

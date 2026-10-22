@@ -10,6 +10,9 @@ import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type RefObje
 
 /** 判定横向的起手位移（px）：小于它不锁轴（避免抖动误判）。 */
 const AXIS_LOCK_PX = 8;
+/** 撤销窗口（秒）：滑动删除后先不写库，留这么久可反悔（看板行与通知主卡共用）。 */
+export const UNDO_SECONDS = 2;
+
 /** 位移上限 = 容器宽度的这个比例（拖到底也不会把行甩出去）。 */
 const DRAG_LIMIT_RATIO = 0.6;
 
