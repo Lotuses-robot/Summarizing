@@ -13,8 +13,9 @@ interface RouterSettingSpec {
   label: string;
   /** 是不是凭据（`router:list` 只显示尾 4 位——运维能看出「配没配、是哪把」，但看不全）。 */
   secret: boolean;
-  /** 数值型设置（写入时校验：必须是正数——错填当场拒绝，不在读取时静默修正）。 */
-  positiveNumber?: true;
+  /** 数值型设置（写入时校验：必须是非负数——错填当场拒绝，不在读取时静默修正）。
+   *  `allowZero` = 允许 0（对「间隔」类设置，0 表示不限速）。 */
+  nonNegativeNumber?: true;
 }
 
 /** Router 的设置项清单（`router:set` 认的键、`router:list` 的展示顺序）。
@@ -31,7 +32,7 @@ const ROUTER_SETTINGS: RouterSettingSpec[] = [
     key: "wecom.replyThrottleMinutes",
     label: "回执最小间隔（分钟）",
     secret: false,
-    positiveNumber: true,
+    nonNegativeNumber: true,
   },
 ];
 
@@ -54,10 +55,10 @@ export function writeRouterSetting(db: RegistryDb, key: string, value: string): 
       `未知的 Router 设置项：${key}（可用：${ROUTER_SETTINGS.map((s) => s.key).join(" / ")}）`,
     );
   }
-  if (spec.positiveNumber === true) {
+  if (spec.nonNegativeNumber === true) {
     const n = Number(value.trim());
-    if (value.trim() === "" || !Number.isFinite(n) || n <= 0) {
-      throw new Error(`「${spec.label}」必须是正数（收到 ${JSON.stringify(value)}）`);
+    if (value.trim() === "" || !Number.isFinite(n) || n < 0) {
+      throw new Error(`「${spec.label}」必须是不小于 0 的数（收到 ${JSON.stringify(value)}）`);
     }
   }
   setRelaySetting(db, key, value);

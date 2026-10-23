@@ -15,6 +15,7 @@ import {
   outboundFailure,
   downloadKfMedia,
   getServiceState,
+  listServicers,
   transServiceState,
   sendKfText,
   serviceStateText,
@@ -226,10 +227,11 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
   function replyThrottleMs(): number {
     const raw = getRelaySetting(db, "wecom.replyThrottleMinutes");
     if (raw === null) return DEFAULT_REPLY_THROTTLE_MINUTES * 60_000;
-    const minutes = Number(raw);
-    if (raw.trim() === "" || !Number.isFinite(minutes) || minutes <= 0) {
+    const minutes = Number(raw.trim());
+    // 0 = 不节流（每条都回）；支持小数（0.5 = 30 秒）。负数/非数字才回落默认。
+    if (raw.trim() === "" || !Number.isFinite(minutes) || minutes < 0) {
       log.warn(
-        `回执节流设置不是正数（${JSON.stringify(raw)}），按默认 ${DEFAULT_REPLY_THROTTLE_MINUTES} 分钟处理`,
+        `回执节流设置不是非负数（${JSON.stringify(raw)}），按默认 ${DEFAULT_REPLY_THROTTLE_MINUTES} 分钟处理`,
       );
       return DEFAULT_REPLY_THROTTLE_MINUTES * 60_000;
     }
@@ -250,7 +252,7 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
   ): Promise<void> {
     const throttleMs = replyThrottleMs();
     const until = repliedUntil.get(externalUserId) ?? 0;
-    if (until > nowMs) {
+    if (throttleMs > 0 && until > nowMs) {
       // 静默会让「没反应」无从排查——明确写出还要等多久
       log.info(
         `回执已节流（${externalUserId}）：${Math.ceil((until - nowMs) / 60_000)} 分钟后再回`,
@@ -263,7 +265,11 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       // **先接管会话，再回消息**：账号既已「通过 API 管理」，微信就不再帮我们分配会话
       // （官方：接待规则「将暂时不对该账号生效」），新消息会停在「待接入池排队中」——
       // 那个状态禁止发消息（实测 95018）。转成「由智能助手接待」才谈得上回执。
-      await takeOverSession(token, openKfid, externalUserId);
+      if (!(await takeOverSession(token, openKfid, externalUserId))) {
+        // 会话刚被重置/无法接管：这一条发不出去，退掉占位让下一条还能回
+        repliedUntil.delete(externalUserId);
+        return;
+      }
       const res = await sendKfText(token, { touser: externalUserId, openKfid, content: text });
       if (!wecomOk(res)) {
         // 会话转人工/排队/已结束、或配额耗尽——留痕，不重试；**退掉占位**让后续消息还能再试
@@ -296,22 +302,67 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     token: string,
     openKfid: string,
     externalUserId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const state = await getServiceState(token, openKfid, externalUserId);
-    if (state === null) return; // 查不到状态就不盲动
+    if (state === null) return true; // 查不到状态就照常试发（send_msg 会给出真实原因）
     if (state === 0) {
       const r = await transServiceState(token, openKfid, externalUserId, 1);
-      if (r.ok) log.info(`会话已接管（${externalUserId}）：未处理 → 智能助手接待`);
-      else log.warn(`接管会话失败（${externalUserId}）：${r.reason}`);
-      return;
+      if (r.ok) {
+        log.info(`会话已接管（${externalUserId}）：未处理 → 智能助手接待`);
+        return true;
+      }
+      log.warn(`接管会话失败（${externalUserId}）：${r.reason}`);
+      return true; // 接管失败也试一次——send_msg 的报错比这里的信息更具体
     }
-    if (state === 2) {
-      // 排队中：官方不允许 2→1。结束会话让客户下一条消息重置为「未处理」。
-      const r = await transServiceState(token, openKfid, externalUserId, 4);
-      if (r.ok) log.info(`会话原在排队中（${externalUserId}），已结束——客户下条消息会重新接入`);
-      else log.warn(`结束排队会话失败（${externalUserId}）：${r.reason}`);
+    if (state === 1) return true; // 已在智能助手接待，可以直接回
+
+    if (state === 2 || state === 3) {
+      // **把会话绕回可回状态**（2026-10-23 实测可行的完整链路）：
+      //   2（排队）→ 3（指定接待人）→ 4（结束）→ 客户下条消息重置为 0
+      //   3（人工）→ 4（结束）→ 同上
+      // 为什么不能一步到位：官方状态表里 2 只能转 3、3 只能转接/结束，
+      // 而 2→1、2→4 都会报 95016（实测）。所以必须一段一段走。
+      //
+      // ⚠️ 转 3 要求 `servicer_userid` 必填且该人「正在接待」——取本账号的第一个接待人员。
+      // 取不到就放弃（没有接待人员时这条路走不通，只能靠后台改接待方式）。
+      if (state === 2) {
+        const servicer = await pickAnyServicer(token, openKfid);
+        if (servicer === null) {
+          log.warn(
+            `会话在待接入池排队（${externalUserId}）且本账号无接待人员可中转——` +
+              "无法自动接管（请在企微后台为该客服账号加一个接待人员，或改用「智能助手接待」）",
+          );
+          return false;
+        }
+        const toHuman = await transServiceState(token, openKfid, externalUserId, 3, servicer);
+        if (!toHuman.ok) {
+          log.warn(`会话 2→3 失败（${externalUserId}）：${toHuman.reason}`);
+          return false;
+        }
+      }
+      const ended = await transServiceState(token, openKfid, externalUserId, 4);
+      if (ended.ok) {
+        // 会话刚被结束，**这一次发不出去**——客户下条消息会重新接入（状态 0），那时才回。
+        // 返回 false 让调用方跳过本次回执，而不是撞一次必定失败的 95018。
+        log.info(`会话已重置（${externalUserId}）：人工/排队 → 结束，客户下条消息会重新接入`);
+      } else {
+        log.warn(`会话结束失败（${externalUserId}）：${ended.reason}`);
+      }
+      return false;
     }
-    // 1（已在智能助手）/ 3（人工接待，不该抢）/ 4（已结束）→ 不动
+    // 4（已结束）：客户下条消息本来就会重置为 0，这一条发不出去
+    return false;
+  }
+
+  /** 取本客服账号的任一「接待中」人员（转 3 的中转用）。
+   *
+   *  为什么需要它：官方要求转 3 时 `servicer_userid` 必填，且该人须「正在接待」。
+   *  拿不到就说明这个账号没有接待人员——那时 2→3 走不了，只能靠后台改接待方式。
+   */
+  async function pickAnyServicer(token: string, openKfid: string): Promise<string | null> {
+    const list = await listServicers(token, openKfid);
+    // status 0 = 接待中，1 = 停止接待（官方定义）
+    return list.find((s) => s.status === 0)?.userId ?? null;
   }
 
   /** 投递一条消息给它的归属账户，并按结果决定回什么话。

@@ -368,6 +368,39 @@ export async function transServiceState(
   }
 }
 
+/** 本客服账号的接待人员（官方 `kf/servicer/list`）。
+ *
+ *  为什么需要：把会话转成「人工接待」（状态 3）时 `servicer_userid` **必填**，
+ *  且该人须处于「正在接待」。要自动走 2→3→4 这条重置链路，就得先知道有谁可用。
+ */
+export async function listServicers(
+  token: string,
+  openKfid: string,
+): Promise<Array<{ userId: string; status: number }>> {
+  try {
+    const res = await wecomGet<WecomEnvelope & { servicer_list?: unknown }>(
+      "/cgi-bin/kf/servicer/list",
+      `access_token=${encodeURIComponent(token)}&open_kfid=${encodeURIComponent(openKfid)}`,
+    );
+    if (!wecomOk(res)) return [];
+    // 官方形状：userid + status(0 接待中 / 1 停止接待)；也可能给 department_id（无 userid）
+    const parsed = z
+      .array(
+        z.object({
+          userid: z.string().optional(),
+          status: z.number().optional(),
+        }),
+      )
+      .safeParse(res.servicer_list);
+    if (!parsed.success) return [];
+    return parsed.data.flatMap((s) =>
+      s.userid === undefined ? [] : [{ userId: s.userid, status: s.status ?? 1 }],
+    );
+  } catch {
+    return []; // 查不到就当作没有可用接待人员——调用方会放弃并留痕
+  }
+}
+
 /** 会话状态 → 人话（日志用；说明「为什么不能回」）。 */
 export function serviceStateText(state: KfServiceState): string {
   switch (state) {

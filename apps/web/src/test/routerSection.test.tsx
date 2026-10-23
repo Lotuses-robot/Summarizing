@@ -65,7 +65,7 @@ afterEach(() => {
 describe("路由区：读", () => {
   it("列出已有的绑定码；开关反映当前状态", async () => {
     stubRouter(channel({ enabled: false, bindings: ["cust-A", "cust-B"] }));
-    render(<RouterSection id="s" />);
+    render(<RouterSection />);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("cust-A")).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe("路由区：读", () => {
       "fetch",
       vi.fn(() => Promise.reject(new Error("挂了"))),
     );
-    render(<RouterSection id="s" />);
+    render(<RouterSection />);
     await waitFor(() => {
       expect(screen.getByText(/读取路由设置失败/)).toBeInTheDocument();
     });
@@ -89,7 +89,7 @@ describe("路由区：读", () => {
 describe("路由区：写", () => {
   it("拨开关 → 立刻 PUT enabled", async () => {
     const { calls } = stubRouter(channel({ enabled: true, bindings: [] }));
-    render(<RouterSection id="s" />);
+    render(<RouterSection />);
     await waitFor(() => expect(screen.getByRole("checkbox")).toBeChecked());
 
     fireEvent.click(screen.getByRole("checkbox"));
@@ -102,7 +102,7 @@ describe("路由区：写", () => {
 
   it("加一条绑定码并失焦 → PUT 整段码表", async () => {
     const { calls } = stubRouter(channel({ enabled: true, bindings: [] }));
-    render(<RouterSection id="s" />);
+    render(<RouterSection />);
     await waitFor(() => expect(screen.getByText("添加绑定码")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("添加绑定码"));
@@ -119,7 +119,7 @@ describe("路由区：写", () => {
 
   it("删一条 → PUT 剩下那几条", async () => {
     const { calls } = stubRouter(channel({ enabled: true, bindings: ["cust-A", "cust-B"] }));
-    render(<RouterSection id="s" />);
+    render(<RouterSection />);
     await waitFor(() => expect(screen.getByDisplayValue("cust-B")).toBeInTheDocument());
 
     // 第二个删除钮 = cust-B 那一行
@@ -135,7 +135,7 @@ describe("路由区：写", () => {
 
   it("保存失败 → 常驻红字（不静默）", async () => {
     stubRouter(channel({ enabled: true, bindings: ["cust-A"] }), { failPut: true });
-    render(<RouterSection id="s" />);
+    render(<RouterSection />);
     await waitFor(() => expect(screen.getByDisplayValue("cust-A")).toBeInTheDocument());
 
     fireEvent.blur(screen.getByDisplayValue("cust-A"));

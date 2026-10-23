@@ -648,6 +648,125 @@ describe("Router · 一对多投递", () => {
     expect(transAt).toBeLessThan(sendAt);
   });
 
+  it("会话卡在排队(2) → 走 2→3→4 重置，本次不回、不撞 95018", async () => {
+    // 用户实测出来的可行链路（2026-10-23）：2 只能转 3，3 才能结束到 4；
+    // 2→1 与 2→4 都会报 95016。重置后客户下条消息会重新接入（状态 0），那时才回。
+    const realm = await makeRelayRealm();
+    const a = await realm.addAccount({ username: "alpha" });
+    bindWecom(realm, "cust-A", a.space.uid);
+
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes("/cgi-bin/gettoken")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 0, access_token: "AT", expires_in: 7200 })),
+          );
+        }
+        if (u.includes("/cgi-bin/getcallbackip")) {
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0, ip_list: [] })));
+        }
+        if (u.includes("/kf/servicer/list")) {
+          calls.push("servicer/list");
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ errcode: 0, servicer_list: [{ userid: "ZhuChenRui", status: 0 }] }),
+            ),
+          );
+        }
+        if (u.includes("/service_state/get")) {
+          calls.push("state/get");
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0, service_state: 2 })));
+        }
+        if (u.includes("/service_state/trans")) {
+          const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+          const st =
+            typeof body === "object" && body !== null && "service_state" in body
+              ? String(body.service_state)
+              : "?";
+          calls.push(`state/trans:${st}`);
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0 })));
+        }
+        if (u.includes("/kf/send_msg")) {
+          calls.push("send_msg");
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0 })));
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              errcode: 0,
+              has_more: 0,
+              msg_list: [
+                {
+                  msgid: "m1",
+                  open_kfid: "kf1",
+                  external_userid: "cust-A",
+                  origin: 3,
+                  msgtype: "text",
+                  text: { content: "你好" },
+                  send_time: "1790000000",
+                },
+              ],
+            }),
+          ),
+        );
+      }),
+    );
+
+    await postEvent(realm);
+    await until(() => calls.includes("state/trans:4"), "走到结束会话");
+
+    // 顺序：查状态 → 取接待人员 → 转 3（人工）→ 转 4（结束）
+    expect(calls.indexOf("servicer/list")).toBeLessThan(calls.indexOf("state/trans:3"));
+    expect(calls.indexOf("state/trans:3")).toBeLessThan(calls.indexOf("state/trans:4"));
+    // 本轮**不**发消息（会话刚结束，发也发不出去，避免撞 95018）
+    expect(calls).not.toContain("send_msg");
+  });
+
+  it("节流设为 0 → 每条都回（不合并）", async () => {
+    const realm = await makeRelayRealm();
+    const a = await realm.addAccount({ username: "alpha" });
+    bindWecom(realm, "cust-A", a.space.uid);
+    writeRouterSetting(realm.registry, "wecom.replyThrottleMinutes", "0");
+
+    const { sent } = stubWecomFetch([
+      {
+        msgid: "m1",
+        open_kfid: "kf1",
+        external_userid: "cust-A",
+        origin: 3,
+        msgtype: "text",
+        text: { content: "一" },
+        send_time: "1790000000",
+      },
+      {
+        msgid: "m2",
+        open_kfid: "kf1",
+        external_userid: "cust-A",
+        origin: 3,
+        msgtype: "text",
+        text: { content: "二" },
+        send_time: "1790000001",
+      },
+      {
+        msgid: "m3",
+        open_kfid: "kf1",
+        external_userid: "cust-A",
+        origin: 3,
+        msgtype: "text",
+        text: { content: "三" },
+        send_time: "1790000002",
+      },
+    ]);
+
+    await postEvent(realm);
+    await until(() => sent.length >= 3, "三条各回一次");
+
+    expect(sent).toHaveLength(3);
+  });
+
   it("不同客户各回各的（节流按客户，不是全局）", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });

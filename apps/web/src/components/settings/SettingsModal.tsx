@@ -581,7 +581,16 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             </Row>
           </Card>
 
-          <RouterSection id={SECTION_DOM.router} />
+          <Card
+            id={SECTION_DOM.router}
+            icon={Route}
+            title="路由"
+            desc="一个部署对接多个账户——消息按绑定码分流"
+            bare
+            footnote="绑定码由对方发消息后自动回给他；填进去，他的消息就只进你的账户。凭据由运维在服务器上配置。"
+          >
+            <RouterSection />
+          </Card>
 
           <Card
             id={SECTION_DOM.sources}

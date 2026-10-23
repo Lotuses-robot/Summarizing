@@ -57,6 +57,54 @@ function stubAi(opts: { failGet?: boolean; deferFirstPut?: boolean } = {}): {
   return { calls, releaseFirstPut: () => release?.() };
 }
 
+describe("设置弹层的分区层级", () => {
+  it("「路由」是父级区，微信客服是它下面的子项（不与区并列）", async () => {
+    // 用户 2026-10-23：「微信客服那个东西，为什么在设置中和路由同级？应该和信源一样是子集关系」
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/router")) {
+          return Promise.resolve(
+            jsonResponse({
+              channels: [
+                {
+                  kind: "wecom",
+                  label: "微信客服",
+                  description: "客户在微信里发给客服号的消息",
+                  enabled: true,
+                  bindings: [],
+                },
+              ],
+            }),
+          );
+        }
+        if (url.includes("/api/settings/ai")) {
+          return Promise.resolve(
+            jsonResponse({
+              baseUrl: "",
+              model: "",
+              apiKeyMasked: null,
+              overridden: false,
+            }),
+          );
+        }
+        if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
+        return Promise.resolve(jsonResponse({ rules: "" }));
+      }),
+    );
+    render(<SettingsModal open onClose={() => {}} />);
+
+    // 「路由」在左导航与标题栏各出现一次——取标题（role=heading）那一处
+    const routerHeading = await screen.findByRole("heading", { level: 3, name: /路由/ });
+    const channel = await screen.findByText("微信客服");
+    // 微信客服必须是「路由」那一节的**后代**，而不是同级
+    const section = routerHeading.closest("section");
+    expect(section).not.toBeNull();
+    expect(section?.contains(channel)).toBe(true);
+  });
+});
+
 describe("设置弹层：AI 即时生效管道（设置重排 review 轮）", () => {
   beforeEach(() => {
     window.localStorage.clear();

@@ -118,7 +118,7 @@ function ChannelCard({ channel }: { channel: RouterChannel }) {
  *  未配置凭据时这一区照样显示——开关和码都不是凭据，账户主人随时可以填。
  *
  *  `id` = 锚点 id（左导航滚动定位用，由 SettingsModal 的 SECTION_DOM 单一出处传入）。 */
-export function RouterSection({ id }: { id: string }) {
+export function RouterSection() {
   const [view, setView] = useState<RouterAccountView | null>(null);
   const [readFailed, setReadFailed] = useState(false);
 
@@ -129,29 +129,22 @@ export function RouterSection({ id }: { id: string }) {
       .catch(() => setReadFailed(true));
   }, []);
 
+  // 只渲染**子项**（每个接入一张卡）——外层标题由 SettingsModal 的 <Card title="路由"> 给，
+  // 与「信源」区同一个结构：父级是区，子级是具体来源。
+  if (readFailed) {
+    return <p className="px-0.5 text-sm text-danger">读取路由设置失败（后端是否在跑？）</p>;
+  }
+  if (view === null) return <p className="px-0.5 text-sm text-ink-muted">读取中…</p>;
+  if (view.channels.length === 0) {
+    return (
+      <p className="px-0.5 text-sm text-ink-muted">还没有可用的路由（运维尚未启用任何接入）</p>
+    );
+  }
   return (
-    <section id={id} className="scroll-mt-4 space-y-5">
-      <header className="flex items-center gap-1.5 px-0.5">
-        <Route size={14} className="text-ink-muted" />
-        <span role="heading" aria-level={3} className="text-sm font-semibold">
-          路由
-        </span>
-        <span className="truncate text-xs text-ink-muted">
-          · 一个部署对接多个账户——消息按绑定码分流
-        </span>
-      </header>
-      {readFailed ? (
-        <p className="px-0.5 text-sm text-danger">读取路由设置失败（后端是否在跑？）</p>
-      ) : view === null ? (
-        <p className="px-0.5 text-sm text-ink-muted">读取中…</p>
-      ) : view.channels.length === 0 ? (
-        <p className="px-0.5 text-sm text-ink-muted">还没有可用的路由（运维尚未启用任何接入）</p>
-      ) : (
-        view.channels.map((ch) => <ChannelCard key={ch.kind} channel={ch} />)
-      )}
-      <p className="px-0.5 text-xs text-ink-muted">
-        绑定码由对方发消息后自动回给他；把它填在上面，他的消息就只进你的账户。凭据由运维在服务器上配置。
-      </p>
-    </section>
+    <div className="space-y-5">
+      {view.channels.map((ch) => (
+        <ChannelCard key={ch.kind} channel={ch} />
+      ))}
+    </div>
   );
 }

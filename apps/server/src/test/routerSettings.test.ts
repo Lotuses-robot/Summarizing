@@ -81,14 +81,20 @@ describe("Router 部署级设置", () => {
     db.$client.close();
   });
 
-  it("数值型设置写入即校验：空串 / 非数字 / 0 / 负数一律拒（D-103：错填当场判错）", () => {
+  it("数值型设置写入即校验：空串 / 非数字 / 负数一律拒；0 与小数合法（D-103）", () => {
     const db = tmpRegistry();
-    for (const bad of ["", "  ", "10分钟", "abc", "0", "-5"]) {
-      expect(() => writeRouterSetting(db, "wecom.replyThrottleMinutes", bad)).toThrow("必须是正数");
+    for (const bad of ["", "  ", "10分钟", "abc", "-5", "-0.5"]) {
+      expect(() => writeRouterSetting(db, "wecom.replyThrottleMinutes", bad)).toThrow(
+        "必须是不小于 0 的数",
+      );
     }
     expect(readRouterSetting(db, "wecom.replyThrottleMinutes")).toBeNull(); // 一个都没写进去
-    writeRouterSetting(db, "wecom.replyThrottleMinutes", "15");
-    expect(readRouterSetting(db, "wecom.replyThrottleMinutes")).toBe("15");
+
+    // 0 = 不节流（每条都回）；0.5 = 30 秒（给「先试试够不够用」留口子）
+    for (const ok of ["0", "0.5", "15"]) {
+      writeRouterSetting(db, "wecom.replyThrottleMinutes", ok);
+      expect(readRouterSetting(db, "wecom.replyThrottleMinutes")).toBe(ok);
+    }
     db.$client.close();
   });
 
