@@ -233,7 +233,12 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     return minutes * 60_000;
   }
 
-  /** 给某客户回执（按客户节流；失败不重试——转人工/配额满都是不该重试的情形）。 */
+  /** 给某客户回执（按客户节流；失败不重试——转人工/配额满都是不该重试的情形）。
+   *
+   *  **先占位再发**（并发拉取同一客户时不会重复回两次），但**发送失败要把占位退掉**：
+   *  否则一次失败（如 95018 会话已被人工接手）会把接下来整个窗口的回执全吃掉，
+   *  表现为「再发消息就毫无反应」。
+   */
   async function replyOnce(
     openKfid: string,
     externalUserId: string,
@@ -241,17 +246,25 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     nowMs: number,
   ): Promise<void> {
     const throttleMs = replyThrottleMs();
-    if ((repliedUntil.get(externalUserId) ?? 0) > nowMs) return; // 窗口内已回过
-    // 先占位再发：并发拉取同一客户时不会重复回两次
-    repliedUntil.set(externalUserId, nowMs + throttleMs);
+    const until = repliedUntil.get(externalUserId) ?? 0;
+    if (until > nowMs) {
+      // 静默会让「没反应」无从排查——明确写出还要等多久
+      log.info(
+        `回执已节流（${externalUserId}）：${Math.ceil((until - nowMs) / 60_000)} 分钟后再回`,
+      );
+      return;
+    }
+    repliedUntil.set(externalUserId, nowMs + throttleMs); // 占位（防并发重复回）
     try {
       const token = await getAccessToken(cred(db, "corpId"), cred(db, "secret"));
       const res = await sendKfText(token, { touser: externalUserId, openKfid, content: text });
       if (!wecomOk(res)) {
-        // 会话转人工/排队/已结束、或配额耗尽——留痕即可，不重试
+        // 会话转人工/排队/已结束、或配额耗尽——留痕，不重试；**退掉占位**让后续消息还能再试
+        repliedUntil.delete(externalUserId);
         log.warn(`回执未送达（${externalUserId}）：${wecomError(res)}`);
       }
     } catch (err) {
+      repliedUntil.delete(externalUserId); // 同上：网络/鉴权抖动不该连累后续 10 分钟
       log.warn(`回执发送失败（${externalUserId}）：${errText(err)}`);
     }
   }
@@ -293,6 +306,7 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       space.relayMediaFetchers.set(SOURCE_NAME, (placeholder) => fetchMedia(placeholder));
     });
     if (result.ok) {
+      log.info(`已投递给 ${uid}（客户 ${ext}）`);
       if (m.origin === ORIGIN_CUSTOMER) await replyOnce(kfid, ext, REPLY_TEXT, Date.now());
       return;
     }
@@ -340,6 +354,11 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
           return;
         }
         const list = res.msg_list ?? [];
+        // 成功路径也要说话：否则「没动静」时无法区分「回调没到」「拉到了但没消息」
+        // 「拉到了但全被拒」——三种情况在日志里长得一模一样。
+        log.info(
+          `拉到 ${list.length} 条（客服账号 ${openKfid}）${list.length === 0 ? "，本轮无新消息" : ""}`,
+        );
         const receivedAt = nowWallClock();
         for (const msg of list) {
           if (stopping) return; // 关停中：不再往空间里投（否则会重新装配出刚拆掉的空间）
@@ -489,6 +508,7 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
 
     const event = xmlField(verified.xml, "Event");
     if (event === "kf_msg_or_event") {
+      log.info("收到 kf_msg_or_event 回调");
       // 事件体里带一个 10 分钟有效的拉取令牌——记下来，拉取时带上
       // （官方：不填也能拉，但「不填接口有严格的频率限制」）
       const pulled = xmlField(verified.xml, "Token");

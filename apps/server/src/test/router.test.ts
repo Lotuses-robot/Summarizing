@@ -504,6 +504,72 @@ describe("Router · 一对多投递", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("回执发送失败**不占**节流窗口：下一条消息还能再试（95018 会话被接手的真实场景）", async () => {
+    // 病根（用户实测）：「每次开启对话第一条消息会回来一个 95018，然后再怎么发都不会有反应了」——
+    // 节流窗口在发送**之前**就占上了，而 95018（会话已被人工接手）每次必失败，
+    // 于是整个窗口内所有回执都被静默吃掉，表现为「发消息毫无反应」。
+    const realm = await makeRelayRealm();
+    const a = await realm.addAccount({ username: "alpha" });
+    bindWecom(realm, "cust-A", a.space.uid);
+
+    const attempts: string[] = [];
+    let msgList: unknown[] = [
+      {
+        msgid: "m1",
+        open_kfid: "kf1",
+        external_userid: "cust-A",
+        origin: 3,
+        msgtype: "text",
+        text: { content: "第一条" },
+        send_time: "1790000000",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes("/cgi-bin/gettoken")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 0, access_token: "AT", expires_in: 7200 })),
+          );
+        }
+        if (u.includes("/cgi-bin/getcallbackip")) {
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0, ip_list: [] })));
+        }
+        if (u.includes("/cgi-bin/kf/send_msg")) {
+          attempts.push(typeof init?.body === "string" ? init.body : "");
+          // 会话已被人工接手 —— 每次都失败
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 95018, errmsg: "session status invalid" })),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({ errcode: 0, has_more: 0, msg_list: msgList })),
+        );
+      }),
+    );
+
+    await postEvent(realm);
+    await until(() => attempts.length > 0, "第一次回执尝试");
+
+    // 同一客户再发一条 → 仍应尝试回执（若被失败的占位挡住，这里就永远是 1）
+    msgList = [
+      {
+        msgid: "m2",
+        open_kfid: "kf1",
+        external_userid: "cust-A",
+        origin: 3,
+        msgtype: "text",
+        text: { content: "第二条" },
+        send_time: "1790000005",
+      },
+    ];
+    await postEvent(realm);
+    await until(() => attempts.length >= 2, "失败后仍会再次尝试回执");
+
+    expect(attempts.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("不同客户各回各的（节流按客户，不是全局）", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
