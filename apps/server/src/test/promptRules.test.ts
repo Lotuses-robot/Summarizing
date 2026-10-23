@@ -69,6 +69,18 @@ describe("buildDigestPrompt：检索面与矛盾决断（D-127）", () => {
     expect(p).not.toContain("缩小范围再查");
   });
 
+  it("信源说明：wecom 是「客户咨询企业」，不是用户自己的待办", () => {
+    // 用户 2026-10-23：「调整一下对 agent0 消化的提示词，至少现在先暂时手动加进去对 wecom 的了解，
+    // 不然他还以为这是什么信息」——此前提示词里只有 chat/nc 的隐含假设。
+    const p = buildDigestPrompt("");
+    expect(p).toContain("【信源说明");
+    expect(p).toContain("wecom");
+    expect(p).toContain("企业微信");
+    expect(p).toContain("不是用户本人的待办");
+    expect(p).toContain("chat");
+    expect(p).toContain("nc");
+  });
+
   it("矛盾决断：无权威性字段时不得凭猜测决断", () => {
     const p = buildDigestPrompt("");
     expect(p).toContain("实际存在的字段");
