@@ -13,6 +13,10 @@ on:
         description: "同时构建并推送容器镜像到 ACR（需配好 secrets）"
         type: boolean
         default: false
+      image_tag:
+        description: "手动构建时推到哪个 tag（如 v0.7.0；留空则用 github.ref_name）"
+        type: string
+        default: ""
 
 permissions:
   contents: write # 建 Release / 传附件需要
@@ -63,7 +67,24 @@ jobs:
           RAW="${{ secrets.ACR_REGISTRY }}"
           REG="$(printf '%s' "$RAW" | tr -d '[:space:]' | sed -E 's#^https?://##; s#/$##')"
           echo "registry 形状诊断（不含值）：raw_len=${#RAW} normalized_len=${#REG}"
-          TAG="$REG/${{ secrets.ACR_NAMESPACE }}/summarizing:${{ github.ref_name }}"
+          # ⚠️ tag 名的来源：推 tag 时 = 那个 tag；手动触发时 github.ref_name 是**分支名**（如 main），
+          # 直接用它会把镜像推成 `:main`——服务器按 `:v0.7.0` 拉，永远拉不到新镜像（2026-10-23 踩到）。
+          # 所以手动触发必须显式给 image_tag；没给就拒绝构建，绝不静默推一个分支名标签。
+          TAG_NAME="${{ inputs.image_tag }}"
+          if [ -z "$TAG_NAME" ]; then
+            if [ "${{ github.event_name }}" = "push" ]; then
+              TAG_NAME="${{ github.ref_name }}"
+            else
+              echo "::error::手动触发必须填 image_tag（要推的版本号，如 v0.7.0）——分支名不能当镜像 tag"
+              exit 1
+            fi
+          fi
+          case "$TAG_NAME" in
+            v*) ;;
+            *) echo "::error::image_tag 必须以 v 开头（形如 v0.7.0），收到：$TAG_NAME"; exit 1 ;;
+          esac
+          echo "镜像 tag = $TAG_NAME"
+          TAG="$REG/${{ secrets.ACR_NAMESPACE }}/summarizing:$TAG_NAME"
           docker build -t "$TAG" .
           docker push "$TAG"
 
