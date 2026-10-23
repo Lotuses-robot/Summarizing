@@ -12,6 +12,7 @@ import {
   NcEventSchema,
   type BufferedEvent,
   type GroupBuffer,
+  type SealThresholds,
 } from "../sources/nc/types";
 import { parseWallClock, wallClockFromUnix } from "../shared/time";
 import { FakeLlm } from "./helpers/fakeLlm";
@@ -35,7 +36,12 @@ function useSweepFakeTimers(): void {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 }
 
-/** 推进假时钟触发一次封批扫描（替代已删的 adapter.sweep()）。 */
+/** 推进假时钟触发一次封批扫描（替代已删的 adapter.sweep()）。
+ *
+ *  ⚠️ 只伪造了 `setInterval`/`clearInterval`，**没伪造 `Date`**：扫描用的 `Date.now()` 走真时间，
+ *  而「到达时刻」也走真时间（nowWallClock）——两者同源，therefore 静默闸按真实经过时间算。
+ *  为了让用例可控（messages 的时刻写成 2026-09-28 的固定值），`makeNcApp` 把 windowMinutes
+ *  设成 0（= 立即封批）。 */
 function sweepNow(): void {
   vi.advanceTimersByTime(SWEEP_INTERVAL_MS + 1);
 }
@@ -110,7 +116,7 @@ describe("nc 适配器：纯函数", () => {
       sender: overrides.sender ?? "小明",
       senderId: overrides.senderId ?? "1",
       ...(overrides.role === undefined || overrides.role === null ? {} : { role: overrides.role }),
-      groupName: "英语群",
+      displayName: "英语群",
       at: overrides.at ?? "2026-09-28T10:00:00",
       trueTime: overrides.trueTime ?? true,
       raw: NcEventSchema.parse(
@@ -125,13 +131,150 @@ describe("nc 适配器：纯函数", () => {
     };
   }
 
-  it("dueGroups：静默 ≥ 窗口的组才命中（去抖语义，从组内最后一条起算）", () => {
+  it("dueGroups：静默闸——最后一条距今 ≥ 窗口才命中（去抖语义）", () => {
     const buffers = new Map<string, GroupBuffer>([
-      ["g1", { groupId: "g1", events: [], lastAt: "2026-09-28T10:00:00" }], // 距今 4 分钟
-      ["g2", { groupId: "g2", events: [], lastAt: "2026-09-28T10:02:30" }], // 距今 1 分半
+      [
+        "g1",
+        {
+          groupId: "g1",
+          events: [mkEvent({ messageId: "a", at: "2026-09-28T10:00:00" })],
+          lastAt: "2026-09-28T10:00:00",
+          bytes: 10,
+        },
+      ], // 距今 4 分钟
+      [
+        "g2",
+        {
+          groupId: "g2",
+          events: [mkEvent({ messageId: "b", at: "2026-09-28T10:02:30" })],
+          lastAt: "2026-09-28T10:02:30",
+          bytes: 10,
+        },
+      ], // 距今 1 分半
     ]);
     const nowMs = parseWallClock("2026-09-28T10:04:00");
-    expect(dueGroups(buffers, nowMs, 3).map((b) => b.groupId)).toEqual(["g1"]);
+    const t: SealThresholds = {
+      windowMinutes: 3,
+      maxEvents: 50,
+      maxBytes: 20_000,
+      maxAgeMinutes: 30,
+    };
+    expect(dueGroups(buffers, nowMs, t).map((b) => b.groupId)).toEqual(["g1"]);
+  });
+
+  it("dueGroups：条数闸——批内消息数到上限即封批（忙群不必等静默）", () => {
+    const events = Array.from({ length: 5 }, (_, i) =>
+      mkEvent({ messageId: `m${i}`, at: "2026-09-28T10:00:00" }),
+    );
+    const buffers = new Map<string, GroupBuffer>([
+      // 最后一条就在「现在」，静默闸完全不可能命中——只能靠条数闸
+      ["g1", { groupId: "g1", events, lastAt: "2026-09-28T10:04:00", bytes: 50 }],
+    ]);
+    const nowMs = parseWallClock("2026-09-28T10:04:00");
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 5,
+        maxBytes: 1e9,
+        maxAgeMinutes: 999,
+      }),
+    ).toHaveLength(1);
+    // 阈值放到 6 就不该命中
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 6,
+        maxBytes: 1e9,
+        maxAgeMinutes: 999,
+      }),
+    ).toHaveLength(0);
+  });
+
+  it("dueGroups：字节闸——正文累计到上限即封批（长文群先撞这个）", () => {
+    const events = [mkEvent({ messageId: "m1", at: "2026-09-28T10:00:00" })];
+    const buffers = new Map<string, GroupBuffer>([
+      ["g1", { groupId: "g1", events, lastAt: "2026-09-28T10:04:00", bytes: 20_000 }],
+    ]);
+    const nowMs = parseWallClock("2026-09-28T10:04:00");
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 999,
+        maxBytes: 20_000,
+        maxAgeMinutes: 999,
+      }),
+    ).toHaveLength(1);
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 999,
+        maxBytes: 20_001,
+        maxAgeMinutes: 999,
+      }),
+    ).toHaveLength(0);
+  });
+
+  it("dueGroups：龄期闸——从进入缓冲算，忙群一直说话也照样切段（崩溃丢失有上界）", () => {
+    const events = [mkEvent({ messageId: "m1", at: "2026-09-28T10:00:00" })];
+    const buffers = new Map<string, GroupBuffer>([
+      // 10:00 进入缓冲，最后一条 10:29——一直有人说话，静默闸永不命中
+      [
+        "g1",
+        {
+          groupId: "g1",
+          events,
+          lastAt: "2026-09-28T10:29:00",
+          bytes: 10,
+          firstSeenAt: "2026-09-28T10:00:00",
+        },
+      ],
+    ]);
+    const nowMs = parseWallClock("2026-09-28T10:29:00");
+    // 龄期 30 分钟：距进入缓冲已 29 分钟，不命中
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 999,
+        maxBytes: 1e9,
+        maxAgeMinutes: 30,
+      }),
+    ).toHaveLength(0);
+    // 龄期 29 分钟：命中
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 999,
+        maxBytes: 1e9,
+        maxAgeMinutes: 29,
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("dueGroups：龄期闸用**到达时刻**，桥接补推积压消息不会立刻误切", () => {
+    // 消息自带时刻是 3 小时前（bridge 断线重连后补推），但刚刚才到达缓冲
+    const events = [mkEvent({ messageId: "m1", at: "2026-09-28T07:00:00" })];
+    const buffers = new Map<string, GroupBuffer>([
+      [
+        "g1",
+        {
+          groupId: "g1",
+          events,
+          lastAt: "2026-09-28T07:00:00",
+          bytes: 10,
+          firstSeenAt: "2026-09-28T10:00:00", // 到达时刻
+          lastSeenAt: "2026-09-28T10:00:00",
+        },
+      ],
+    ]);
+    const nowMs = parseWallClock("2026-09-28T10:00:05"); // 刚到达 5 秒
+    expect(
+      dueGroups(buffers, nowMs, {
+        windowMinutes: 3,
+        maxEvents: 999,
+        maxBytes: 1e9,
+        maxAgeMinutes: 30,
+      }),
+    ).toHaveLength(0); // 若按消息时刻算，这条会被判「已超龄」或「已静默」而立刻封批
   });
 
   it("assembleBatch：行协议逐行署名，eventTime = 首条时刻（specs/003）", () => {
@@ -432,7 +575,7 @@ describe("nc 适配器：去抖封批全链路", () => {
     return raw;
   }
 
-  it("静默满窗 sweep → 合并投递 → agent0 消化（弹性的 sourceIdentity）", async () => {
+  it("静默满窗 sweep → 合并投递 → agent0 消化（弹性的 identity）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
     const t = await makeNcApp(llm, { g1: "英语课官方群" }, 0); // 窗长 0
@@ -447,11 +590,11 @@ describe("nc 适配器：去抖封批全链路", () => {
     );
 
     const raw = await sealAndWaitDigested(t.db);
-    expect(raw.sourceType).toBe("nc");
+    expect(raw.source).toBe("nc");
     expect(raw.content).toBe(`[${HM}] 小明: 通知：作业\n[${HM}] 小明: 截止10月8日`); // 组内合并（行协议逐行署名，specs/003）
   });
 
-  it("私聊白名单内 → 封批落库：身份以 peer（对方 QQ）标识、sourceLabel = 备注名（2026-10-13 私聊支持）", async () => {
+  it("私聊白名单内 → 封批落库：身份以 peer（对方 QQ）标识、displayName = 备注名（2026-10-13 私聊支持）", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' }); // 消化轮：零变更合法
     const t = await makeNcApp(llm, { g1: "英语群" }, 0, { privates: { "10001": "室友小王" } });
@@ -468,8 +611,8 @@ describe("nc 适配器：去抖封批全链路", () => {
     );
     const raw = await sealAndWaitDigested(t.db);
     expect(raw.content).toContain("明天带饭卡");
-    expect(raw.sourceIdentity["sourceLabel"]).toBe("室友小王"); // 私聊备注名
-    expect(raw.sourceIdentity["peer"]).toBe("10001"); // 身份键 = peer（非 groupId）
+    expect(raw.identity["displayName"]).toBe("室友小王"); // 私聊备注名
+    expect(raw.identity["peer"]).toBe("10001"); // 身份键 = peer（非 groupId）
   });
 
   it("私聊白名单键填了带 private: 前缀的写法 → 与消息比不上，不收（键原样比对，不替用户适配）", async () => {
@@ -566,7 +709,7 @@ describe("nc 适配器：去抖封批全链路", () => {
     // 直查 DB 的 raw 列（RawInput 类型不含它——归档字段只进不出，D-84）
     const row = z
       .object({ raw: z.string().nullable() })
-      .parse(t.db.$client.prepare("SELECT raw FROM raw_inputs WHERE source_type='nc'").get());
+      .parse(t.db.$client.prepare("SELECT raw FROM raw_inputs WHERE source='nc'").get());
     expect(row.raw).not.toBeNull();
     const parsed: unknown = JSON.parse(row.raw ?? "null");
     expect(Array.isArray(parsed)).toBe(true); // 原事件数组
@@ -613,7 +756,7 @@ describe("nc 适配器：去抖封批全链路", () => {
   });
 });
 
-describe("nc 适配器：窗长与关闭", () => {
+describe("nc 适配器：四闸设置与关闭", () => {
   it("扫描定时器自动封批（真实等 5s 周期，不推进假时钟）——防 unref 饿死回归", async () => {
     const llm = new FakeLlm();
     llm.push({ content: '{"changes":[]}' });

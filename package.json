@@ -67,6 +67,7 @@
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
-    "simple-git-hooks@2.14.0": true
+    "simple-git-hooks@2.14.0": true,
+    "nodejieba@3.5.8": true
   }
 }

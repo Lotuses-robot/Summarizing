@@ -37,6 +37,8 @@ function stubApp(opts: { uncertainFail?: boolean } = {}): {
         );
       }
       if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
+      if (url.includes("/api/router"))
+        return Promise.resolve(jsonResponse({ enabled: true, bindings: [] }));
       if (url.includes("/api/uncertain")) {
         if (opts.uncertainFail === true) return Promise.reject(new Error("接口挂了"));
         return Promise.resolve(jsonResponse([]));
@@ -81,6 +83,35 @@ describe("App 接线（D-89：主视图切换 / Esc 分层 / 审核页错误面�
 
     handleEsc(); // App 全局 Esc 消费实际就是调它
     expect(await screen.findByText("日期未知")).toBeInTheDocument();
+  });
+
+  it("首屏未登录（401）→ 只显示登录壳，**不**提示「后端未连接」", async () => {
+    // 回归（用户实测）：服务端 401 的文案是「未登录」，里面没有 "401"；
+    // App 曾用 `errText(err).includes("401")` 判登录态 → 每次打开登录页都显示「后端服务未连接」。
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = fetchUrl(input);
+        if (url.includes("/api/auth/me"))
+          return Promise.resolve(jsonResponse({ error: "未登录" }, 401));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(screen.queryByText(/后端服务未连接/)).not.toBeInTheDocument();
+  });
+
+  it("后端真的挂了（网络故障）→ 登录壳上如实提示", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),
+    );
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "登录" })).toBeInTheDocument();
+    expect(await screen.findByText(/后端服务未连接/)).toBeInTheDocument();
   });
 
   it("存疑库接口挂掉 → 审核页也有可见错误面（不拿假空态说事——评审 C1）", async () => {

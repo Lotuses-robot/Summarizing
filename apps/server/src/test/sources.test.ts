@@ -8,13 +8,13 @@ import { registerSources, START_TIMEOUT_MS, type SpaceDeps } from "../sources/ho
 import { closeSpacesWithTimeout, type Space, type SpaceHub } from "../spaces";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
-import type { SourceAdapter, SourceBatch, SourceContext, SourceRouter } from "../sources/types";
+import type { SourceAdapter, SourceBatch, SourceContext, WebhookRegistrar } from "../sources/types";
 import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
 import { FakeLlm } from "./helpers/fakeLlm";
 import { makeMediaDir } from "../routes/media";
 
 // 信源底座（D-84/D-88；006 起按空间装配 + `/hook` 网关）：SourceContext 手段（ingest 返回值 /
-// 设置 KV / 日志 / 清理）+ 通用设置 HTTP 口。测试替身源经 **SourceRouter** 登记 webhook——
+// 设置 KV / 日志 / 清理）+ 通用设置 HTTP 口。测试替身源经 **WebhookRegistrar** 登记 webhook——
 // core 只交手段与场地（网关内的命名空间），信源自主运转。
 
 afterEach(cleanupAllTestAccounts);
@@ -27,26 +27,27 @@ afterEach(() => {
 });
 
 /** 测试替身源：emit 路由直投 ctx.ingest；kv 路由读写 ctx 设置（core HTTP 口交叉可见）。
- *  006 起路由经 SourceRouter 登记（可达 = /hook/<令牌>/testsrc/...），不再认识 Fastify 实例。 */
+ *  006 起路由经 WebhookRegistrar 登记（可达 = /hook/<令牌>/testsrc/...），不再认识 Fastify 实例。 */
 function makeTestAdapter(): SourceAdapter & { emitted: SourceBatch[] } {
   const emitted: SourceBatch[] = [];
   const KvQuerySchema = z.object({ key: z.string().min(1) });
   return {
     name: "testsrc",
     emitted,
+    accept: () => ({ ok: true }),
     settings: () => [
       { key: "mode", type: "select", label: "模式", options: ["a", "b"], default: "a" },
       { key: "limit", type: "number", label: "上限", default: 10 },
     ],
-    register(ctx, router: SourceRouter) {
+    register(ctx, router: WebhookRegistrar) {
       router.post("/emit", async (req, reply) => {
         const body = z
           .object({ content: z.string().min(1), eventTime: z.string().nullable().default(null) })
           .parse(req.body);
         const batch: SourceBatch = {
           content: body.content,
-          sourceType: "testsrc",
-          sourceIdentity: { sourceLabel: "测试源" },
+          source: "testsrc",
+          identity: { displayName: "测试源" },
           eventTime: body.eventTime,
         };
         emitted.push(batch);
@@ -65,8 +66,8 @@ function makeTestAdapter(): SourceAdapter & { emitted: SourceBatch[] } {
       router.post("/emit-and-report", async (_req, reply) => {
         const result = ctx.ingest({
           content: "看返回值",
-          sourceType: "testsrc",
-          sourceIdentity: { sourceLabel: "测试源" },
+          source: "testsrc",
+          identity: { displayName: "测试源" },
           eventTime: null,
         });
         return reply.code(200).send(result);
@@ -85,6 +86,8 @@ function makeSpaceDeps(llm: FakeLlm = new FakeLlm()): SpaceDeps {
     sourceStates: new Map(),
     webhookRoutes: [],
     mediaDir: makeMediaDir(root, "u1"),
+    mediaFetchers: new Map(),
+    relayMediaFetchers: new Map(),
   };
 }
 
@@ -168,8 +171,8 @@ describe("SourceContext（信源视角，webhook 经网关）", () => {
     const digested = repo.listRawInputsByState(t.db, "digested");
     const first = digested[0];
     if (!first) throw new Error("信源投递未落档");
-    expect(first.sourceType).toBe("testsrc");
-    expect(first.sourceIdentity).toEqual({ sourceLabel: "测试源" });
+    expect(first.source).toBe("testsrc");
+    expect(first.identity).toEqual({ displayName: "测试源" });
     expect(first.content).toBe("群里说的作业通知");
     // 零变更留痕（与手动源同一消化语义）
     expect(repo.listPipelineEvents(t.db, first.id).some((n) => n.detail.includes("零变更"))).toBe(
@@ -281,6 +284,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     let cleaned = false;
     const bad: SourceAdapter = {
       name: "badstop",
+      accept: () => ({ ok: true }),
       register(ctx) {
         ctx.onCleanup(() => {
           cleaned = true;
@@ -300,6 +304,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     const ran: string[] = [];
     const src: SourceAdapter = {
       name: "badcleanup",
+      accept: () => ({ ok: true }),
       register(ctx) {
         ctx.onCleanup(() => {
           ran.push("reg1");
@@ -324,6 +329,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
       dataRoot: os.tmpdir(),
       ensure: () => new Promise<Space>(() => {}),
       byToken: () => new Promise<Space | undefined>(() => {}),
+      forDelivery: () => new Promise<Space | undefined>(() => {}),
       ensureAll: async () => {},
       closeAll: () => new Promise<void>(() => {}), // 永不 settle（如某信源 stop 关不掉）
     };
@@ -342,6 +348,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     const deps = makeSpaceDeps();
     const bad: SourceAdapter = {
       name: "badstart",
+      accept: () => ({ ok: true }),
       register() {},
       async start() {
         throw new Error("连不上");
@@ -349,6 +356,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     };
     const good: SourceAdapter = {
       name: "goodstart",
+      accept: () => ({ ok: true }),
       register() {},
       start() {
         return Promise.resolve();
@@ -365,6 +373,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     const deps = makeSpaceDeps();
     const hanging: SourceAdapter = {
       name: "hangstart",
+      accept: () => ({ ok: true }),
       register() {},
       start() {
         return new Promise<void>(() => {}); // 永不 resolve（如无超时 connect）
@@ -392,6 +401,7 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
     const holder: { ctx: SourceContext | null } = { ctx: null };
     const flappy: SourceAdapter = {
       name: "flappy",
+      accept: () => ({ ok: true }),
       activity: () => [
         { key: "event", label: "收到" },
         { key: "ingest", label: "入库" },
@@ -402,8 +412,8 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
           ctx.markActivity("event"); // 适配器自己的观测口径（core 不再替它猜）
           const result = ctx.ingest({
             content: "恢复测试",
-            sourceType: "flappy",
-            sourceIdentity: { sourceLabel: "易抖源" },
+            source: "flappy",
+            identity: { displayName: "易抖源" },
             eventTime: null,
           });
           return reply.code(200).send(result);
@@ -453,6 +463,7 @@ describe("设置声明落库前校验（simplify 轮根修 + 终轮验证 M1）"
     );
     const bad: SourceAdapter = {
       name: "badschema",
+      accept: () => ({ ok: true }),
       register() {},
       // 空键 = 类型合法（string）但 schema 非法（min(1)）——未类型化的 JS 作者会踩的坑
       settings: () => [{ key: "", type: "text", label: "坏键" }],

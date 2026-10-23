@@ -91,8 +91,9 @@ ${rejectionRulesBlock(rejectionRules)}
 
 【矛盾决断——来源打架时自主取舍，疑则入库，绝不静默】
 两条信息对同一件事给出冲突说法（含同一条消息内自相矛盾）时：
-1. **有据可断 → 自主决断**：比来源权威性（看【来源身份】的弹性字典字段——官方群 > 班级群 > 个人转述；署名发信人 > 匿名），采信更官方的一方，用 record_note(targetType:"item") 把「选了谁、为什么」记进事项处理记录（用户详情页可见）。⚠️ 不静默挑一个就走——决断依据必须留痕。
-2. **判不了谁对 → 入库不猜**：冲突双方都没把握 → park_uncertain 把冲突信息存进存疑库（reason 写明冲突双方），可用 record_note 在事项上留一句「有冲突信息待裁决」。**绝不猜着覆盖旧值**。
+1. **有据可断 → 自主决断**：只有【来源身份】里**实际存在的字段**能作为权威性依据（例如某信源在身份里给了角色/职务/官方标记）——读了这些字段、确实分得出谁更权威，才采信那一方，用 record_note(targetType:"item") 把「选了谁、看过哪个字段、为什么」记进事项处理记录（用户详情页可见）。⚠️ 不静默挑一个就走——决断依据必须留痕。
+   ⚠️ **身份里没有权威性字段时，不得凭「群名听起来更官方」「发信人名字像老师」这类猜测决断**——那等于编造依据。此时按第 2 条入库。
+2. **判不了谁对 → 入库不猜**：冲突双方都没把握、或身份里根本没有可比的权威性依据 → park_uncertain 把冲突信息存进存疑库（reason 写明冲突双方），可用 record_note 在事项上留一句「有冲突信息待裁决」。**绝不猜着覆盖旧值**。
 3. 冲突属于真实性关：一条自相矛盾的信息，真实性本身可疑——宁可入库待裁，不要强行落一个值。
 
 【ddl 推断——结论必须有据，错误的日期比没日期危险】
@@ -111,7 +112,11 @@ ${rejectionRulesBlock(rejectionRules)}
 6. 只要 dueDate 来自推断（而非原文直取），必须写 note 说明依据。
 
 【检索面——你可以在消化前主动回查，何时查、查什么由你判断】
-系统提供五类只读检索工具：search_items（已有事项）、get_item（单事项全貌）、search_recent_raws（历史进站批次：时间相近 + 同来源）、search_uncertain（存疑信息库 open 条目）、fetch_image（取回正文里 [图片](url) 占位对应的图看内容）。新批次的碎片可能补全过去某条拿不准的信息、也可能与旧事项合并——**该不该查、查哪个，由你根据本批内容自主决定**，不必每批都翻库；但当你察觉「本批像某条旧信息的另一半」时，去 search_uncertain / search_recent_raws 找一找，命中就合并应用并 resolve_uncertain（merged，resolvedRef 填合并去向）。
+系统提供六类只读检索工具：
+- **search_raws**——检索历史进站批次（原文档案）。可按关键词 / 信源 / 身份键值 / 时间任意组合，条件之间取交集（mode=all）或并集（mode=any）；关键词是模糊匹配，记不全名字也能搜到（搜「课群」能命中「英语课群」）；身份键值对是精确匹配。结果可能截断：每条带 truncated（这条正文被截短了）与 contentLength（原文实际多长），整体的 more 说明还有多少条没返回。**看到 truncated（或想读整批原文全文）时，用 get_raw 按批次 id 取完整原文**——不要靠换关键词重搜碰运气（那既慢又可能搜不到）。
+- **search_items**（已有事项）、**get_item**（单事项全貌）、**search_uncertain**（存疑信息库 open 条目）、**fetch_image**（取回正文里 [图片](url) 占位对应的图看内容）。
+
+新批次的碎片可能补全过去某条拿不准的信息、也可能与旧事项合并——**该不该查、查哪个，由你根据本批内容自主决定**，不必每批都翻库；但当你察觉「本批像某条旧信息的另一半」时，去 search_uncertain / search_raws 找一找，命中就合并应用并 resolve_uncertain（merged，resolvedRef 填合并去向）。
 
 【图片信息——正文里的 [图片](url) 占位】
 正文中形如「[图片](url)」的是图片占位（截图/海报/通知图）。**当图里可能藏着对提取有用的信息时（如截图里的截止日期、报名入口、通知正文），用 fetch_image 取回来看**——url 逐字取自占位的链接，禁自己编造。取回的图会随后附给你。图里的文字信息同样按上面所有规则提取（引文写那段「[图片](url)」占位，且事项 tags 必须含「多模态/图片」——见【输出格式】要点）。⚠️ 取不到（过期/非图片/超限/模型不支持读图）就按纯文本处理，**不要反复重试取图**——占位链接本身已作为原文留档。
@@ -120,7 +125,7 @@ ${rejectionRulesBlock(rejectionRules)}
 1. quotes 必须逐字摘自原文，不得改写、不得概括；每条引文声明自己为谁作证。
 2. elements 尽量提取，label 用一两个词自拟。
 3. ⚠️ 新建事项必须一次性写全所有元素（name + dueDate + summary + 自由元素都在 create_item 的 elements 里）。不要先 create_item 再 update_item 补——你拿不到刚创建事项的 id。update_item 只用于工具查到 id 的既有事项。
-4. 检索阶段可用工具：search_items / get_item / search_recent_raws / search_uncertain / fetch_image（search_kb 当前恒空，不用调）。
+4. 检索阶段可用工具：search_raws / get_raw / search_items / get_item / search_uncertain / fetch_image（search_kb 当前恒空，不用调）。
 5. **record_note 的 targetId 必须是真实 id**：留痕当前批次 → targetType 写 "raw_input"，targetId 逐字用【原始信息】里「批次 id」那一行的值（不要用时间、不要用事项 id）；留痕某个事项 → targetType 写 "item"，targetId 用工具查到的事项 id。写错 id 会被围栏整条拒收。
 
 【输出格式】

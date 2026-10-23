@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Lock, LockOpen } from "lucide-react";
 import { itemName, type NoticeRow } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
@@ -72,6 +73,13 @@ export function NoticePanel({
   const [hintVisible, setHintVisible] = useState(() => !loadSwipeHintSeen("notice"));
   /** 删除/撤销失败必须可见（红线「不许静默」）。 */
   const [actionError, setActionError] = useState<string | null>(null);
+  /** 主卡锁（用户 2026-10-23）：开锁 = 可横滑（清除/稍后）；关锁 = 固定、可与卡内内容交互。
+   *
+   *  为什么需要它：主卡整体可横滑，而卡内又有可交互内容（引文、按钮、图片、可选中文字）——
+   *  手势会抢走指针，交互就废了。默认**开锁**（保留滑动手势）；要选字/点图/开引文时先关锁。
+   *  **切换通知时自动回到开锁**（用户定：每次查看默认开锁）——否则上一条的锁定状态会悄悄
+   *  延续到下一条，用户点进去发现滑不动却不知道为什么。 */
+  const [locked, setLocked] = useState(false);
 
   const pendingRef = useRef<typeof pending>(null);
   useEffect(() => {
@@ -150,6 +158,7 @@ export function NoticePanel({
     if (row === undefined) return;
     lastMarked.current = selectedId;
     selectRef.current(row);
+    setLocked(false); // 切换通知 → 回到开锁（每条默认都能滑，用户 2026-10-23）
   }, [selectedId]);
 
   // 深链：选中目标（token 防轮询重放）
@@ -250,17 +259,18 @@ export function NoticePanel({
 
   /** 横滑：右滑 = 清除（延迟提交、可撤回），左滑 = 稍后（不写库）。手势机制与看板行同一份（lib/swipe）。 */
   const swipe = useSwipeActions({
-    enabled: pending === null && selected !== null,
+    enabled: pending === null && selected !== null && !locked,
     ratio: 0.35,
     onSwipe: (dir) => {
+      // ⚠️ 先归位，再判空：手势钩子过阈值时刻意不清位移（留给看板行做飞出动效），
+      // 所以**任何**提前 return 都会让卡片停在拖开的位置。`selected` 可能在拖拽途中
+      // 被轮询刷掉（选中项被过滤/移除），那条路径也必须归位。
+      swipe.resetPosition();
       const row = selected;
       if (row === null) return;
       // 会用了就不再提示
       markSwipeHintSeen("notice");
       setHintVisible(false);
-      // 通知卡用的是「模糊遮罩 + 倒计时环」，不是滑出动画：先把卡片弹回原位，
-      // 否则它会停在拖开的位置（手势钩子过阈值时刻意不清位移，留给看板行做飞出动效）
-      swipe.resetPosition();
       if (dir === "right") startDelete(row);
       else skip(row);
     },
@@ -365,7 +375,7 @@ export function NoticePanel({
                       title={isUnread(selected) ? "未读" : "已读"}
                       aria-label={isUnread(selected) ? "未读" : "已读"}
                     />
-                    {selected.sourceLabel !== null && <span>{selected.sourceLabel}</span>}
+                    {selected.displayName !== null && <span>{selected.displayName}</span>}
                     <span title={`更新于 ${fmtFullTime(selected.updatedAt)}`}>
                       {fmtShortTime(selected.updatedAt)}
                     </span>
@@ -377,6 +387,23 @@ export function NoticePanel({
                     <span className="ml-auto tabular-nums">
                       {selectedIndex + 1}/{visible.length}
                     </span>
+                    {/* 锁：开 = 可横滑（清除/稍后）；关 = 固定，卡内可正常交互（选字/看图/开引文）。
+                        与序号同行贴右——用户 2026-10-23：「最头顶一行对齐的最右侧挤一个小锁头」。 */}
+                    <button
+                      type="button"
+                      className="ml-1.5 -my-0.5 shrink-0 cursor-pointer rounded p-0.5 text-ink-muted hover:text-accent"
+                      onClick={(e) => {
+                        e.stopPropagation(); // 别冒到卡片上去（那是手势/选中区）
+                        setLocked((v) => !v);
+                      }}
+                      title={
+                        locked ? "已锁定：卡内可正常操作（拖动已停用）" : "开锁：可左右滑动切换动作"
+                      }
+                      aria-label={locked ? "解锁（恢复横滑）" : "锁定（固定卡片、可操作内容）"}
+                      aria-pressed={locked}
+                    >
+                      {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+                    </button>
                   </div>
                 </div>
                 {/* 内容整体右移 10px：标题不缩进、标题下的信息轻内收（用户 2026-10-19） */}
@@ -427,9 +454,9 @@ export function NoticePanel({
                   />
                   <span className="min-w-0 flex-1 truncate">{itemName(r.item.elements)}</span>
                   {/* 来源标签窄屏让位标题（2026-10-22 移动端走查）：主卡里本就有来源，列表只做索引 */}
-                  {r.sourceLabel !== null && (
+                  {r.displayName !== null && (
                     <span className="hidden shrink-0 text-xs text-ink-muted sm:inline">
-                      {r.sourceLabel}
+                      {r.displayName}
                     </span>
                   )}
                   <span

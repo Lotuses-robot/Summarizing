@@ -8,8 +8,8 @@ import { IngestRequestSchema } from "./index";
 function body(eventTime: unknown) {
   return {
     content: "群里说的作业通知",
-    sourceType: "paste",
-    sourceIdentity: { sourceLabel: "测试" },
+    source: "paste",
+    identity: { displayName: "测试" },
     eventTime,
   };
 }
@@ -21,8 +21,8 @@ describe("IngestRequestSchema.eventTime（北京墙钟或 null）", () => {
     expect(IngestRequestSchema.safeParse(body(null)).success).toBe(true); // 无事件时间
     const noField = IngestRequestSchema.safeParse({
       content: "x",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "测试" },
+      source: "paste",
+      identity: { displayName: "测试" },
     });
     expect(noField.success).toBe(true);
     if (noField.success) expect(noField.data.eventTime).toBeNull(); // default(null)

@@ -158,7 +158,7 @@ function idleCard(latest: PipelineRun | undefined): {
     return {
       icon: <XCircle size={20} className="shrink-0 text-red-500" />,
       title: "空闲",
-      sub: `最近一批未处理：${latest.sourceLabel}`,
+      sub: `最近一批未处理：${latest.displayName}`,
       tone: "text-danger",
     };
   }
@@ -226,7 +226,7 @@ function DigestingCard({
       meta={
         <>
           <Loader2 size={16} className="shrink-0 animate-spin text-amber-500" />
-          <span className="text-xs font-medium text-ink-muted">{run.sourceLabel}</span>
+          <span className="text-xs font-medium text-ink-muted">{run.displayName}</span>
           <span className="ml-auto text-xs tabular-nums text-ink-muted/70">
             {rounds > 0 && `第 ${rounds}/${DIGEST_MAX_ROUNDS} 轮 · `}已跑 {elapsedSec}s
           </span>
@@ -270,7 +270,7 @@ function DoneCard({ run }: { run: PipelineRun }) {
       shell="flash-in border border-accent/25 bg-gradient-to-b from-accent-soft to-accent-soft/30"
       meta={
         <>
-          <span className="text-xs font-medium text-ink-muted">{run.sourceLabel}</span>
+          <span className="text-xs font-medium text-ink-muted">{run.displayName}</span>
           <span className="ml-auto text-xs tabular-nums text-ink-muted/70">
             {fmtShortTime(run.receivedAt)}
           </span>
@@ -295,7 +295,7 @@ function IdleCard({ latest }: { latest: PipelineRun | undefined }) {
       meta={
         <>
           {latest !== undefined && (
-            <span className="text-xs font-medium text-ink-muted/80">{latest.sourceLabel}</span>
+            <span className="text-xs font-medium text-ink-muted/80">{latest.displayName}</span>
           )}
           <span className="ml-auto text-xs tabular-nums text-ink-muted/60">
             {latest !== undefined ? fmtShortTime(latest.receivedAt) : ""}
@@ -468,7 +468,7 @@ export function PipelineView() {
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", info.dot)} />
                 <span className="text-[10px] text-ink-muted">{info.text}</span>
-                <span className="text-xs font-medium">{run.sourceLabel}</span>
+                <span className="text-xs font-medium">{run.displayName}</span>
                 {run.summary !== null && (
                   <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
                     {run.summary}

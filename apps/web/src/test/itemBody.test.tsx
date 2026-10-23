@@ -72,8 +72,8 @@ function makeDetail(overrides: Partial<GetItemResult> = {}): GetItemResult {
       raw1: {
         id: "raw1",
         content: "群通知：英语作业 9 月 30 号截止，请互相转告",
-        sourceType: "paste",
-        sourceIdentity: { sourceLabel: "QQ", groupId: "123", sender: "学习委员" },
+        source: "paste",
+        identity: { displayName: "QQ", groupId: "123", sender: "学习委员" },
         receivedAt: "2026-09-26T10:00:00",
         eventTime: null,
         digestState: "digested",
@@ -161,8 +161,8 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
           raw1: {
             id: "raw1",
             content: "群通知",
-            sourceType: "nc",
-            sourceIdentity: { sourceLabel: "英语课群", groupId: "940641749", sender: "学习委员" },
+            source: "nc",
+            identity: { displayName: "英语课群", groupId: "940641749", sender: "学习委员" },
             receivedAt: "2026-09-26T10:00:00",
             eventTime: null,
             digestState: "digested",
@@ -172,8 +172,8 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
           raw2: {
             id: "raw2",
             content: "补发",
-            sourceType: "nc",
-            sourceIdentity: { sourceLabel: "英语课群", groupId: "940641749" },
+            source: "nc",
+            identity: { displayName: "英语课群", groupId: "940641749" },
             receivedAt: "2026-09-27T10:00:00",
             eventTime: null,
             digestState: "digested",
@@ -222,11 +222,28 @@ describe("ItemBody（展开体，D-80/D-82）", () => {
     expect(screen.queryByText("[groupId]")).not.toBeInTheDocument();
   });
 
+  it("引文悬浮窗渲染在 document.body 下（不被行的 transform 关住）", async () => {
+    stubFetch(makeDetail());
+    const { container } = render(<ItemBody id="it1" />);
+    fireEvent.click(await screen.findByText("[链接]"));
+    fireEvent.click(screen.getByText("看原文"));
+    const overlay = await waitFor(() => {
+      const el = document.querySelector(".fixed.inset-0");
+      if (el === null) throw new Error("悬浮窗未渲染");
+      return el;
+    });
+    // 关键：`position: fixed` 的参照系会被**任何 transform 祖先**改写。通知主卡/看板行都是
+    // 可被 translateX 拖动的元素，悬浮窗若渲染在它们内部，就会以那张卡为参照——2026-10-23
+    // 实测表现为「以非常蜷缩的姿态进入通知框内，随着通知框一起滑走」。portal 到 body 才是视口级。
+    expect(container.contains(overlay)).toBe(false);
+    expect(overlay.parentElement).toBe(document.body);
+  });
+
   it("「看原文」打开引文悬浮窗：批次原文 + 高亮引文句", async () => {
     stubFetch(makeDetail());
     render(<ItemBody id="it1" />);
     fireEvent.click(await screen.findByText("[链接]"));
-    // 引文旁标来源（D-89 选 B）：裸 sourceLabel 可见，hover 是**完整身份串**（含其余键）
+    // 引文旁标来源（D-89 选 B）：裸 displayName 可见，hover 是**完整身份串**（含其余键）
     const label = screen.getByTitle("QQ（groupId=123 · sender=学习委员）");
     expect(label).toHaveTextContent("QQ");
     expect(label).not.toHaveTextContent("groupId"); // 行内只见裸 label，全串在 title

@@ -233,8 +233,8 @@ describe("成功调用落行（真实链路）", () => {
       url: "/api/ingest",
       payload: {
         content: "周三前交物理实验报告",
-        sourceType: "nc",
-        sourceIdentity: { sourceLabel: "测试群" },
+        source: "nc",
+        identity: { displayName: "测试群" },
         eventTime: null,
       },
     });

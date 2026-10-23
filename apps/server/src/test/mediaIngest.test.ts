@@ -27,8 +27,8 @@ async function smallPng(): Promise<Buffer> {
 function seedRaw(db: ReturnType<typeof makeDb>, content: string): string {
   const raw = repo.insertRawInput(db, {
     content,
-    sourceType: "nc",
-    sourceIdentity: { sourceLabel: "测试群", groupId: "g1" },
+    source: "nc",
+    identity: { displayName: "测试群", groupId: "g1" },
     receivedAt: "2026-09-28T10:00:00",
     eventTime: null,
   });

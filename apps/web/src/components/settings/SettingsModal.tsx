@@ -6,6 +6,7 @@ import {
   Filter as FilterIcon,
   Loader2,
   Palette as PaletteIcon,
+  Route,
   Rss,
   type LucideIcon,
 } from "lucide-react";
@@ -17,6 +18,7 @@ import { PALETTES } from "../../lib/appearance";
 import { pushEscLayer } from "../../lib/escLayer";
 import { Card, Row, Segmented, StatusSlot, useStatus } from "./primitives";
 import { SourcesSection } from "./SourcesSection";
+import { RouterSection } from "./RouterSection";
 import { CloseButton } from "../CloseButton";
 import {
   loadAppearance,
@@ -53,7 +55,7 @@ const DENSITY_NAMES: Record<Density, string> = { comfortable: "舒适", compact:
 
 // 左侧分类栏（用户 2026-09-27 定：左导航 + 右侧内容，点击定位）。
 // 右侧内容 = 分组卡（macOS 系统设置式，用户 2026-09-30 走查定：一行一设置、控件右对齐、**改完即生效**）。
-type SectionId = "appearance" | "ai" | "rules" | "data" | "sources";
+type SectionId = "appearance" | "ai" | "rules" | "data" | "router" | "sources";
 
 /** 段 id → DOM 锚点 id 的**唯一出处**（JSX 挂锚点、滚动定位、联动观测都查它；漏一段编译不过）。 */
 const SECTION_DOM = {
@@ -61,6 +63,7 @@ const SECTION_DOM = {
   ai: "settings-ai",
   rules: "settings-rules",
   data: "settings-data",
+  router: "settings-router",
   sources: "settings-sources",
 } satisfies Record<SectionId, string>;
 
@@ -70,6 +73,7 @@ const SECTIONS: SectionMeta[] = [
   { id: "ai", label: "AI", icon: Bot },
   { id: "rules", label: "收取规则", icon: FilterIcon },
   { id: "data", label: "数据", icon: Database },
+  { id: "router", label: "路由", icon: Route },
   { id: "sources", label: "信源", icon: Rss },
 ];
 
@@ -576,6 +580,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </a>
             </Row>
           </Card>
+
+          <RouterSection id={SECTION_DOM.router} />
 
           <Card
             id={SECTION_DOM.sources}

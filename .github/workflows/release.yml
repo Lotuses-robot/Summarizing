@@ -29,6 +29,9 @@ jobs:
           cache: npm
       # --ignore-scripts：better-sqlite3 自带预编译，禁 node-gyp 编译（Windows runner 缺 VS 工具链）
       - run: npm ci --ignore-scripts
+      # nodejieba（D-127）：安装脚本 = 下载 win32-x64 预编译产物，被上面的 --ignore-scripts 跳过；
+      # 单独补跑（下载，不编译）。build:release 要拷它的 .node 进便携包。
+      - run: npm rebuild nodejieba
       - run: npm run check
       - run: npm run build:release
       - uses: actions/upload-artifact@v4

@@ -12,8 +12,8 @@ import {
   ProvenanceSchema,
   RawInputSchema,
   UncertainInputSchema,
-  normalizeSourceIdentity,
-  sourceLabelOf,
+  normalizeIdentity,
+  displayNameOf,
   extractImageUrls,
   mediaIdFromUrl,
   type AiSettings,
@@ -25,10 +25,11 @@ import {
   type PipelineRun,
   type Provenance,
   type RawInput,
-  type SourceIdentity,
+  type Identity,
   type UncertainInput,
 } from "@summarizing/shared";
 import { nowWallClock, wallClockFromDate } from "../shared/time";
+import { tokenizeContent, tokenizeIdentity } from "../search/tokenize";
 import type { DbOrTx } from "./db";
 import * as s from "./schema";
 
@@ -269,7 +270,9 @@ export interface RawInputExtras {
 }
 
 /** 原始文本先落档（01§5.3）：在 AI 之前、状态 pending——原文永不丢失的起点。
- *  sourceIdentity 弹性字典序列化进 JSON 列；raw 归档载荷可选（D-84）。 */
+ *  identity 弹性字典序列化进 JSON 列；raw 归档载荷可选（D-84）。
+ *  切词索引列（tokens / identity_tokens）与原文同一次写入，随后**显式**写 raw_fts
+ *  （与 db.ts 的建表口径对应：普通 FTS5 表、不用触发器）。 */
 export function insertRawInput(
   db: DbOrTx,
   args: Omit<RawInput, "id" | "digestState"> & RawInputExtras,
@@ -279,20 +282,30 @@ export function insertRawInput(
     id: newId(),
     digestState: "pending" as const,
     ...rest,
-    sourceIdentity: JSON.stringify(rest.sourceIdentity),
+    identity: JSON.stringify(rest.identity),
     raw: raw === undefined ? null : JSON.stringify(raw),
+    tokens: tokenizeContent(rest.content),
+    identityTokens: tokenizeIdentity(rest.identity),
   };
-  db.insert(s.rawInputs).values(row).run();
+  // 原文与索引**同一事务**写下：两次独立提交时，中间崩溃会留下「有原文、无索引」的批次——
+  // 而 backfill 只补 tokens 为 NULL 的行，那条会永久搜不到。事务同时把两次 WAL 提交合成一次。
+  db.transaction((tx) => {
+    tx.insert(s.rawInputs).values(row).run();
+    // 索引显式写入（普通 FTS5 表 + 显式写、不用触发器——原因见 db.ts）。raw_id 用于回连原文。
+    tx.run(
+      sql`INSERT INTO raw_fts(tokens, identity_tokens, raw_id) VALUES (${row.tokens}, ${row.identityTokens}, ${row.id})`,
+    );
+  });
   return RawInputSchema.parse({ ...rest, id: row.id, digestState: row.digestState });
 }
 
-/** DB 行 → RawInput：sourceIdentity 列过弹性字典防御解析（存量裸字符串 → { name: 原串 }，D-84）。 */
+/** DB 行 → RawInput：identity 列过弹性字典防御解析（存量裸字符串 → { name: 原串 }，D-84）。 */
 function rowToRawInput(row: typeof s.rawInputs.$inferSelect): RawInput {
   return RawInputSchema.parse({
     id: row.id,
     content: row.content,
-    sourceType: row.sourceType,
-    sourceIdentity: normalizeSourceIdentity(parseJsonMaybe(row.sourceIdentity)),
+    source: row.source,
+    identity: normalizeIdentity(parseJsonMaybe(row.identity)),
     receivedAt: row.receivedAt,
     eventTime: row.eventTime,
     digestState: row.digestState,
@@ -345,41 +358,26 @@ export function listRawInputsByState(db: DbOrTx, state: RawInput["digestState"])
     .map((r) => rowToRawInput(r));
 }
 
-/** 最近 N 天的进站批次（search_recent_raws 数据源；按接收时间倒序，截断防全表灌入）。
- *  返回 shared 形状的批次（不含 raw 归档——给 agent0 的量控）。
- *  daysBack 过滤下沉到 SQL（墙钟定宽 → 字典序 = 时间序，可直接字符串比较）——
- *  LIMIT 只在**命中窗口内**截断；若在内存过滤则 LIMIT 会先砍掉老 rowid 的近期批次（评审 A1）。 */
-export function listRecentRawInputs(db: DbOrTx, daysBack: number): RawInput[] {
-  const cutoff = wallClockDaysAgo(daysBack);
+/** 按 id 批量读批次（检索结果取详情用；顺序由调用方决定——返回数组按 id 索引）。 */
+export function getRawInputsByIds(db: DbOrTx, ids: string[]): RawInput[] {
+  if (ids.length === 0) return [];
   return db
     .select()
     .from(s.rawInputs)
-    .where(sql`${s.rawInputs.receivedAt} >= ${cutoff}`)
-    .orderBy(sql`rowid DESC`)
-    .limit(RECENT_RAWS_SQL_LIMIT)
+    .where(inArray(s.rawInputs.id, ids))
     .all()
-    .map((r) => rowToRawInput(r))
-    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+    .map((r) => rowToRawInput(r));
 }
 
 /** 某来源类型最近一次进站时刻（信源「最近活动」在重启后从库恢复，不从零开始）。无记录 = null。 */
-export function latestRawAtForSourceType(db: DbOrTx, sourceType: string): string | null {
+export function latestRawAtForSourceType(db: DbOrTx, source: string): string | null {
   const row = db
     .select({ at: sql<string | null>`max(${s.rawInputs.receivedAt})` })
     .from(s.rawInputs)
-    .where(eq(s.rawInputs.sourceType, sourceType))
+    .where(eq(s.rawInputs.source, source))
     .get();
   return row?.at ?? null;
 }
-
-/** N 天前的北京墙钟串（与 receivedAt 同格式、同口径——供 SQL 字符串比较；单一出处 wallClockFromDate，
- *  勿手搓：手搓副本会按机器时区算，与 +08:00 的 receivedAt 偏 8 小时，D-97 走查逮出）。 */
-function wallClockDaysAgo(days: number): string {
-  return wallClockFromDate(new Date(Date.now() - days * 86_400_000));
-}
-
-/** SQL 端截断上限（rowid 倒序 = 最新优先；过滤后数量由调用方再截）。 */
-const RECENT_RAWS_SQL_LIMIT = 200;
 
 /** 批次级流水（消化生命周期 + agent0 轨迹；事项历史在 item_versions；specs/004 正名）。 */
 export function appendPipelineEvent(
@@ -452,8 +450,8 @@ export function listPipelineRuns(db: DbOrTx, limit = 50): PipelineRun[] {
       .find((e) => e.action === "digest_done" || e.action === "digest_failed");
     return PipelineRunSchema.parse({
       id: r.id,
-      sourceType: r.sourceType,
-      sourceLabel: sourceLabelOf(normalizeSourceIdentity(parseJsonMaybe(r.sourceIdentity))),
+      source: r.source,
+      displayName: displayNameOf(normalizeIdentity(parseJsonMaybe(r.identity))),
       receivedAt: r.receivedAt,
       eventTime: r.eventTime,
       digestState: r.digestState,
@@ -831,8 +829,8 @@ export function insertUncertainInput(
   db: DbOrTx,
   args: {
     content: string;
-    sourceType: string;
-    sourceIdentity: SourceIdentity;
+    source: string;
+    identity: Identity;
     eventTime: string | null;
     receivedAt: string;
     originRawInputId: string | null;
@@ -844,8 +842,8 @@ export function insertUncertainInput(
   const row = {
     id: newId(),
     content: args.content,
-    sourceType: args.sourceType,
-    sourceIdentity: JSON.stringify(args.sourceIdentity),
+    source: args.source,
+    identity: JSON.stringify(args.identity),
     eventTime: args.eventTime,
     receivedAt: args.receivedAt,
     originRawInputId: args.originRawInputId,
@@ -864,7 +862,7 @@ export function insertUncertainInput(
 function uncertainRowToInput(row: typeof s.uncertainInputs.$inferSelect): UncertainInput {
   return UncertainInputSchema.parse({
     ...row,
-    sourceIdentity: normalizeSourceIdentity(parseJsonMaybe(row.sourceIdentity)),
+    identity: normalizeIdentity(parseJsonMaybe(row.identity)),
     needsHuman: Number(row.needsHuman),
   });
 }
@@ -972,6 +970,12 @@ function mediaMapOf(
 
 /** 回收站保留天数（007，OQ-6）：固定 15 天，首版不做设置项。 */
 const PURGE_DAYS = 15;
+
+/** N 天前的北京墙钟串（与 receivedAt 同格式、同口径——供 SQL 字符串比较；单一出处 wallClockFromDate，
+ *  勿手搓：手搓副本会按机器时区算，与 +08:00 的 receivedAt 偏 8 小时，D-97 走查逮出）。 */
+function wallClockDaysAgo(days: number): string {
+  return wallClockFromDate(new Date(Date.now() - days * 86_400_000));
+}
 
 /** 一键清理回收站（007）：物理清除**进入 trashed 超过 PURGE_DAYS 天**的信息
  *  （按 trashedAt——进入回收站的时刻，非创建时刻，用户 2026-10-16 定）。

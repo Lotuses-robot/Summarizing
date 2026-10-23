@@ -37,6 +37,15 @@ export interface Space {
   webhookRoutes: WebhookRoute[];
   /** 本账户的图片媒体目录 `data/media/<uid>/`（009；装配期 mkdir，上传/清理都走它）。 */
   mediaDir: string;
+  /** 信源**自己声明**的「媒体占位 → 字节」实现（D-128；键 = 信源名）。
+   *  图片缓存按批次的 source 查它——只有「占位不是公开 URL」的信源会登记。
+   *  ⚠️ 这张表 `/api/ingest` 也读得到，别往里放部署级的凭据（见 `relayMediaFetchers`）。 */
+  mediaFetchers: Map<string, NonNullable<SourceAdapter["fetchMedia"]>>;
+  /** **部署级**（Router）注入的「媒体占位 → 字节」实现（D-130；键 = 信源名）。
+   *  只给同名信源的 `ctx.ingest` 用——不暴露给 `/api/ingest`（那会把部署凭据借给任何登录用户）。 */
+  relayMediaFetchers: Map<string, NonNullable<SourceAdapter["fetchMedia"]>>;
+  /** 按名字取本账户已上岗的信源（D-130：Router 投递用）。未启用返回 undefined。 */
+  source(name: string): SourceAdapter | undefined;
   /** 关停：各信源 stop + 清理表反向撤销（逐项隔离）。 */
   stop(): Promise<void>;
 }
@@ -87,8 +96,12 @@ async function assembleSpace(
     const webhookRoutes: WebhookRoute[] = [];
     const mediaDir = makeMediaDir(dataRoot, account.uid);
     const tools = makeAgentTools(db, mediaDir);
+    /** 信源自带的媒体取字节实现（D-128）——core 的图片缓存按批次的 source 查它。
+     *  放在 registerSources 之前建好、由它填充；随 space 一起交出去。 */
+    const mediaFetchers = new Map<string, NonNullable<SourceAdapter["fetchMedia"]>>();
+    const relayMediaFetchers = new Map<string, NonNullable<SourceAdapter["fetchMedia"]>>();
     const assembly = registerSources(
-      { db, llmRef, sourceStates, webhookRoutes, mediaDir },
+      { db, llmRef, sourceStates, webhookRoutes, mediaDir, mediaFetchers, relayMediaFetchers },
       factories.map((make) => make()),
     );
     await assembly.start();
@@ -99,7 +112,11 @@ async function assembleSpace(
     // 启动自动重试（D-116）：只重试本次清扫扫出的被打断批次——fire-and-forget，不阻塞启动。
     // 放在装配完成之后：llm/tools/媒体目录都已就绪，重试走的是与手动重试完全相同的管线。
     const client = llmRef.current;
-    retryInterruptedOnStartup(db, client, tools, client.modelTag, interrupted, mediaDir);
+    retryInterruptedOnStartup(db, client, tools, client.modelTag, interrupted, mediaDir, (source) =>
+      // 启动重试发生在装配期：Router 还没投递过，`relayMediaFetchers` 通常是空的；
+      // 本源自己声明的实现已在 registerSources 里填好，这里查得到就够。
+      mediaFetchers.get(source),
+    );
 
     return {
       uid: account.uid,
@@ -110,6 +127,9 @@ async function assembleSpace(
       sourceStates,
       webhookRoutes,
       mediaDir,
+      mediaFetchers,
+      relayMediaFetchers,
+      source: (name: string) => assembly.source(name),
       stop: async () => {
         stopMediaSweep();
         await assembly.stop();
@@ -134,6 +154,12 @@ export interface SpaceHub {
   ensure(uid: string): Promise<Space>;
   /** 按接入令牌定空间（webhook 网关用）：仅 active 账户；无/错/停用 → undefined。 */
   byToken(token: string): Promise<Space | undefined>;
+  /** 按 uid 取**可接收**的空间（Router 投递用）：账户不存在或已停用 → undefined。
+   *
+   *  为什么不复用 `ensure`：`ensure` 只查「账户存在」，停用账户照样会被装配——
+   *  那会让已停用的人继续收消息、用他自己的 key 消化（D-130 投递必须查 status）。
+   *  为什么不复用 `byToken`：Router 手上没有令牌，只有 uid。 */
+  forDelivery(uid: string): Promise<Space | undefined>;
   /** 启动时全量装配：只遍历 **active** 账户（停用不装配——重新启用后首请求懒装配）。 */
   ensureAll(): Promise<void>;
   /** 关停全部空间（信源 stop + 清理表；超时隔离由调用方〔index.ts〕包）。 */
@@ -175,6 +201,12 @@ export function makeSpaceHub(args: {
       const account = getAccountByToken(args.registry, token);
       if (account === undefined || account.status !== "active") return undefined;
       return ensure(account.uid);
+    },
+    async forDelivery(uid: string): Promise<Space | undefined> {
+      const account = getAccountByUid(args.registry, uid);
+      // 停用的账户 = 不该再往它库里写东西（管理通道的「停用」必须真的停）
+      if (account === undefined || account.status !== "active") return undefined;
+      return ensure(uid);
     },
     async ensureAll(): Promise<void> {
       for (const account of listAccounts(args.registry)) {

@@ -74,7 +74,7 @@ for (const t of [
 // ── 批次原文（全部虚构）──
 type RawSeed = {
   content: string;
-  sourceLabel: string;
+  displayName: string;
   sender: string;
   groupId: string;
   receivedAt: string;
@@ -82,63 +82,63 @@ type RawSeed = {
 const raws: RawSeed[] = [
   {
     content: `【课程设计】数据结构大作业：实现一个图书管理系统（图书增删改查 + 读者管理），${spokenDate(3)}前把设计文档和源码打包交到教学网。`,
-    sourceLabel: "学习交流群",
+    displayName: "学习交流群",
     sender: "班长 小林",
     groupId: "10001",
     receivedAt: wallClockAgo(3 * DAY),
   },
   {
     content: `图书馆提醒：《算法导论》应还日期为 ${spokenDate(-1)}，可在图书馆公众号续借一次。`,
-    sourceLabel: "班级通知群",
+    displayName: "班级通知群",
     sender: "图书馆",
     groupId: "10002",
     receivedAt: wallClockAgo(1 * DAY),
   },
   {
     content: "关于期中考试安排：高等数学期中考试定于第 8 周周四下午 14:00–16:00，考场另行通知。",
-    sourceLabel: "学习交流群",
+    displayName: "学习交流群",
     sender: "学习委员",
     groupId: "10001",
     receivedAt: wallClockAgo(2 * DAY),
   },
   {
     content: "入学体检复查提醒：有复查项目的同学请携带学生卡到校医院二楼登记复查。",
-    sourceLabel: "班级通知群",
+    displayName: "班级通知群",
     sender: "辅导员",
     groupId: "10002",
     receivedAt: wallClockAgo(5 * DAY),
   },
   {
     content: "校程序设计竞赛来啦！三人一队，先到竞赛平台组队再报名，截止时间见平台公告。",
-    sourceLabel: "社团大群",
+    displayName: "社团大群",
     sender: "社长",
     groupId: "10003",
     receivedAt: wallClockAgo(4 * DAY),
   },
   {
     content: "《形势与政策》论文今天 24 点前交到课程群作业，3000 字、主题自选。",
-    sourceLabel: "班级通知群",
+    displayName: "班级通知群",
     sender: "学委",
     groupId: "10002",
     receivedAt: wallClockAgo(6 * DAY),
   },
   {
     content: "本周六招新摊位值班，报名接龙：小林、阿凯、我。",
-    sourceLabel: "社团大群",
+    displayName: "社团大群",
     sender: "社长",
     groupId: "10003",
     receivedAt: wallClockAgo(9 * DAY),
   },
   {
     content: `帮我记一下，${spokenDate(6)}要和导师开组会讨论选题。`,
-    sourceLabel: "前台对话",
+    displayName: "前台对话",
     sender: "我",
     groupId: "",
     receivedAt: wallClockAgo(30 * 60_000),
   },
   {
     content: "【变更】数据结构课下周起改到明理楼3楼上课，原明理楼5楼不再使用。",
-    sourceLabel: "学习交流群",
+    displayName: "学习交流群",
     sender: "学习委员",
     groupId: "10001",
     receivedAt: wallClockAgo(3 * HOUR),
@@ -147,11 +147,11 @@ const raws: RawSeed[] = [
 
 const rawIds: string[] = [];
 raws.forEach((r) => {
-  const sourceType = r.sourceLabel === "前台对话" ? "chat" : "nc";
+  const source = r.displayName === "前台对话" ? "chat" : "nc";
   const row = repo.insertRawInput(db, {
     content: r.content,
-    sourceType,
-    sourceIdentity: { sourceLabel: r.sourceLabel, groupId: r.groupId, sender: r.sender },
+    source,
+    identity: { displayName: r.displayName, groupId: r.groupId, sender: r.sender },
     receivedAt: r.receivedAt,
     eventTime: r.receivedAt,
   });
@@ -496,8 +496,8 @@ for (const id of [itemA, itemC, itemI, itemD, itemH, itemE, itemF]) {
 // ── 存疑信息库（2 条）──
 repo.insertUncertainInput(db, {
   content: "有人说下周可能要体测，具体哪天还没通知。",
-  sourceType: "nc",
-  sourceIdentity: { sourceLabel: "社团大群", groupId: "10003", sender: "阿凯" },
+  source: "nc",
+  identity: { displayName: "社团大群", groupId: "10003", sender: "阿凯" },
   eventTime: null,
   receivedAt: wallClockAgo(2 * DAY),
   originRawInputId: null,
@@ -507,8 +507,8 @@ repo.insertUncertainInput(db, {
 });
 repo.insertUncertainInput(db, {
   content: "听说三食堂下个月要停业装修，不知道具体从哪天开始。",
-  sourceType: "nc",
-  sourceIdentity: { sourceLabel: "学习交流群", groupId: "10001", sender: "小林" },
+  source: "nc",
+  identity: { displayName: "学习交流群", groupId: "10001", sender: "小林" },
   eventTime: null,
   receivedAt: wallClockAgo(1 * DAY),
   originRawInputId: null,

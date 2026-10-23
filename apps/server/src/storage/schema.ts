@@ -48,12 +48,16 @@ export const evidence = sqliteTable(
 export const rawInputs = sqliteTable("raw_inputs", {
   id: text("id").primaryKey(),
   content: text("content").notNull(),
-  sourceType: text("source_type").notNull(),
-  sourceIdentity: text("source_identity").notNull(), // JSON 串（弹性字典，D-84）
+  source: text("source").notNull(),
+  identity: text("identity_json").notNull(), // JSON 串（弹性字典，D-84）
   receivedAt: text("received_at").notNull(),
   eventTime: text("event_time"),
   digestState: text("digest_state").notNull().default("pending"), // pending | digesting | digested | failed
   raw: text("raw"), // 信源原始载荷 JSON 留底（D-84；shared RawInput 类型不含它——归档字段，仅 DB）
+  // 检索索引列（D-127）：raw_fts 是**独立的** FTS5 表，写入由 repo.insertRawInput 显式完成
+  // （不用触发器——原因见 db.ts）。NULL = 建表前的存量行，由启动时的 backfillSearchIndex 补齐。
+  tokens: text("tokens"), // 内容切词（search/tokenize.ts）
+  identityTokens: text("identity_tokens"), // 身份词袋（键名 + 值）
 });
 
 // 事项已读标记（用户 2026-09-27：「新」微标点开即消）：item 级一面标记，不进版本链/编辑列表。
@@ -89,8 +93,8 @@ export const uncertainInputs = sqliteTable(
   {
     id: text("id").primaryKey(),
     content: text("content").notNull(), // 原话逐字
-    sourceType: text("source_type").notNull(),
-    sourceIdentity: text("source_identity").notNull(), // JSON 串（弹性字典快照）
+    source: text("source").notNull(),
+    identity: text("identity_json").notNull(), // JSON 串（弹性字典快照）
     eventTime: text("event_time"),
     receivedAt: text("received_at").notNull(),
     originRawInputId: text("origin_raw_input_id"), // 从哪个批次摘出

@@ -46,7 +46,7 @@ for (const [entry, outName] of ENTRIES) {
     format: "esm",
     target: "node22",
     outfile: path.join(distDir, outName),
-    external: ["better-sqlite3", "sharp"],
+    external: ["better-sqlite3", "sharp", "nodejieba"],
     define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
     logLevel: "warning",
     banner: { js: REQUIRE_SHIM },

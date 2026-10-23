@@ -12,8 +12,8 @@ afterEach(cleanupAllTestAccounts);
 function seedBatch(db: Db): string {
   const raw = repo.insertRawInput(db, {
     content: "群里说的作业通知",
-    sourceType: "nc",
-    sourceIdentity: { sourceLabel: "英语课官方群", groupId: "g1" },
+    source: "nc",
+    identity: { displayName: "英语课官方群", groupId: "g1" },
     receivedAt: "2026-09-28T10:00:00",
     eventTime: "2026-09-28T10:00:00",
   });
@@ -45,8 +45,8 @@ describe("流水读口（specs/005）", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({
       id: rawId,
-      sourceType: "nc",
-      sourceLabel: "英语课官方群",
+      source: "nc",
+      displayName: "英语课官方群",
       digestState: "digested",
       summary: "应用 1 项变更：新建事项「作业」",
       eventCount: 2,

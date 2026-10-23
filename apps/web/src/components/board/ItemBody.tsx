@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   relativeDueText,
-  sourceIdentityLabel,
-  sourceLabelOf,
+  displayNameWithDetails,
+  displayNameOf,
   FIXED_LABELS,
   type GetItemResult,
   type RawInput,
@@ -242,14 +242,14 @@ export function ItemBody({
             const open = openSources.includes(src.raw.id);
             return (
               <div key={src.raw.id} className="mt-3 first:mt-0">
-                {/* 收起态行 = [信源类型] sourceLabel（用户 2026-10-14 定：nc 放最前、不放别的）。
+                {/* 收起态行 = [信源类型] displayName（用户 2026-10-14 定：nc 放最前、不放别的）。
                     点行展开/收起——手势与元素行同款；行与批次一一对应，同标签多批次 = 多行 */}
                 <p
                   className={cn("cursor-pointer", isReader ? "text-[13px]" : "text-sm")}
                   onClick={() => toggleSource(src.raw.id)}
                 >
-                  <b className="text-ink-muted">[{src.raw.sourceType}]</b>{" "}
-                  {sourceLabelOf(src.raw.sourceIdentity)}
+                  <b className="text-ink-muted">[{src.raw.source}]</b>{" "}
+                  {displayNameOf(src.raw.identity)}
                 </p>
                 {/* 展开区（引文同款左缘缩进线）：① 除保留键外的其余自由键逐条成行；
                     ② 本批次自身一行，行内「看原文」直达该批次原文浮窗 */}
@@ -330,7 +330,7 @@ export function ItemBody({
 /** 来源信息行：**一个进站批次 = 一行**（用户 2026-10-14 定）——raw 即行本体（行键 = raw.id），entries 是它的派生展示。 */
 interface SourceRow {
   raw: RawInput; // 本行对应的批次（展开区自由键与「看原文」都由它派生）
-  entries: [string, string][]; // 除 sourceLabel 外的自由键值对（键按字典序稳定）
+  entries: [string, string][]; // 除 displayName 外的自由键值对（键按字典序稳定）
 }
 
 /** 从事项详情的证据批次逐批次铺开来源行（用户 2026-10-14 加「来源信息」栏）。
@@ -340,9 +340,9 @@ function collectSources(detail: GetItemResult): SourceRow[] {
   return Object.values(detail.rawInputs)
     .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
     .map((raw) => {
-      // 自由键值对（除保留键 sourceLabel）——值转字符串展示，键按字典序稳定排序（同一批次每次渲染一致）
-      const entries = Object.entries(raw.sourceIdentity)
-        .filter(([k]) => k !== "sourceLabel")
+      // 自由键值对（除保留键 displayName）——值转字符串展示，键按字典序稳定排序（同一批次每次渲染一致）
+      const entries = Object.entries(raw.identity)
+        .filter(([k]) => k !== "displayName")
         .map(([k, v]): [string, string] => [
           k,
           typeof v === "string" || typeof v === "number" || typeof v === "boolean"
@@ -381,9 +381,9 @@ function Quotes({
                 {raw !== null && (
                   <>
                     {" · "}
-                    {/* 引文旁标来源（D-89 选 B）：显示裸 sourceLabel；hover 给完整身份串 */}
-                    <span className="cursor-help" title={sourceIdentityLabel(raw.sourceIdentity)}>
-                      {sourceLabelOf(raw.sourceIdentity)}
+                    {/* 引文旁标来源（D-89 选 B）：显示裸 displayName；hover 给完整身份串 */}
+                    <span className="cursor-help" title={displayNameWithDetails(raw.identity)}>
+                      {displayNameOf(raw.identity)}
                     </span>
                     {" · "}
                     <button

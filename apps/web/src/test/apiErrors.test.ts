@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "../api";
+import { api, ApiError, isUnauthorized } from "../api";
 import { jsonResponse } from "./helpers/http";
 
 // web 端错误文案口径（api.ts 的 apiErrorText）：4xx 说人话；5xx 不透传服务端异常原文。
@@ -29,6 +29,25 @@ describe("api 错误文案", () => {
   it("4xx：自定义 {error} 照实显示", async () => {
     stub(400, { error: "不是支持的图片格式（image/png）" });
     await expect(api.board()).rejects.toThrow("不是支持的图片格式（image/png）");
+  });
+
+  it('401 带状态码（判「未登录」靠它，不靠文案里有没有 "401"）', async () => {
+    // 服务端 401 回的是 {"error":"未登录"}——文案里根本没有 "401"。
+    // 曾经 App 用 `errText(err).includes("401")` 判登录态 → 首屏永远被误判成「后端没起来」。
+    stub(401, { error: "未登录" });
+    const err = await api.me().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(isUnauthorized(err)).toBe(true);
+    expect((err as ApiError).status).toBe(401);
+  });
+
+  it("网络故障（不是 HTTP 响应）→ isUnauthorized 为 false（那才是后端没起来）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.reject(new TypeError("Failed to fetch"))),
+    );
+    const err = await api.me().catch((e: unknown) => e);
+    expect(isUnauthorized(err)).toBe(false);
   });
 
   it("5xx：异常原文（SQL/文件路径）不透传到界面", async () => {

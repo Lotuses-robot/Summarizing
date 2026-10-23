@@ -66,7 +66,7 @@ export interface BufferedEvent {
   sender: string; // 发信人显示名（群名片 > 昵称 > user_id）
   senderId: string;
   role?: string; // 群角色原文（owner/admin/member；nc 变体可能发漂移值——显示时归一，未知不显示）
-  groupName: string; // 白名单里的会话备注名（群名 / 私聊对方备注；入缓冲时确定；封批直接用作 sourceIdentity.sourceLabel）
+  displayName: string; // 白名单里的会话备注名（群名 / 私聊对方备注；入缓冲时确定；封批直接用作 identity.displayName）
   at: string; // 机械时刻（消息自带时刻；桥接发 null 时按接收时刻）——只用于去抖与行前缀
   trueTime: boolean; // at 是否消息自带真时刻——false 时 eventTime 必须置 null（01§5.3 禁接收兜底）
   raw: NcEvent; // 原始事件留底
@@ -75,7 +75,20 @@ export interface BufferedEvent {
 export interface GroupBuffer {
   groupId: string;
   events: BufferedEvent[];
-  lastAt: string; // 组内最后一条消息时刻——去抖窗口从它起算
+  /** 组内最后一条消息的**消息时刻**——行协议与 eventTime 用（反映事情何时发生）。 */
+  lastAt: string;
+  /** 组内最后一条消息**进入缓冲的时刻**——静默闸用它。
+   *
+   *  为什么不拿 lastAt：那是消息自带时刻（`ev.time`）。实时桥接下两者相等，但桥接断线重连后
+   *  补推积压消息时，每条都带着几小时前的 `time`——按它算静默，会把**刚到达**的一批判成
+   *  「已经安静了几小时」，立刻封批并切成一条一条。到达时刻衡量的才是「这批在内存里等了多久」。 */
+  lastSeenAt?: string;
+  /** 组内正文累计字节（字节闸用；入缓冲时累加）。缓冲区只由 nc 适配器维护——缺省 0 只服务
+   *  「组装/判定」类的纯函数调用方（assembleBatch、测试），不影响真实缓冲的累加语义。 */
+  bytes?: number;
+  /** 本组**首条消息进入缓冲的时刻**——龄期闸从它起算（同样为了不被补推的旧消息时刻带偏）。
+   *  缺省（测试/纯函数调用）回退 lastSeenAt / lastAt。 */
+  firstSeenAt?: string;
 }
 
 /** 从一组缓冲事件组装要投递的字段（纯函数；不含 ingest 副作用）。 */
@@ -88,18 +101,49 @@ export interface SealedBatch {
   sender?: string; // 批内唯一发送者才写；多人批次省略——身份由行协议逐行承载（D-91）
 }
 
-/** 命中窗口的组（静默 ≥ windowMinutes 才封批）——纯函数，便于测试。 */
+/** 封批四闸的阈值（D-127）：任一命中即封批。
+ *
+ * 为什么要四闸：原来只有「静默窗」一道——忙群只要一直有人说话就永不到期，批次无限增长
+ * （内存涨、崩溃丢得多、AI 一次要看几百条）；docs/08 承诺的「崩溃最多丢一个窗口」在连续
+ * 聊天时是假的。四闸把「批最大能有多大」变成有上界的事实。 */
+export interface SealThresholds {
+  windowMinutes: number; // 静默闸：最后一条消息距今 ≥ 此值
+  maxEvents: number; // 条数闸：批内消息数 ≥ 此值
+  maxBytes: number; // 字节闸：批内正文累计字节 ≥ 此值
+  maxAgeMinutes: number; // 龄期闸：距**进入缓冲**已 ≥ 此值（忙群也定期切段）
+}
+
+/** 命中任一闸的组 —— 纯函数，便于测试。
+ *
+ * @param buffers 各组缓冲
+ * @param nowMs 当前时刻（epoch ms）——**闸门的唯一时间基准**
+ * @param t 阈值
+ */
 export function dueGroups(
   buffers: Map<string, GroupBuffer>,
   nowMs: number,
-  windowMinutes: number,
+  t: SealThresholds,
 ): GroupBuffer[] {
-  const windowMs = windowMinutes * 60_000;
+  const windowMs = t.windowMinutes * 60_000;
+  const ageMs = t.maxAgeMinutes * 60_000;
   const due: GroupBuffer[] = [];
   for (const buf of buffers.values()) {
-    // lastAt 是北京墙钟串：必须 parseWallClock（+08:00）——裸 Date.parse 按机器本地解析，
-    // 在 UTC 服务器上整串判晚 8h → nowMs−lastMs 恒负 → 组永不到期、封批去抖失效（2026-10-12 CI 逮出）。
-    const lastMs = parseWallClock(buf.lastAt);
+    if (buf.events.length === 0) continue; // 空组不该存在（入缓冲即至少一条）；防御性跳过
+    // 条数 / 字节：与时刻无关的纯量闸（bytes 缺省视为 0——见 GroupBuffer.bytes）
+    if (buf.events.length >= t.maxEvents || (buf.bytes ?? 0) >= t.maxBytes) {
+      due.push(buf);
+      continue;
+    }
+    // 龄期闸：从「首条进入缓冲」算——忙群连续说话也照样到期，这是「崩溃丢失有上界」的依据。
+    // （用 firstSeenAt 而非 first.at：后者是消息时刻，桥接补推积压消息时会让本闸立刻误触发。）
+    const firstMs = buf.firstSeenAt === undefined ? Number.NaN : parseWallClock(buf.firstSeenAt);
+    if (!Number.isNaN(firstMs) && nowMs - firstMs >= ageMs) {
+      due.push(buf);
+      continue;
+    }
+    // 静默闸：从**最后一条到达**算（不是消息时刻——见 GroupBuffer.lastSeenAt）。
+    // 时刻串一律 parseWallClock（+08:00）：裸 Date.parse 按机器本地解析，UTC 服务器上整串判晚 8h。
+    const lastMs = parseWallClock(buf.lastSeenAt ?? buf.lastAt);
     if (!Number.isNaN(lastMs) && nowMs - lastMs >= windowMs) due.push(buf);
   }
   return due;

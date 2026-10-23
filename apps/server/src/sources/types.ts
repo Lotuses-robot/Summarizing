@@ -78,12 +78,16 @@ type SourceRouteRequest = Omit<FastifyRequest, "space">;
  *  reply；网关按原样透传返回值，不解释。 */
 export type SourceRouteHandler = (req: SourceRouteRequest, reply: FastifyReply) => unknown;
 
+/** `accept` 的结果：失败带原因（Router 留痕用），不抛异常。
+ *  `reason` 是给日志/排障看的一句话，不是给终端用户看的文案。 */
+export type AcceptResult = { ok: true } | { ok: false; reason: string };
+
 /** 信源 webhook 登记口（006 收窄，D-96）：只在本源命名空间内登记 HTTP 入口——
  *  **可达地址 = `/hook/<账户令牌>/<源名>/<path>`**（core 网关统一鉴权路由）。
  *  路径为**纯字面段**（不支持 `:param`——需要参数走 query/body；参数段支持等真有源需要再加）。
  *  收窄理由：①Fastify listen 后不能再注册路由 → 运行中新账户必须走网关；②信源不得挂全局路由
  *  （多用户下=鉴权旁路，直接排除）。拉型源（SSE 等出站客户端）不用它——走 `start()`。 */
-export interface SourceRouter {
+export interface WebhookRegistrar {
   post(path: string, handler: SourceRouteHandler): void;
   get(path: string, handler: SourceRouteHandler): void;
   put(path: string, handler: SourceRouteHandler): void;
@@ -92,11 +96,23 @@ export interface SourceRouter {
 
 /** 信源适配器：一个源一个模块，注册表加一个**工厂**（每空间各造一份实例——私有态天然隔离）。 */
 export interface SourceAdapter {
-  /** 源的唯一短名——sourceType、信源设置命名空间、from 排障标记共用。 */
+  /** 源的唯一短名——source、信源设置命名空间、from 排障标记共用。 */
   readonly name: string;
-  /** 上岗（装配期，**同步**）：登记 webhook（`router`）、起定时器、存引用——不阻塞、不连外部。
+  /** 接收一条原始消息（D-130）。**两个调用方**：
+   *  · Router（部署级）——一个回调服务多个账户时，由它查明归属后转发；
+   *  · 信源自己的 webhook（nc）——地址天然带账户令牌，进来就知道归属。
+   *
+   *  解协议、算分组键、组装 identity **全部在这里**：Router 不认识协议字段，
+   *  它只把 `raw` 原样交过来。`receivedAt` 是到达时刻（拉取型源由 Router 记，
+   *  push 型源自己记）——闸门用它，不用消息自带时刻（补推的旧消息会带偏闸门）。
+   *
+   *  入参 `raw` = 原始消息（形状由本信源自己 zod 解析）；`receivedAt` = 到达时刻（北京墙钟）。
+   *  失败**不抛**——Router 据此留痕，抛错会污染 webhook 网关的响应。
+   */
+  accept(input: { raw: unknown; receivedAt: string }): AcceptResult;
+  /** 上岗（装配期，**同步**）：登记 webhook（`registrar`）、起定时器、存引用——不阻塞、不连外部。
    *  ⚠️ 006 起装配按**空间**（每账户）各跑一次。清理走 `ctx.onCleanup`（不再返回清理函数，D-88）。 */
-  register(ctx: SourceContext, router: SourceRouter): void;
+  register(ctx: SourceContext, registrar: WebhookRegistrar): void;
   /** 启动（运行期，**可异步、可失败**，可选）：连外部、拉校验……core 的 `startSources` 在真正
    *  listen 前 await 它；失败只标记本信源 error，不拖垮别的。**不需要异步启动的信源不写**（如 nc）。 */
   start?(): void | Promise<void>;
@@ -104,6 +120,20 @@ export interface SourceAdapter {
   stop?(): Promise<void>;
   /** 声明设置项（纯数据）。缺席 = 本信源无设置。core 落库 `__schema__` 并随 `GET /api/sources` 吐给前端。 */
   settings?(): SettingField[];
+  /** 取回一个**媒体占位**背后的字节（可选，D-128）。
+   *
+   *  为什么这属于信源而不属于 core：媒体占位的形状是信源定的，取字节的方式也只有信源知道。
+   *  两种现实形态：①公开 URL（QQ 图片）——core 用通用下载器就能取，信源不必声明本方法；
+   *  ②**私有凭据才能取**（企业微信的 media_id 要带 access_token）——只有信源自己会换 token。
+   *  core 的图片缓存环节遇到「不是 http(s) 的占位」时调它；信源不实现 = 该源的这类占位不缓存
+   *  （正文里仍逐字保留占位，不静默改写——01§5.3）。
+   *
+   *  @param placeholder 占位里的那段（`[图片](X)` 的 X，逐字）
+   *  @returns 字节 + 声明的 content-type（可缺）；取不到返回 null（core 留痕后跳过，不重试）
+   */
+  fetchMedia?(
+    placeholder: string,
+  ): Promise<{ bytes: Uint8Array; contentType: string | null } | null>;
   /** 接入引导（纯数据，可选）：告诉用户在**本信源自己的**那个系统里怎么把 webhook 指过来
    *  （如 nc 的「网络配置 → HTTP 服务器 → 反向 WebSocket / HTTP 上报」）。缺席 = 不显示引导行。
    *  ⚠️ 这是**源自己的知识**，写在适配器里——core 与前端只做展示，不解析内容（D-115）。 */

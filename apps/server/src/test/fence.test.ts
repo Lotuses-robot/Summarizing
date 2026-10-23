@@ -13,8 +13,8 @@ const RAW_TEXT = "数据结构 老师说下周要交第三次作业 好像还要
 function seedFenceRaw(db: ReturnType<typeof makeDb>, content: string = RAW_TEXT) {
   return repo.insertRawInput(db, {
     content,
-    sourceType: "paste",
-    sourceIdentity: { sourceLabel: "s" },
+    source: "paste",
+    identity: { displayName: "s" },
     receivedAt: "2026-09-24T10:00:00",
     eventTime: null,
   });
@@ -314,8 +314,8 @@ describe("围栏：引文逐字校验（第 6 轮审查）", () => {
     const db = makeDb(":memory:");
     const raw = repo.insertRawInput(db, {
       content: "[10:00] 小明: 通知：作业\n[10:00] 小明: 截止10月8日",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群" },
+      source: "nc",
+      identity: { displayName: "群" },
       receivedAt: "2026-09-28T10:00:00",
       eventTime: null,
     });
@@ -606,8 +606,8 @@ describe("围栏：record_note 的批次目标必须真实且是本批", () => {
     const raw = seedFenceRaw(db);
     const other = repo.insertRawInput(db, {
       content: "另一批",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });

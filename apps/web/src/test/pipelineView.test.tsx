@@ -12,8 +12,8 @@ import { fetchUrl, jsonResponse } from "./helpers/http";
 const RUNS = [
   {
     id: "r-digesting",
-    sourceType: "nc",
-    sourceLabel: "社团群",
+    source: "nc",
+    displayName: "社团群",
     receivedAt: "2026-09-28T11:00:00",
     eventTime: null,
     digestState: "digesting",
@@ -22,8 +22,8 @@ const RUNS = [
   },
   {
     id: "r-digested",
-    sourceType: "nc",
-    sourceLabel: "英语课官方群",
+    source: "nc",
+    displayName: "英语课官方群",
     receivedAt: "2026-09-28T10:00:00",
     eventTime: "2026-09-28T10:00:00",
     digestState: "digested",
@@ -69,8 +69,8 @@ function emptyDetail(): Response {
     raw: {
       id: "r-empty",
       content: "（空）",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "测试" },
+      source: "chat",
+      identity: { displayName: "测试" },
       receivedAt: "2026-09-28T00:00:00",
       eventTime: null,
       digestState: "digesting",
@@ -106,8 +106,8 @@ function stubApi(): void {
             raw: {
               id: "r-digested",
               content: "群里说的作业通知",
-              sourceType: "nc",
-              sourceIdentity: { sourceLabel: "英语课官方群" },
+              source: "nc",
+              identity: { displayName: "英语课官方群" },
               receivedAt: "2026-09-28T10:00:00",
               eventTime: "2026-09-28T10:00:00",
               digestState: "digested",
@@ -122,8 +122,8 @@ function stubApi(): void {
             raw: {
               id: "r-digesting",
               content: "社团群消息",
-              sourceType: "nc",
-              sourceIdentity: { sourceLabel: "社团群" },
+              source: "nc",
+              identity: { displayName: "社团群" },
               receivedAt: "2026-09-28T11:00:00",
               eventTime: null,
               digestState: "digesting",
@@ -156,7 +156,7 @@ function stubApi(): void {
               {
                 id: "e6",
                 action: "digest_trace",
-                detail: "第 4 轮：search_recent_raws",
+                detail: "第 4 轮：search_raws",
                 payload: null,
                 at: "2026-09-28T11:00:14",
                 by: { actor: "agent0", model: "test" },
@@ -193,7 +193,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
     expect(screen.getByText(/已跑 \d+s/)).toBeInTheDocument();
     expect(screen.getByText(/第 4\/8 轮/)).toBeInTheDocument(); // 详情里 4 条 digest_trace
     // 渐隐轨迹：最新活动全亮，上一轮更淡（越旧越透明——「滚动栏 + 残影」）
-    const newest = await screen.findByText("第 4 轮：search_recent_raws");
+    const newest = await screen.findByText("第 4 轮：search_raws");
     const older = screen.getByText("第 3 轮：search_uncertain");
     expect(newest.style.opacity).toBe("1");
     expect(Number(older.style.opacity)).toBeLessThan(1);
@@ -339,8 +339,8 @@ describe("PipelineView（流水视图，specs/005）", () => {
               raw: {
                 id: "r-digesting",
                 content: "社团群消息",
-                sourceType: "nc",
-                sourceIdentity: { sourceLabel: "社团群" },
+                source: "nc",
+                identity: { displayName: "社团群" },
                 receivedAt: "2026-09-28T11:00:00",
                 eventTime: null,
                 digestState: "digesting",
@@ -390,8 +390,8 @@ describe("PipelineView（流水视图，specs/005）", () => {
               raw: {
                 id: "r-digesting",
                 content: "社团群消息",
-                sourceType: "nc",
-                sourceIdentity: { sourceLabel: "社团群" },
+                source: "nc",
+                identity: { displayName: "社团群" },
                 receivedAt: "2026-09-28T11:00:00",
                 eventTime: null,
                 digestState: "digesting",
@@ -439,8 +439,8 @@ describe("图片缓存进度（009：缓存中/成功/失败都看得见）", ()
   it("缓存中与缓存结果都出现在消化中状态卡里", async () => {
     const run = {
       id: "r-cache",
-      sourceType: "nc",
-      sourceLabel: "社团群",
+      source: "nc",
+      displayName: "社团群",
       receivedAt: "2026-09-28T11:00:00",
       eventTime: null,
       digestState: "digesting",
@@ -457,8 +457,8 @@ describe("图片缓存进度（009：缓存中/成功/失败都看得见）", ()
               raw: {
                 id: "r-cache",
                 content: "看 [图片](https://qq.example/x.jpg) 这张",
-                sourceType: "nc",
-                sourceIdentity: { sourceLabel: "社团群" },
+                source: "nc",
+                identity: { displayName: "社团群" },
                 receivedAt: "2026-09-28T11:00:00",
                 eventTime: null,
                 digestState: "digesting",

@@ -42,6 +42,16 @@ const meta = sqliteTable("meta", {
   value: text("value").notNull(),
 });
 
+/** 部署级信源设置（D-130）：Router 的凭据、绑定表、拉取游标都存这。
+ *
+ *  为什么不复用 `meta`：`meta` 是**系统自身**的状态（session_secret），而这里是**信源**的状态——
+ *  两个所有者混在一张表里，将来「清 meta」会误伤 Router 的绑定。分表让所有权一目了然。
+ *  哑 KV：值形状归调用方（D-84 同款原则）。 */
+export const relaySettings = sqliteTable("relay_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
+
 export type AccountRow = typeof accounts.$inferSelect;
 
 /** 打开系统库：幂等建表 + session_secret 缺失即生成（重启后会话不失效）；文件库开 WAL。
@@ -51,7 +61,7 @@ export type AccountRow = typeof accounts.$inferSelect;
   return drizzle(
     openGatedDb(file, (sqlite) => ensureRegistrySchema(sqlite)),
     {
-      schema: { accounts, invites, meta },
+      schema: { accounts, invites, meta, relaySettings },
     },
   );
 }
@@ -79,6 +89,10 @@ function ensureRegistrySchema(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS invites_used_idx ON invites (used_by);
     CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS relay_settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );

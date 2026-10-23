@@ -40,7 +40,7 @@ function sweepBrief(entry: UncertainInput): string {
     "[待复核的存疑条目]",
     `id：${entry.id}`,
     `原话：${entry.content}`,
-    `信源：${JSON.stringify(entry.sourceIdentity)}`,
+    `信源：${JSON.stringify(entry.identity)}`,
     `事件时间：${entry.eventTime ?? "未知"}`,
     `入库时间：${entry.createdAt}`,
     `需人工分：${entry.needsHuman}`,

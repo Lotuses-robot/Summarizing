@@ -19,8 +19,8 @@ afterEach(cleanupAllTestAccounts);
 function seedRaw(db: ReturnType<typeof makeDb>, content = "原始通知"): RawInput {
   return repo.insertRawInput(db, {
     content,
-    sourceType: "chat",
-    sourceIdentity: { sourceLabel: "课程群" },
+    source: "chat",
+    identity: { displayName: "课程群" },
     receivedAt: "2026-09-28T10:00:00",
     eventTime: null,
   });
@@ -72,7 +72,7 @@ describe("存疑信息库（D-85）", () => {
     const entry = open[0];
     expect(entry?.content).toBe("听说要加口语考试");
     expect(entry?.needsHuman).toBe(80);
-    expect(entry?.sourceIdentity).toEqual({ sourceLabel: "课程群" }); // 信源快照从当批带
+    expect(entry?.identity).toEqual({ displayName: "课程群" }); // 信源快照从当批带
     expect(entry?.originRawInputId).toBe(raw.id);
     expect(entry?.status).toBe("open");
   });
@@ -417,8 +417,8 @@ describe("存疑库人工移除端点（D-88 T4：PUT /api/uncertain/:id）", ()
     const raw = seedRaw(db);
     const entry = repo.insertUncertainInput(db, {
       content: "拿不准的消息",
-      sourceType: raw.sourceType,
-      sourceIdentity: raw.sourceIdentity,
+      source: raw.source,
+      identity: raw.identity,
       eventTime: null,
       receivedAt: "2026-09-28T10:00:00",
       originRawInputId: raw.id,

@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { exitAfter, gracefulClose, makeApp, SHUTDOWN_TIMEOUT_MS } from "./app";
 import { closeSpacesWithTimeout, makeSpaceHub } from "./spaces";
 import { makeRegistryDb } from "./storage/registry";
+import { makeRouter } from "./router";
 
 // .env 固定在仓库根，按绝对路径加载——npm -w 会把 cwd 切到 workspace 目录，
 // 相对加载曾在 cwd=apps/server 时静默解析出 0 个变量（实证过）。
@@ -22,9 +23,14 @@ mkdirSync(dataRoot, { recursive: true });
 const registry = makeRegistryDb(path.join(dataRoot, "system.db"));
 const hub = makeSpaceHub({ registry, dataRoot });
 
-const app = makeApp({ registry, hub });
+// Router（D-130）：部署级单例——微信客服这类「一个入口对接多个账户」的接入走它。
+// 它自己的接入路由由 `registerRoutes` 挂到 app 上（`/relay/<协议>/*`）。
+const router = makeRouter({ db: registry, hub });
+const app = makeApp({ registry, hub, router });
 
 await hub.ensureAll();
+// Router 接入启动（轮询兜底等）：在 listen 之前——第一个回调到达时拉取链路已就绪
+await router.start();
 // 注：账户多且带连接型 start 的信源时，串行 ensureAll 会拖长启动——届时改并行（熟人规模暂不做）。
 
 // SIGINT 归 core（D-88 修正 D-84 遗留）：信源不再自己 process.on。
@@ -32,9 +38,16 @@ await hub.ensureAll();
 // exitAfter 保底退出——任一环挂起都不许拖住 Ctrl-C（守卫测试在 nc.test / sources.test）。
 // SIGTERM 同款（批次 2 / Docker）：容器里 node 即 PID 1，内核不代它执行默认「收到即终止」——
 // 无处理器 = docker stop / compose down 的 SIGTERM 被忽略、10s 宽限后 SIGKILL，优雅关停永不执行。
-/** 优雅关停（SIGINT/SIGTERM 共用）：先关 HTTP，再停全部空间（含信源封批），exitAfter 保底退出。 */
+/** 优雅关停（SIGINT/SIGTERM 共用）：**先停 Router（不再产生新消息）→ 再关 HTTP → 最后停各空间
+ *  （信源强制封批）**，exitAfter 保底退出。顺序不能反：Router 先停，已经在途的消息才不会在
+ *  信源缓冲被清空之后又落进来（那批会丢且无痕）。 */
 const onShutdown = (): void => {
-  void exitAfter(gracefulClose(app).then(() => closeSpacesWithTimeout(hub, SHUTDOWN_TIMEOUT_MS)));
+  void exitAfter(
+    router
+      .stop()
+      .then(() => gracefulClose(app))
+      .then(() => closeSpacesWithTimeout(hub, SHUTDOWN_TIMEOUT_MS)),
+  );
 };
 process.on("SIGINT", onShutdown);
 process.on("SIGTERM", onShutdown);

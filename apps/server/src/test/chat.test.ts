@@ -20,8 +20,8 @@ function seedBoard(db: ReturnType<typeof makeDb>): string {
     db,
     repo.insertRawInput(db, {
       content: "x",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     }),
@@ -50,7 +50,7 @@ function chatRaws(db: ReturnType<typeof makeDb>) {
     ...repo.listRawInputsByState(db, "digesting"),
     ...repo.listRawInputsByState(db, "digested"),
     ...repo.listRawInputsByState(db, "failed"),
-  ].filter((r) => r.sourceType === "chat");
+  ].filter((r) => r.source === "chat");
 }
 
 describe("handleChat（前台 buddy 工具循环，D-78）", () => {
@@ -397,15 +397,15 @@ describe("handleChat（前台 buddy 工具循环，D-78）", () => {
     // 造一条 open 存疑（绕过 agent0——本测的是工具不是词表）
     const raw = repo.insertRawInput(db, {
       content: "x",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
     const entry = repo.insertUncertainInput(db, {
       content: "拿不准的消息",
-      sourceType: raw.sourceType,
-      sourceIdentity: raw.sourceIdentity,
+      source: raw.source,
+      identity: raw.identity,
       eventTime: null,
       receivedAt: "2026-09-28T10:00:00",
       originRawInputId: raw.id,
@@ -609,8 +609,8 @@ describe("前台删除工具（007 / OQ-8：对话删除 = 进回收站）", () 
   function seedNotice(db: ReturnType<typeof makeDb>): string {
     const raw = repo.insertRawInput(db, {
       content: "课改到明理楼3楼",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-10-17T10:00:00",
       eventTime: null,
     });

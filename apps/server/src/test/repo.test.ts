@@ -10,8 +10,8 @@ import { parseWallClock } from "../shared/time";
 function seedRaw(db: ReturnType<typeof makeDb>): RawInput {
   return repo.insertRawInput(db, {
     content: "x",
-    sourceType: "paste",
-    sourceIdentity: { sourceLabel: "s" },
+    source: "paste",
+    identity: { displayName: "s" },
     receivedAt: "2026-09-24T10:00:00",
     eventTime: null,
   });
@@ -109,8 +109,8 @@ describe("事项版本链", () => {
     const db = makeDb(":memory:");
     const a = repo.insertRawInput(db, {
       content: "a",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "x" },
+      source: "paste",
+      identity: { displayName: "x" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -139,8 +139,8 @@ describe("孤儿清扫（L11）", () => {
   function seedWithState(db: ReturnType<typeof makeDb>, state: RawInput["digestState"]): RawInput {
     const raw = repo.insertRawInput(db, {
       content: "x",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -358,22 +358,22 @@ describe("信源最近活动（009 的设置面补充）", () => {
     expect(repo.latestRawAtForSourceType(db, "nc")).toBeNull();
     repo.insertRawInput(db, {
       content: "早的",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群" },
+      source: "nc",
+      identity: { displayName: "群" },
       receivedAt: "2026-10-01T09:00:00",
       eventTime: null,
     });
     repo.insertRawInput(db, {
       content: "晚的",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群" },
+      source: "nc",
+      identity: { displayName: "群" },
       receivedAt: "2026-10-02T09:00:00",
       eventTime: null,
     });
     repo.insertRawInput(db, {
       content: "别的源",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "用户对话" },
+      source: "chat",
+      identity: { displayName: "用户对话" },
       receivedAt: "2026-10-03T09:00:00",
       eventTime: null,
     });

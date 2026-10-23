@@ -1,4 +1,4 @@
-import { NoticeViewSchema, sourceLabelOf, type NoticeView } from "@summarizing/shared";
+import { NoticeViewSchema, displayNameOf, type NoticeView } from "@summarizing/shared";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 
@@ -17,7 +17,7 @@ function latestSourceLabel(db: Db, itemId: string): string | null {
     const frag = repo.getFragment(db, ev.fragmentId);
     if (!frag) continue;
     const raw = repo.getRawInput(db, frag.rawInputId);
-    if (raw) return sourceLabelOf(raw.sourceIdentity);
+    if (raw) return displayNameOf(raw.identity);
   }
   return null;
 }
@@ -35,7 +35,7 @@ export function deriveNotices(db: Db): NoticeView {
         item: r.item,
         updatedAt: r.updatedAt,
         viewed: viewedIds.has(r.item.id),
-        sourceLabel: latestSourceLabel(db, r.item.id),
+        displayName: latestSourceLabel(db, r.item.id),
       }))
       // 最近更新在上（定宽北京墙钟字典序 = 时间序，D-64）；破平用 itemId 保排序稳定
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.item.id.localeCompare(a.item.id)),

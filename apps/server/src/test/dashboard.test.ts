@@ -43,8 +43,8 @@ function tmpDir(): string {
 function seedRaw(db: ReturnType<typeof makeDb>, content: string, receivedAt?: string) {
   return repo.insertRawInput(db, {
     content,
-    sourceType: "paste",
-    sourceIdentity: { sourceLabel: "s" },
+    source: "paste",
+    identity: { displayName: "s" },
     receivedAt: receivedAt ?? today(),
     eventTime: null,
   });
@@ -467,9 +467,10 @@ describe("只读聚合的脏形态（stats 层）", () => {
     const db = new Database(file);
     // 只有 v1 的核心表，没有 llm_usage / media
     db.exec(`
-      CREATE TABLE raw_inputs (id TEXT PRIMARY KEY, content TEXT NOT NULL, source_type TEXT NOT NULL,
-        source_identity TEXT NOT NULL, received_at TEXT NOT NULL, event_time TEXT,
-        digest_state TEXT NOT NULL DEFAULT 'pending', raw TEXT);
+      CREATE TABLE raw_inputs (id TEXT PRIMARY KEY, content TEXT NOT NULL, source TEXT NOT NULL,
+        identity_json TEXT NOT NULL, received_at TEXT NOT NULL, event_time TEXT,
+        digest_state TEXT NOT NULL DEFAULT 'pending', raw TEXT,
+        tokens TEXT, identity_tokens TEXT);
       CREATE TABLE item_versions (id TEXT PRIMARY KEY, item_id TEXT NOT NULL, action TEXT NOT NULL,
         detail TEXT NOT NULL, snapshot TEXT NOT NULL, at TEXT NOT NULL, by TEXT NOT NULL, revoked_by TEXT);
     `);

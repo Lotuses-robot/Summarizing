@@ -31,7 +31,7 @@ export function useSwipeActions({
   onSwipe,
   ratio,
 }: {
-  /** false 时完全不接手势（如正在撤销窗口里）。 */
+  /** false 时完全不接手势（锁住、正在撤销窗口里、或展开态）。 */
   enabled: boolean;
   /** 过阈值后触发；info = 松手时的位移（px）与速度（px/ms，带方向）——
    *  调用方据此让后续动画从当前速度接着走，而不是从静止重新起步。 */

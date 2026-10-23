@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { sourceIdentityLabel, type MediaMap, type RawInput } from "@summarizing/shared";
+import { createPortal } from "react-dom";
+import { displayNameWithDetails, type MediaMap, type RawInput } from "@summarizing/shared";
 import { pushEscLayer } from "../../lib/escLayer";
 import { fmtFullTime } from "../../lib/time";
 import { MediaText } from "./MediaText";
@@ -27,7 +28,7 @@ export function QuoteOverlay({
 
   const idx = quote === "" ? -1 : rawInput.content.indexOf(quote);
 
-  return (
+  return createPortal(
     // 遮罩点击 = 关闭；内层 stopPropagation 让阅读区的点击不冒泡
     <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose}>
       <div
@@ -37,7 +38,7 @@ export function QuoteOverlay({
         <div className="mb-2 flex items-center justify-between gap-2 text-xs text-ink-muted">
           <span className="truncate">
             批次 {rawInput.id.slice(0, 6)} · {fmtFullTime(rawInput.receivedAt)} ·{" "}
-            {sourceIdentityLabel(rawInput.sourceIdentity)}
+            {displayNameWithDetails(rawInput.identity)}
           </span>
           <CloseButton onClick={onClose} label="关闭引文" className="-my-1 shrink-0" />
         </div>
@@ -59,6 +60,7 @@ export function QuoteOverlay({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

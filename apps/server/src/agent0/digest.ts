@@ -5,7 +5,8 @@ import {
   GetItemArgsSchema,
   SearchKbArgsSchema,
   SearchItemsArgsSchema,
-  SearchRecentRawsArgsSchema,
+  GetRawArgsSchema,
+  SearchRawsArgsSchema,
   SearchUncertainArgsSchema,
   type ChangeList,
   type DigestState,
@@ -23,7 +24,7 @@ import { TOOL_DEFS, type AgentTools, type ToolContext } from "./tools";
 import { executeChanges } from "../executor/executor";
 import { uncitedMediaExpiry } from "../shared/mediaTtl";
 import { nowWallClock } from "../shared/time";
-import { cacheIngestImages } from "../application/mediaIngest";
+import { cacheIngestImages, type MediaFetcherLookup } from "../application/mediaIngest";
 
 // 消化管线（01§4.10 全景）：
 // ① 入口 RawInput（已落档）→ ② 自由推理（工具循环，轮数上限 DIGEST_MAX_ROUNDS 在 shared）
@@ -239,6 +240,7 @@ export function retryInterruptedOnStartup(
   modelTag: string,
   interrupted: RawInput[],
   mediaDir: string,
+  mediaLookup?: MediaFetcherLookup,
 ): number {
   if (interrupted.length === 0) return 0;
   // 未配置时启动重试必然失败；留一条可见说明，不假装「重试过了」（跳过原因不静默）
@@ -261,7 +263,7 @@ export function retryInterruptedOnStartup(
         );
         continue;
       }
-      const result = retryRawInput(db, llm, tools, modelTag, raw.id, mediaDir);
+      const result = retryRawInput(db, llm, tools, modelTag, raw.id, mediaDir, mediaLookup);
       if (!result.ok) {
         bestEffortLog(
           `[digest] 启动重试未发射（raw=${raw.id}，${result.reason}）——批次状态在清扫后被改动过`,
@@ -294,13 +296,24 @@ export function retryRawInput(
   modelTag: string,
   id: string,
   mediaDir: string,
+  mediaLookup?: MediaFetcherLookup,
 ): RetryResult {
   const raw = repo.getRawInput(db, id);
   if (!raw) return { ok: false, reason: "not_found" };
   if (!repo.setDigestStateIf(db, id, "failed", "pending")) {
     return { ok: false, reason: "not_failed" };
   }
-  const digestState = kickDigest(db, llm, tools, modelTag, raw, "retry", mediaDir);
+  const digestState = kickDigest(
+    db,
+    llm,
+    tools,
+    modelTag,
+    raw,
+    "retry",
+    mediaDir,
+    undefined,
+    mediaLookup,
+  );
   return { ok: true, digestState };
 }
 
@@ -322,6 +335,8 @@ export function kickDigest(
   from: string,
   mediaDir: string,
   log?: (msg: string) => void,
+  /** 按信源名查「媒体占位取字节」实现——由调用方提供查表口（见 `MediaFetcherLookup`）。 */
+  mediaLookup?: MediaFetcherLookup,
 ): "digesting" | "pending" {
   // 发射即置「消化中」——尽力而为：库异常时滞留 pending 照常发射（stderr 留痕；七轮评审），
   // 置位结果如实返回供回执（specs/004 八轮评审：不报与库不符的快照）。
@@ -342,7 +357,7 @@ export function kickDigest(
   // （慢下载必踩）。串行还省掉一次重复下载——缓存落地后 agent0 的 fetch_image 直接本地命中。
   // 两者都在后台，进站回执照旧立即返回（信源等的是 202）。
   if (mediaDir === "") fire();
-  else void cacheIngestImages(db, mediaDir, raw.id).then(fire);
+  else void cacheIngestImages(db, mediaDir, raw.id, mediaLookup?.(raw.source)).then(fire);
   return bumped;
 }
 
@@ -469,7 +484,7 @@ async function elicitChangeList(
     if (turn.toolCalls.length > 0) {
       traceRound();
       messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
-      const ctx = { sourceIdentity: raw.sourceIdentity, eventTime: raw.eventTime };
+      const ctx = { identity: raw.identity, eventTime: raw.eventTime };
       const images: string[] = []; // 本轮的图片 data URL（稍后作 user 消息注入模型）
       for (const call of turn.toolCalls) {
         if (call.name === "fetch_image") {
@@ -534,7 +549,7 @@ interface ToolRun {
 }
 
 /** 执行一次工具调用并返回结果；工具报错回喂给模型自行调整，不中断循环。
- *  ctx = 当前批次参照（信源+时刻）——信源阶段工具（search_recent_raws/search_uncertain）靠它做接近度。 */
+ *  ctx = 当前批次参照（信源+时刻）——search_uncertain 靠它做接近度。 */
 async function runTool(
   tools: AgentTools,
   name: string,
@@ -562,11 +577,15 @@ async function runTool(
           image: null,
           mediaId: null,
         };
-      case "search_recent_raws":
+      case "search_raws":
         return {
-          text: JSON.stringify(
-            await tools.searchRecentRaws(SearchRecentRawsArgsSchema.parse(args), ctx),
-          ),
+          text: JSON.stringify(await tools.searchRaws(SearchRawsArgsSchema.parse(args))),
+          image: null,
+          mediaId: null,
+        };
+      case "get_raw":
+        return {
+          text: JSON.stringify(await tools.getRaw(GetRawArgsSchema.parse(args))),
           image: null,
           mediaId: null,
         };
@@ -711,13 +730,13 @@ async function requestRepair(
  *  - 对话来源（chat）：前台提交即用户亲口说的时刻，是**有据锚点**；
  *  - 其余来源（粘贴/信源）：接收时间仍禁止当锚（积压粘贴是常态，01§5.3）。 */
 function buildUserBrief(raw: RawInput, now: string): string {
-  const isChat = raw.sourceType === "chat";
+  const isChat = raw.source === "chat";
   return [
     "[原始信息]",
     `批次 id：${raw.id}`,
     `内容（逐字）：${raw.content}`,
-    `来源类型：${raw.sourceType}`,
-    `来源身份：${JSON.stringify(raw.sourceIdentity)}`,
+    `来源类型：${raw.source}`,
+    `来源身份：${JSON.stringify(raw.identity)}`,
     `事件时间：${
       raw.eventTime ??
       (isChat

@@ -22,8 +22,10 @@ import { registerUncertainRoutes } from "./routes/uncertain";
 import { registerUsageRoutes } from "./routes/usage";
 import { registerMediaRoutes } from "./routes/media";
 import { registerDashboardRoutes } from "./routes/dashboard";
+import { registerRouterRoutes } from "./routes/router";
 import { MEDIA_MAX_INPUT_BYTES } from "./shared/mediaTtl";
 import type { SpaceHub } from "./spaces";
+import type { Router } from "./router";
 
 // 装配 HTTP 应用（006 多用户重构）：
 // ① 公开面 = 认证三端点（register/login/logout）+ webhook 网关（令牌鉴权）——除此之外全部 401；
@@ -77,8 +79,9 @@ function registerWebhookGateway(app: FastifyInstance, hub: SpaceHub): void {
   });
 }
 
-/** 装配 HTTP 应用（只装 core——不认识信源；信源在空间装配里上岗）。 */
-export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
+/** 装配 HTTP 应用（只装 core——不认识信源；信源在空间装配里上岗）。
+ *  `router` 可选：给了就把它的接入路由挂上（部署级的 `/relay/*`，与账户无关——测试可省）。 */
+export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub; router?: Router }) {
   const app = Fastify({
     logger: {
       serializers: {
@@ -97,6 +100,16 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
     trustProxy: process.env.TRUST_PROXY === "1",
   });
   void app.register(cookie);
+  // 企业微信/微信/公众号的回调 body 是 **text/xml**（Fastify 默认只认 json/text）——
+  // 不注册这个解析器，验签请求会在解析层先 415，根本到不了信源处理器（实测）。
+  // 只收纯文本原样：不解析 XML（各信源自己按需取字段），也不放开其它二进制类型。
+  app.addContentTypeParser(
+    ["text/xml", "application/xml"],
+    { parseAs: "string" },
+    (_req, body, done) => {
+      done(null, body);
+    },
+  );
   const secret = getSessionSecret(deps.registry);
 
   // 基础安全头（006 安全审视）：nosniff / Referrer-Policy: same-origin（防邀请码经 referrer 出站）/
@@ -122,6 +135,9 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
   // ── 公开面 ──
   registerAuthPublicRoutes(app, { registry: deps.registry, hub: deps.hub, secret });
   registerWebhookGateway(app, deps.hub);
+  // Router 的接入路由（D-130）：部署级、不带账户令牌——路径由各接入自己声明（`/relay/<协议>/*`）。
+  // 与 webhook 网关并列：两者都是「外部进站」，前者按令牌定向账户，后者自己查绑定定账户。
+  deps.router?.registerRoutes(app);
   // 公开状态面板（011）：无认证，只吐白名单快照；页面自包含，不进 React 构建。
   registerDashboardRoutes(app, { registry: deps.registry, dataRoot: deps.hub.dataRoot });
 
@@ -192,6 +208,10 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
         "ingest-api",
         space.mediaDir,
         (msg) => req.log.error(msg),
+        // ⚠️ 只查信源**自己声明**的取字节实现——`relayMediaFetchers` 里是部署级凭据
+        // （企业微信的 corp secret），而这里的 source 是调用方随便填的字符串。
+        // 合成一张表就等于：任何登录用户都能借部署凭据去取别人的 media_id（越权）。
+        (source) => space.mediaFetchers.get(source),
       );
       // digestState 来自 kickDigest 的置位结果——不报发射前快照（七轮评审）
       return reply.code(202).send({ id: raw.id, digestState });
@@ -222,6 +242,8 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
         parsed.data.history,
         req.space.mediaDir,
         parsed.data.mentions,
+        // 对话里 @ 图片同理：按信源查（只认信源自己声明的，不含部署级凭据）
+        (source) => req.space.mediaFetchers.get(source),
       );
     });
 
@@ -256,6 +278,8 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub }) {
     registerTrashRoutes(scope);
     registerUsageRoutes(scope);
     registerMediaRoutes(scope);
+    // 账户侧的 Router 入口（D-130）：只有开关与绑定码——凭据是部署方的，不在这
+    registerRouterRoutes(scope, { registry: deps.registry });
   });
 
   return app;

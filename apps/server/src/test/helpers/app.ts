@@ -5,6 +5,7 @@ import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fas
 import { errText } from "@summarizing/shared";
 import { makeApp } from "../../app";
 import { makeSpaceHub, type Space, type SpaceHub } from "../../spaces";
+import { makeRouter, type Router } from "../../router";
 import {
   createAccount,
   getSessionSecret,
@@ -62,6 +63,8 @@ export interface TestRealm {
   app: FastifyInstance;
   registry: RegistryDb;
   hub: SpaceHub;
+  /** 本实例的 Router（部署级；`withRouter` 时才存在——`/relay/*` 路由由它挂上）。 */
+  router?: Router;
   /** 临时数据目录（本实例全部账户共用）。 */
   dataRoot: string;
   /** 在本实例里新建一个已登录账户（默认用户名 tester / tester2 / …）。 */
@@ -95,6 +98,8 @@ export async function makeTestRealm(
   args: {
     adapters?: Array<() => SourceAdapter>;
     makeLlm?: (db: Db) => TaggedLlm;
+    /** 装 Router（D-130）：`/relay/*` 接入路由随之可达。 */
+    withRouter?: boolean;
   } = {},
 ): Promise<TestRealm> {
   // 空间装配缺 env 时走「未配置占位」客户端（buildLlm，不抛）——无需环境修补；
@@ -107,7 +112,10 @@ export async function makeTestRealm(
     adapters: args.adapters,
     makeLlm: args.makeLlm,
   });
-  const app = makeApp({ registry, hub });
+  // Router 的日志吞掉（测试不断言 stderr；需要断言的用例自己注入 log）
+  const router =
+    args.withRouter === true ? makeRouter({ db: registry, hub, log: silentLog() }) : undefined;
+  const app = makeApp({ registry, hub, ...(router === undefined ? {} : { router }) });
   const secret = getSessionSecret(registry);
   const spaces: Space[] = [];
 
@@ -137,6 +145,7 @@ export async function makeTestRealm(
     app,
     registry,
     hub,
+    ...(router === undefined ? {} : { router }),
     dataRoot: dir,
     async addAccount(a = {}): Promise<TestAccount> {
       n += 1;
@@ -169,15 +178,33 @@ export async function makeTestRealm(
   };
 }
 
-/** 造一个已登录的测试账户（单账户用例的便捷口；底层 = makeTestRealm().addAccount）。 */
+/** 造一个已登录的测试账户（单账户用例的便捷口；底层 = makeTestRealm().addAccount）。
+ *  `withRouter` = 同时装 Router（`/relay/*` 可达；账户侧行为不变）。 */
 export async function makeTestAccount(
   args: {
     username?: string;
     llm?: FakeLlm;
     adapters?: Array<() => SourceAdapter>;
     makeLlm?: (db: Db) => TaggedLlm;
+    withRouter?: boolean;
   } = {},
 ): Promise<TestAccount> {
-  const realm = await makeTestRealm({ adapters: args.adapters, makeLlm: args.makeLlm });
+  const realm = await makeTestRealm({
+    adapters: args.adapters,
+    makeLlm: args.makeLlm,
+    withRouter: args.withRouter,
+  });
   return realm.addAccount(args);
+}
+
+/** 什么都不记的日志口（测试默认——Router/信源的留痕不走 stderr 污染用例输出）。 */
+function silentLog(): {
+  debug(m: string): void;
+  info(m: string): void;
+  warn(m: string): void;
+  error(m: string): void;
+} {
+  /** 任何一种级别都丢弃。 */
+  const noop = (): void => undefined;
+  return { debug: noop, info: noop, warn: noop, error: noop };
 }

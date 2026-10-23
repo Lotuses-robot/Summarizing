@@ -118,6 +118,35 @@ cpSync(
   path.join(bs3dst, "prebuilds/win32-x64.node"),
 );
 
+// nodejieba 精简拷贝（D-127 切词用）：包本体（index.js + package.json + types/）+ 本平台 .node
+// + 词典 5 文件（≈11MB）。词典必须齐：nodejieba 首次切词时按默认路径 load 全部词典，
+// **缺任一个会 FATAL 直接退进程**（实测：不是可捕获的异常）——所以宁可多带 5.7MB 的 idf，
+// 也不留「少一个文件就启动即崩」的隐患。pos_dict/ 只服务词性标注，不拷。
+const jiebaSrc = path.join(root, "node_modules/nodejieba");
+const jiebaDst = path.join(out, "node_modules/nodejieba");
+mkPath(jiebaDst);
+for (const f of ["package.json", "index.js"]) {
+  cpSync(path.join(jiebaSrc, f), path.join(jiebaDst, f));
+}
+cpSync(path.join(jiebaSrc, "types"), path.join(jiebaDst, "types"), { recursive: true });
+const jiebaDictSrc = path.join(jiebaSrc, "submodules/cppjieba/dict");
+const jiebaDictDst = path.join(jiebaDst, "submodules/cppjieba/dict");
+mkPath(jiebaDictDst);
+for (const f of [
+  "jieba.dict.utf8",
+  "hmm_model.utf8",
+  "user.dict.utf8",
+  "idf.utf8",
+  "stop_words.utf8",
+]) {
+  cpSync(path.join(jiebaDictSrc, f), path.join(jiebaDictDst, f));
+}
+mkPath(path.join(jiebaDst, "build/Release"));
+cpSync(
+  path.join(jiebaSrc, "build/Release/nodejieba.node"),
+  path.join(jiebaDst, "build/Release/nodejieba.node"),
+);
+
 // sharp 精简拷贝（009 起图片压缩用）：本体（package.json + dist/，JS 全在 dist）+ 本平台预编译包
 // （win32-x64 自带 libvips DLL，≈19MB）+ 三个运行时小依赖。install/ 与 src/ 只在构建 native 时才用，不进包。
 const sharpSrc = path.join(root, "node_modules/sharp");

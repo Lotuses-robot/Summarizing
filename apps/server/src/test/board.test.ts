@@ -21,8 +21,8 @@ afterEach(cleanupAllTestAccounts);
 function seedRaw(db: ReturnType<typeof makeDb>, content = "x"): RawInput {
   return repo.insertRawInput(db, {
     content,
-    sourceType: "paste",
-    sourceIdentity: { sourceLabel: "s" },
+    source: "paste",
+    identity: { displayName: "s" },
     receivedAt: "2026-09-24T10:00:00",
     eventTime: null,
   });
@@ -631,8 +631,8 @@ describe("通知与回收站接口（真实 HTTP 入口，007）", () => {
     });
     repo.insertUncertainInput(t.db, {
       content: "与该条目相关的存疑原文",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       eventTime: null,
       receivedAt: "2026-09-27T12:00:00",
       originRawInputId: raw.id,

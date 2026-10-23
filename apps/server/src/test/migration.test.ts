@@ -3,11 +3,12 @@ import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { normalizeSourceIdentity } from "@summarizing/shared";
+import { normalizeIdentity } from "@summarizing/shared";
+import { z } from "zod";
 import { makeDb } from "../storage/db";
 import * as repo from "../storage/repo";
 
-// 信源阶段存量迁移（D-84）：老库的裸字符串 sourceIdentity → 弹性字典 { sourceLabel: 原串 }；
+// 信源阶段存量迁移（D-84）：老库的裸字符串 identity → 弹性字典 { displayName: 原串 }；
 // raw_inputs 补 raw 列。用临时文件造「老库」，再走 makeDb 的 ensureSchema 自愈路径
 // （与生产启动一字不差的同一条路径——不重复实现 DDL）。
 
@@ -46,40 +47,40 @@ function cleanup(dir: string): void {
 }
 
 describe("存量迁移（D-84）：字符串身份 → 弹性字典", () => {
-  it("老库裸字符串身份 → 迁移后读为 { sourceLabel: 原串 }（不重置库、原文未动）", () => {
+  it("老库裸字符串身份 → 迁移后读为 { displayName: 原串 }（不重置库、原文未动）", () => {
     const file = writeLegacyDbFile();
     try {
       const db = makeDb(file); // ensureSchema 自愈：补 raw 列 + 迁移身份
       const raw = repo.getRawInput(db, "r1");
       if (!raw) throw new Error("存量批次丢失");
-      expect(raw.sourceIdentity).toEqual({ sourceLabel: "手机备忘录" });
+      expect(raw.identity).toEqual({ displayName: "手机备忘录" });
       expect(raw.content).toBe("老批次原文");
     } finally {
       cleanup(path.dirname(file));
     }
   });
 
-  it("迁移幂等：对已迁移的库再开一次，不把 { sourceLabel } 再包一层", () => {
+  it("迁移幂等：对已迁移的库再开一次，不把 { displayName } 再包一层", () => {
     const file = writeLegacyDbFile();
     try {
       makeDb(file); // 第一次迁移
       const db2 = makeDb(file); // 模拟重启，再跑一遍 ensureSchema
-      expect(repo.getRawInput(db2, "r1")?.sourceIdentity).toEqual({ sourceLabel: "手机备忘录" });
+      expect(repo.getRawInput(db2, "r1")?.identity).toEqual({ displayName: "手机备忘录" });
     } finally {
       cleanup(path.dirname(file));
     }
   });
 
-  it("normalizeSourceIdentity：坏形状兜底、对象原样", () => {
-    expect(normalizeSourceIdentity({ sourceLabel: "群", groupId: "1" })).toEqual({
-      sourceLabel: "群",
+  it("normalizeIdentity：坏形状兜底、对象原样", () => {
+    expect(normalizeIdentity({ displayName: "群", groupId: "1" })).toEqual({
+      displayName: "群",
       groupId: "1",
     });
-    expect(normalizeSourceIdentity("裸串")).toEqual({ sourceLabel: "裸串" });
-    expect(normalizeSourceIdentity(42)).toEqual({ sourceLabel: "未知来源" });
-    expect(normalizeSourceIdentity({ notName: 1 })).toEqual({ sourceLabel: "未知来源" });
-    expect(normalizeSourceIdentity({ name: "旧群", groupId: "9" })).toEqual({
-      sourceLabel: "旧群", // 旧保留键 name 漏网 → 升为 sourceLabel，其余键保留
+    expect(normalizeIdentity("裸串")).toEqual({ displayName: "裸串" });
+    expect(normalizeIdentity(42)).toEqual({ displayName: "未知来源" });
+    expect(normalizeIdentity({ notName: 1 })).toEqual({ displayName: "未知来源" });
+    expect(normalizeIdentity({ name: "旧群", groupId: "9" })).toEqual({
+      displayName: "旧群", // 旧保留键 name 漏网 → 升为 displayName，其余键保留
       groupId: "9",
     });
   });
@@ -215,28 +216,111 @@ function writeLegacyNameKeyDbFile(): string {
   return file;
 }
 
-describe("保留键改名迁移（D-88）：name → sourceLabel", () => {
-  it("存量 { name: … } 对象 → 键改名 sourceLabel（其余键保留，幂等）", () => {
+describe("保留键改名迁移（D-88）：name → displayName", () => {
+  it("存量 { name: … } 对象 → 键改名 displayName（其余键保留，幂等）", () => {
     const file = writeLegacyNameKeyDbFile();
     try {
       const db = makeDb(file); // ensureSchema 自愈：键改名
       const raw = repo.getRawInput(db, "r1");
       if (!raw) throw new Error("存量批次丢失");
-      expect(raw.sourceIdentity).toEqual({
-        sourceLabel: "英语课官方群",
+      expect(raw.identity).toEqual({
+        displayName: "英语课官方群",
         groupId: "123",
         sender: "课代表",
       });
 
       // 幂等：再开一次不重复（已无 name 键）
       const db2 = makeDb(file);
-      expect(repo.getRawInput(db2, "r1")?.sourceIdentity).toEqual({
-        sourceLabel: "英语课官方群",
+      expect(repo.getRawInput(db2, "r1")?.identity).toEqual({
+        displayName: "英语课官方群",
         groupId: "123",
         sender: "课代表",
       });
     } finally {
       cleanup(path.dirname(file));
     }
+  });
+});
+
+/** 造一个 D-127 前的库文件：列名 source_type / source_identity，保留键 sourceLabel。 */
+function writeLegacySourceLabelDbFile(): string {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "summarizing-mig-d127-"));
+  const file = path.join(dir, "legacy.db");
+  const sqlite = new Database(file);
+  sqlite.exec(`
+    CREATE TABLE raw_inputs (
+      id TEXT PRIMARY KEY, content TEXT NOT NULL, source_type TEXT NOT NULL,
+      source_identity TEXT NOT NULL, received_at TEXT NOT NULL, event_time TEXT,
+      digest_state TEXT NOT NULL DEFAULT 'pending', raw TEXT
+    );
+  `);
+  sqlite
+    .prepare(
+      "INSERT INTO raw_inputs (id,content,source_type,source_identity,received_at,event_time,digest_state) VALUES (?,?,?,?,?,?,?)",
+    )
+    .run(
+      "r1",
+      "老批次原文",
+      "nc",
+      JSON.stringify({ sourceLabel: "英语课官方群", groupId: "123", sender: "课代表" }),
+      "2026-09-20T10:00:00",
+      null,
+      "digested",
+    );
+  sqlite.close();
+  return file;
+}
+
+describe("术语改名迁移（D-127）：列名与保留键", () => {
+  it("列名 source_type/source_identity → source/identity_json（原文未动）", () => {
+    const file = writeLegacySourceLabelDbFile();
+    try {
+      const db = makeDb(file);
+      const cols = z
+        .object({ name: z.string() })
+        .array()
+        .parse(db.$client.prepare("PRAGMA table_info(raw_inputs)").all())
+        .map((r) => r.name);
+      expect(cols).toContain("source");
+      expect(cols).toContain("identity_json");
+      expect(cols).not.toContain("source_type");
+      expect(cols).not.toContain("source_identity");
+      // 迁移不碰 content（原文逐字不可变）
+      expect(repo.getRawInput(db, "r1")?.content).toBe("老批次原文");
+    } finally {
+      cleanup(path.dirname(file));
+    }
+  });
+
+  it("保留键 sourceLabel → displayName（其余键保留，幂等）", () => {
+    const file = writeLegacySourceLabelDbFile();
+    try {
+      const db = makeDb(file);
+      const raw = repo.getRawInput(db, "r1");
+      if (!raw) throw new Error("存量批次丢失");
+      expect(raw.identity).toEqual({
+        displayName: "英语课官方群",
+        groupId: "123",
+        sender: "课代表",
+      });
+
+      // 幂等：再开一次不重复
+      const db2 = makeDb(file);
+      expect(repo.getRawInput(db2, "r1")?.identity).toEqual({
+        displayName: "英语课官方群",
+        groupId: "123",
+        sender: "课代表",
+      });
+    } finally {
+      cleanup(path.dirname(file));
+    }
+  });
+
+  it("旧键直读不崩（漏迁的库）：normalizeIdentity 认 sourceLabel", () => {
+    expect(normalizeIdentity({ sourceLabel: "旧群" })).toEqual({ displayName: "旧群" });
+    expect(normalizeIdentity({ sourceLabel: "旧群", groupId: "1" })).toEqual({
+      displayName: "旧群",
+      groupId: "1",
+    });
   });
 });

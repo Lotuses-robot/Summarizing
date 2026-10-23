@@ -139,11 +139,16 @@ function Row({
   })();
 
   /** 松手时的位移与速度（px / px·ms⁻¹）：撤销窗口的动画从这儿接着走，不重新起步。 */
-  const releaseRef = useRef({ dx: 0, velocity: 0 });
-  /** 横滑：右滑 = 移入回收站，左滑 = 完成 / 撤销完成（与通知页同一套手势，lib/swipe 唯一实现）。
+  const releaseRef = useRef({
+    dx: 0,
+    velocity: 0,
+  }); /** 横滑：右滑 = 移入回收站，左滑 = 完成 / 撤销完成（与通知页同一套手势，lib/swipe 唯一实现）。
+   *  **展开态不接手势**（用户 2026-10-23）：展开体里有可交互内容（引文、按钮、图片、可选中文字），
+   *  横滑会把指针抢走，交互就废了。比「再加一个锁钮」简洁——展开本来就是「我要读它」的状态，
+   *  这一态下不需要滑动手势；收起即恢复。
    *  手势结束仍会来一次 click——用它吞掉，否则滑完会顺手把行展开。 */
   const swipe = useSwipeActions({
-    enabled: true,
+    enabled: !expanded && !pendingTrash,
     ratio: 0.35,
     onSwipe: (dir, info) => {
       releaseRef.current = info;

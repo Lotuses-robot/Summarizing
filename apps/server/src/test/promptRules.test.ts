@@ -53,6 +53,32 @@ describe("buildDigestPrompt：用户拒收规则注入（D-107）", () => {
   });
 });
 
+describe("buildDigestPrompt：检索面与矛盾决断（D-127）", () => {
+  it("检索面用 search_raws，并讲清并/交与截断标注", () => {
+    const p = buildDigestPrompt("");
+    expect(p).toContain("search_raws");
+    expect(p).not.toContain("search_recent_raws");
+    expect(p).toContain("mode=all");
+    expect(p).toContain("mode=any");
+    expect(p).toContain("truncated");
+    expect(p).toContain("contentLength");
+    // 截断的含义要说清，且**指路到 get_raw**（而不是教模型换关键词碰运气——
+    // 那正是 get_raw 存在要取代的做法）
+    expect(p).toContain("get_raw");
+    expect(p).toContain("取完整原文");
+    expect(p).not.toContain("缩小范围再查");
+  });
+
+  it("矛盾决断：无权威性字段时不得凭猜测决断", () => {
+    const p = buildDigestPrompt("");
+    expect(p).toContain("实际存在的字段");
+    expect(p).toContain("不得凭「群名听起来更官方」");
+    // 旧的「官方群 > 班级群 > 个人转述」要求 AI 去比一个数据里没有的属性，已删
+    expect(p).not.toContain("官方群 > 班级群 > 个人转述");
+    expect(p).not.toContain("署名发信人 > 匿名");
+  });
+});
+
 describe("buildDigestPrompt：事项 / 通知判类（2026-10-21 走查修订）", () => {
   it("主尺 = 备忘录测试（不用动作词清单判类）", () => {
     const p = buildDigestPrompt("");

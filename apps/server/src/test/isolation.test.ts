@@ -23,8 +23,8 @@ describe("双账户隔离（SC-001）", () => {
       url: "/api/ingest",
       payload: {
         content: "A 的作业通知：十月八日交",
-        sourceType: "paste",
-        sourceIdentity: { sourceLabel: "手机备忘录" },
+        source: "paste",
+        identity: { displayName: "手机备忘录" },
         eventTime: null,
       },
     });
@@ -60,8 +60,8 @@ describe("双账户隔离（SC-001）", () => {
     // A 直库造一个事项（走真实执行器——造数层）
     const raw = repo.insertRawInput(a.db, {
       content: "作业通知",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -138,8 +138,8 @@ describe("双账户隔离（SC-001）", () => {
         url: "/api/ingest",
         payload: {
           content: "x",
-          sourceType: "paste",
-          sourceIdentity: { sourceLabel: "s" },
+          source: "paste",
+          identity: { displayName: "s" },
           eventTime: null,
         },
       },

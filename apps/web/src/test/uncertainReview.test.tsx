@@ -13,8 +13,8 @@ function makeEntry(partial: Partial<UncertainInput> = {}): UncertainInput {
   return {
     id: "u1",
     content: "听说要加口语考试",
-    sourceType: "nc",
-    sourceIdentity: { sourceLabel: "英语课官方群", groupId: "123" },
+    source: "nc",
+    identity: { displayName: "英语课官方群", groupId: "123" },
     eventTime: null,
     receivedAt: "2026-09-28T10:00:00",
     originRawInputId: "r1",

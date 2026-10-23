@@ -20,4 +20,7 @@ jobs:
       # --ignore-scripts：better-sqlite3 自带预编译二进制，禁脚本免 node-gyp 编译
       #（Linux runner 能编但慢；Windows runner 缺 VS 工具链直接失败——2026-10-12 实测）
       - run: npm ci --ignore-scripts
+      # nodejieba（D-127）：其安装脚本本身就是「下载预编译产物」，被 --ignore-scripts 一起跳过；
+      # 单独补跑（下载 linux-x64 预编译，不编译）。测试要真实切词，缺 .node 会整片失败。
+      - run: npm rebuild nodejieba
       - run: npm run check

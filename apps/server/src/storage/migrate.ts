@@ -12,8 +12,13 @@ import { nowWallClock } from "../shared/time";
  *  （db.ts / registry.ts 各自主体），存量变换同样写在 ensureSchema 里（先例：migrateByToProvenance）。
  *  v2（007）：取消归档状态——存量 archived 快照迁移为 done（FR-018）。
  *  v3（010）：新增 llm_usage（token 用量）——纯建表，无存量变换。
- *  v4（009）：新增 media（图片缓存生命周期）——纯建表，无存量变换。 */
-export const SCHEMA_VERSION = 4;
+ *  v4（009）：新增 media（图片缓存生命周期）——纯建表，无存量变换。
+ *  v5（012 / D-127）：术语改名——source_type → source、source_identity → identity_json，
+ *    保留键 sourceLabel → displayName（列名幂等改名 + 存量 JSON 键改名）。
+ *  v6（012 / D-127）：全文检索——raw_inputs 加 tokens / identity_tokens、建 FTS5 虚表 raw_fts，
+ *    存量批次切词回填 + 索引重建。
+ *  v7（013 / D-130）：系统库新增 relay_settings（部署级信源设置）——纯建表，无存量变换。 */
+export const SCHEMA_VERSION = 7;
 
 /** 备份保留份数（超过按时间清最旧——防无限堆积）。 */
 const BACKUP_KEEP = 5;

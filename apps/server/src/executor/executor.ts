@@ -232,8 +232,8 @@ function applyChanges(
         // 拿不准的信息入存疑信息库（D-85）：信源快照从当批自动带；批次引用可回溯原文。
         repo.insertUncertainInput(tx, {
           content: item.content,
-          sourceType: raw.sourceType,
-          sourceIdentity: raw.sourceIdentity,
+          source: raw.source,
+          identity: raw.identity,
           eventTime: raw.eventTime,
           receivedAt: raw.receivedAt,
           originRawInputId: raw.id,

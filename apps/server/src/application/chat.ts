@@ -18,6 +18,7 @@ import { describeSweep, sweepUncertainLibrary } from "../agent0/sweep";
 import { kickDigest } from "../agent0/digest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { ChatMsg, LlmClient, ToolCall, ToolDef } from "../shared/llm";
+import type { MediaFetcherLookup } from "./mediaIngest";
 import { recordUsage } from "../shared/usage";
 
 // 前台 buddy（D-78）：有连续上下文的多轮对话 agent——像聊天一样答问、收信息、留痕。
@@ -106,6 +107,8 @@ interface ChatTurnState {
   refTitles: Map<string, string>;
   /** 本回合用户消息里的图片占位 URL——ingest 工具据它把模型漏抄的占位补回原文。 */
   imageUrls: string[];
+  /** 按信源名查「媒体占位取字节」实现（对话入口用；与其它消化入口同一条口）。 */
+  mediaLookup?: MediaFetcherLookup;
 }
 
 /** references 组装：按触碰顺序去重、上限 8（防 chips 洪泛，05§四）。 */
@@ -138,6 +141,8 @@ export async function handleChat(
   history: ChatHistoryItem[],
   mediaDir: string,
   mentions: { id: string; title: string }[] = [],
+  /** 按信源名查「媒体占位取字节」实现（与其它消化入口同一条口——见 `MediaFetcherLookup`）。 */
+  mediaLookup?: MediaFetcherLookup,
 ): Promise<ChatResult> {
   const tools = makeAgentTools(db, mediaDir);
   const state: ChatTurnState = {
@@ -145,6 +150,7 @@ export async function handleChat(
     actions: [],
     refTitles: new Map(),
     imageUrls: extractImageUrls(message),
+    ...(mediaLookup === undefined ? {} : { mediaLookup }),
   };
   // 持久化本轮用户消息（L16：刷新/换设备可回填）——落库即用户话已存，模型再挂也不丢这句
   repo.appendChatTurn(db, "user", message);
@@ -167,7 +173,7 @@ export async function handleChat(
     if (!state.ingested && (state.actions.length === 0 || claimsRecorded(reply))) {
       const why = state.actions.length === 0 ? "本轮无成功工具调用" : "回复声称已录入";
       process.stderr.write(`[chat] ${why}，按兜底录入：${message.slice(0, 60)}\n`);
-      fallbackIngest(db, llm, modelTag, tools, message, mediaDir);
+      fallbackIngest(db, llm, modelTag, tools, message, mediaDir, mediaLookup);
       state.actions.push(ingestAction());
     }
     result = { reply, actions: state.actions, references: pickReferences(state) };
@@ -177,7 +183,7 @@ export async function handleChat(
     // 前台 LLM 挂了 ≠ 消息丢失（D-14）：本轮尚未录入 → 原文走消化管线兜底；已录入过则如实相告
     if (!state.ingested) {
       result = {
-        reply: fallbackIngest(db, llm, modelTag, tools, message, mediaDir),
+        reply: fallbackIngest(db, llm, modelTag, tools, message, mediaDir, mediaLookup),
         actions: [ingestAction()],
         references: [],
       };
@@ -295,7 +301,7 @@ async function runTool(
         // 模型若填 true 会答「库是空的」= 用户可见的错误答案，评审 A4）
         const result = await tools.searchUncertain(
           { sameSourceOnly: false },
-          { sourceIdentity: { sourceLabel: "用户对话" }, eventTime: null },
+          { identity: { displayName: "用户对话" }, eventTime: null },
         );
         state.actions.push({
           tool: "search_uncertain",
@@ -384,7 +390,17 @@ async function runTool(
         const raw = insertChatRaw(db, full);
         state.ingested = true;
         state.actions.push(ingestAction());
-        kickDigest(db, llm, tools, modelTag, raw, "ingest-tool", mediaDir);
+        kickDigest(
+          db,
+          llm,
+          tools,
+          modelTag,
+          raw,
+          "ingest-tool",
+          mediaDir,
+          undefined,
+          state.mediaLookup,
+        );
         return JSON.stringify({ ok: true, note: "已录入待处理队列，agent0 消化中" });
       }
       case "log_chitchat": {
@@ -412,9 +428,10 @@ function fallbackIngest(
   tools: AgentTools,
   message: string,
   mediaDir: string,
+  mediaLookup?: MediaFetcherLookup,
 ): string {
   const raw = insertChatRaw(db, message);
-  kickDigest(db, llm, tools, modelTag, raw, "fallback", mediaDir);
+  kickDigest(db, llm, tools, modelTag, raw, "fallback", mediaDir, undefined, mediaLookup);
   return "已记录，正在处理。";
 }
 
@@ -422,8 +439,8 @@ function fallbackIngest(
 function insertChatRaw(db: Db, content: string) {
   return repo.insertRawInput(db, {
     content,
-    sourceType: "chat",
-    sourceIdentity: { sourceLabel: "用户对话" },
+    source: "chat",
+    identity: { displayName: "用户对话" },
     receivedAt: nowWallClock(),
     eventTime: null,
   });

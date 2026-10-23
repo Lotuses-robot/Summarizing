@@ -3,35 +3,42 @@ import {
   errText,
   FetchImageArgsSchema,
   GetItemArgsSchema,
+  GetRawArgsSchema,
+  GetRawResultSchema,
   mediaIdFromUrl,
   SearchItemsArgsSchema,
   SearchKbArgsSchema,
-  SearchRecentRawsArgsSchema,
-  SearchRecentRawsResultSchema,
+  SearchRawsArgsSchema,
+  SearchRawsResultSchema,
   SearchUncertainArgsSchema,
   SearchUncertainResultSchema,
   type FetchImageArgs,
   type GetItemArgs,
   type GetItemResult,
+  type GetRawArgs,
+  type GetRawResult,
   type SearchKbArgs,
   type SearchKbResult,
   type SearchItemsArgs,
   type SearchItemsResult,
-  type SearchRecentRawsArgs,
-  type SearchRecentRawsResult,
+  type RawInput,
+  type SearchRawsArgs,
+  type SearchRawHit,
+  type SearchRawsResult,
   type SearchUncertainArgs,
   type SearchUncertainResult,
-  type SourceIdentity,
+  type Identity,
 } from "@summarizing/shared";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
+import { buildCountSql, buildSearchSql, validateSearchArgs } from "../search/query";
 import type { ToolDef } from "../shared/llm";
 import { parseWallClock } from "../shared/time";
 import { fetchImage } from "./fetchImage";
 import { readMediaBytes, storeImageBytes } from "../application/media";
 
 // agent0 的检索工具（01§4.14）：全部真代码检索，LLM 永不裸操作存储。
-// search_recent_raws / search_uncertain 归信源阶段（D-85）：前者找碎片兄弟，后者查存疑库复原。
+// search_raws / search_uncertain 归信源阶段（D-85）：前者检索历史批次，后者查存疑库复原。
 // fetch_image 归多模态初步（2026-10-13）：正文里的 `[图片](url)` 占位，agent0 自行取回查看。
 
 export const TOOL_DEFS: ToolDef[] = [
@@ -52,10 +59,16 @@ export const TOOL_DEFS: ToolDef[] = [
     parametersJsonSchema: z.toJSONSchema(GetItemArgsSchema),
   },
   {
-    name: "search_recent_raws",
+    name: "search_raws",
     description:
-      "检索历史进站批次（时间相近 + 可选同来源）——散落碎片的兄弟找齐（本批像某条旧通知的续篇时用）",
-    parametersJsonSchema: z.toJSONSchema(SearchRecentRawsArgsSchema),
+      "检索历史进站批次（原文档案）。按关键词 / 信源 / 身份键值 / 时间任意组合查询，条件间取交集（mode=all）或并集（mode=any）。模糊匹配支持部分关键词（搜「课群」能命中「英语课群」），精确匹配按身份键值对查。结果可能因过长而截断——每条带 truncated 与原长度，more 说明还有多少条未返回；需要更多请缩小范围或调小 limit。⚠️ 某条 truncated=true 时，用 get_raw 按它的 id 取全文。",
+    parametersJsonSchema: z.toJSONSchema(SearchRawsArgsSchema),
+  },
+  {
+    name: "get_raw",
+    description:
+      "按 id 读取一条进站批次的全文（search_raws 结果里 truncated=true 时用它，或需要逐字核对引文时用）。id 必须逐字来自 search_raws 结果或当前批次简报，不猜、不做模糊匹配。一次只查一条；正文过长仍会截断，看 truncated 与 contentLength。",
+    parametersJsonSchema: z.toJSONSchema(GetRawArgsSchema),
   },
   {
     name: "search_uncertain",
@@ -73,7 +86,7 @@ export const TOOL_DEFS: ToolDef[] = [
 
 /** 检索工具的当前批次参照（服务端隐式注入，agent0 不拼参数）——供接近度排序。 */
 export interface ToolContext {
-  sourceIdentity: SourceIdentity;
+  identity: Identity;
   eventTime: string | null;
 }
 
@@ -86,7 +99,8 @@ export interface AgentTools {
   searchItems(args: SearchItemsArgs): Promise<SearchItemsResult>;
   searchKb(args: SearchKbArgs): Promise<SearchKbResult>;
   getItem(args: GetItemArgs): Promise<GetItemResult>;
-  searchRecentRaws(args: SearchRecentRawsArgs, ctx: ToolContext): Promise<SearchRecentRawsResult>;
+  searchRaws(args: SearchRawsArgs): Promise<SearchRawsResult>;
+  getRaw(args: GetRawArgs): Promise<GetRawResult>;
   searchUncertain(args: SearchUncertainArgs, ctx: ToolContext): Promise<SearchUncertainResult>;
   fetchImage(args: FetchImageArgs): Promise<FetchImageToolResult>;
 }
@@ -122,27 +136,60 @@ export function makeAgentTools(db: Db, mediaDir: string): AgentTools {
       }
       return full;
     },
-    async searchRecentRaws({ daysBack, sameSourceOnly }, ctx) {
-      const all = repo.listRecentRawInputs(db, daysBack);
-      const filtered = sameSourceOnly
-        ? all.filter((r) => sameIdentity(r.sourceIdentity, ctx.sourceIdentity))
-        : all;
-      // 映射成契约形状后过 Result schema（截断 content 防 token 洪泛、不外发内部字段；契约漂移在此爆）
-      return SearchRecentRawsResultSchema.parse({
-        raws: filtered.slice(0, TOOL_RESULT_LIMIT).map((r) => ({
-          id: r.id,
-          content: r.content.slice(0, TOOL_RESULT_CONTENT_MAX),
-          sourceType: r.sourceType,
-          sourceIdentity: r.sourceIdentity,
-          receivedAt: r.receivedAt,
-          eventTime: r.eventTime,
-        })),
+    async getRaw({ id }) {
+      // 精确查一条：id 逐字比对（批次永不删，查不到就是 id 不对——报错并给正确用法，不猜）
+      const raw = repo.getRawInput(db, id);
+      if (raw === null) {
+        throw new Error(
+          `没有这个批次 id：${id}——id 必须逐字来自 search_raws 结果或当前批次简报（本工具不做模糊匹配）`,
+        );
+      }
+      const truncated = raw.content.length > GET_RAW_CONTENT_MAX;
+      return GetRawResultSchema.parse({
+        id: raw.id,
+        content: truncated ? raw.content.slice(0, GET_RAW_CONTENT_MAX) : raw.content,
+        truncated,
+        contentLength: raw.content.length,
+        source: raw.source,
+        identity: raw.identity,
+        receivedAt: raw.receivedAt,
+        eventTime: raw.eventTime,
+      });
+    },
+    async searchRaws(args) {
+      // 边界先校验（越界直接抛给模型：文案里带正确用法——D-103 不替模型改输入）
+      validateSearchArgs(args);
+      const idQuery = buildSearchSql(args);
+      const countQuery = buildCountSql(args);
+      const ids = queryRows(db, idQuery.sql, idQuery.params);
+      const total = countRows(db, countQuery.sql, countQuery.params);
+      const limit = args.limit ?? DEFAULT_SEARCH_LIMIT;
+      const selected = ids.slice(0, limit);
+      const raws = repo.getRawInputsByIds(db, selected);
+      const byId = new Map(raws.map((r) => [r.id, r]));
+      const hits: SearchRawHit[] = [];
+      let budget = SEARCH_RESULT_BUDGET;
+      for (const id of selected) {
+        const raw = byId.get(id);
+        if (raw === undefined) continue; // 检索与读之间被删（批次永不删，防御性跳过）
+        const summary = summarizeRaw(raw);
+        // 预算按**总量**算；装不下的**这一条**跳过、继续看后面的短条目——
+        // 不能一遇到装不下就 break：那会把后面所有命中（包括模型要找的「另一半」）全部丢掉，
+        // 而 more 区分不出「预算丢弃」和「超出 limit」。跳过则至少保证「给出的都是装得下的」。
+        if (budget - summary.content.length < 0) continue;
+        budget -= summary.content.length;
+        hits.push(summary);
+      }
+      return SearchRawsResultSchema.parse({
+        hits,
+        total,
+        more: total - hits.length,
       });
     },
     async searchUncertain({ sameSourceOnly }, ctx) {
       const open = repo.listUncertainByStatus(db, "open");
       const filtered = sameSourceOnly
-        ? open.filter((u) => sameIdentity(u.sourceIdentity, ctx.sourceIdentity))
+        ? open.filter((u) => sameIdentity(u.identity, ctx.identity))
         : open;
       // 接近度排序 → 截断 → 映射 → 过 Result schema（同 searchRecentRaws）
       return SearchUncertainResultSchema.parse({
@@ -152,7 +199,7 @@ export function makeAgentTools(db: Db, mediaDir: string): AgentTools {
           .map((u) => ({
             id: u.id,
             content: u.content.slice(0, TOOL_RESULT_CONTENT_MAX),
-            sourceIdentity: u.sourceIdentity,
+            identity: u.identity,
             eventTime: u.eventTime,
             createdAt: u.createdAt,
             needsHuman: u.needsHuman,
@@ -226,9 +273,77 @@ const TOOL_RESULT_LIMIT = 30;
 /** 工具结果里单条 content 的截断长度（检索只求「认出是同一条」，不必全量原文）。 */
 const TOOL_RESULT_CONTENT_MAX = 400;
 
-/** 两条来源身份是否同源（同 sourceLabel 视为同群/同发信人；弹性字典的核心键就这一个）。 */
-function sameIdentity(a: SourceIdentity, b: SourceIdentity): boolean {
-  return a["sourceLabel"] === b["sourceLabel"];
+/** search_raws 默认返回条数（模型不给 limit 时）。 */
+const DEFAULT_SEARCH_LIMIT = 20;
+/** search_raws 单次结果的总字数预算（D-127：取代「每条硬砍 400 字 × 30 条」的 12,000 字洪泛）。
+ *  依据：prompt 多 5,000 token 时缓存命中率 95%→55%——增量越小越好；2,000 字约 500 token。 */
+const SEARCH_RESULT_BUDGET = 2_000;
+/** search_raws 单条摘要的字数上限（摘要级：够认出是哪条，不够下结论——看全文走 get_raw）。 */
+const SEARCH_RAW_SUMMARY_MAX = 150;
+
+/** get_raw 单次返回的字数上限（够读完一整篇通知；再长说明该批已撞字节闸，不该整段灌进对话）。
+ *  取 4,000 而不是更大：一次 get_raw 的返回会永久留在对话里，按「一次读一整篇」定档即可。 */
+const GET_RAW_CONTENT_MAX = 4_000;
+
+/** 一条批次 → 检索命中（截断**如实标注**：truncated + contentLength）。
+ *  @param raw 批次（原文逐字，不改）
+ */
+function summarizeRaw(raw: RawInput): SearchRawHit {
+  const truncated = raw.content.length > SEARCH_RAW_SUMMARY_MAX;
+  return {
+    id: raw.id,
+    content: truncated ? raw.content.slice(0, SEARCH_RAW_SUMMARY_MAX) : raw.content,
+    truncated,
+    contentLength: raw.content.length,
+    source: raw.source,
+    identity: raw.identity,
+    receivedAt: raw.receivedAt,
+    eventTime: raw.eventTime,
+  };
+}
+
+/** 跑一条 id 查询（search/query.ts 构造；参数全部绑定，无字符串拼接）。
+ *  @param db 库句柄
+ *  @param sql 查询 SQL
+ *  @param params 绑定参数
+ */
+function queryRows(db: Db, sql: string, params: unknown[]): string[] {
+  return z
+    .object({ id: z.string() })
+    .array()
+    .parse(db.$client.prepare(sql).all(...params))
+    .map((r) => r.id);
+}
+
+/** 跑 count 查询（命中总数，不受 limit 影响）。
+ *  @param db 库句柄
+ *  @param sql 查询 SQL
+ *  @param params 绑定参数
+ */
+function countRows(db: Db, sql: string, params: unknown[]): number {
+  return z.object({ n: z.number() }).parse(db.$client.prepare(sql).get(...params)).n;
+}
+
+/** 取身份的「同源判据键」（除 sender 外全部键，排序后可比）。
+ *  @param i 身份字典
+ */
+function identityKeys(i: Identity): string[] {
+  return Object.keys(i)
+    .filter((k) => k !== "sender")
+    .sort();
+}
+
+/** 两条身份是否同源：**除 `sender` 外的全部键**逐个相等。
+ *
+ *  为什么排除 sender：多人群批次按 D-91 **不写发信人**（批内多人时不署名），
+ *  拿 sender 比会把「同一群的两人接续发言」判成不同源——恰恰是最该找齐的场景。
+ *  为什么其余键全比：只比 displayName 会漏判（同一显示名可能是不同群的备注重名）。
+ *  键集合不同 = 不同源（一个缺 groupId 的批次与有 groupId 的不是同一类身份）。 */
+function sameIdentity(a: Identity, b: Identity): boolean {
+  const ak = identityKeys(a);
+  const bk = identityKeys(b);
+  if (ak.length !== bk.length || ak.some((k, idx) => k !== bk[idx])) return false;
+  return ak.every((k) => a[k] === b[k]);
 }
 
 /** 按与当前批次的信源接近度排序（同源 > 时间临近 > 新入库）——给 agent0 找「另一半」用。
@@ -237,11 +352,13 @@ function byProximity(ctx: ToolContext) {
   // 时刻串一律 parseWallClock（+08:00 显式解析，机器时区无关——裸 Date.parse 是 D-97 泄漏形态）
   const ctxT = ctx.eventTime === null ? Number.NaN : parseWallClock(ctx.eventTime);
   return (
-    a: { sourceIdentity: SourceIdentity; eventTime: string | null; createdAt: string },
+    a: { identity: Identity; eventTime: string | null; createdAt: string },
     b: typeof a,
   ): number => {
-    const aSame = a.sourceIdentity["sourceLabel"] === ctx.sourceIdentity["sourceLabel"] ? 1 : 0;
-    const bSame = b.sourceIdentity["sourceLabel"] === ctx.sourceIdentity["sourceLabel"] ? 1 : 0;
+    // 同源判据**与 sameIdentity 同一出处**（此前这里只比 displayName，而同一次调用里的
+    // sameSourceOnly 过滤比全部键——同一批数据被两套判据分到不同组，自相矛盾）
+    const aSame = sameIdentity(a.identity, ctx.identity) ? 1 : 0;
+    const bSame = sameIdentity(b.identity, ctx.identity) ? 1 : 0;
     if (aSame !== bSame) return bSame - aSame; // 同源优先
     if (!Number.isNaN(ctxT)) {
       const aT = parseWallClock(a.eventTime ?? a.createdAt);

@@ -12,7 +12,7 @@ import type {
   SourceBatch,
   SourceContext,
   SourceRouteHandler,
-  SourceRouter,
+  WebhookRegistrar,
   SourceState,
 } from "./types";
 
@@ -23,7 +23,7 @@ import type {
  *  导出给测试 import（推进假时钟用同一来源，杜绝「改常量忘改测试」）。 */
 export const START_TIMEOUT_MS = 10_000;
 
-/** webhook 处理器：适配器经 SourceRouter 登记，core 网关按 (源名, method, 相对路径) 分发。 */
+/** webhook 处理器：适配器经 WebhookRegistrar 登记，core 网关按 (源名, method, 相对路径) 分发。 */
 export interface WebhookRoute {
   /** 登记它的源（多源同空间时精确分发——两个源都可以有 "/event"）。 */
   source: string;
@@ -43,16 +43,29 @@ export interface SpaceDeps {
   webhookRoutes: WebhookRoute[];
   /** 本账户的图片媒体目录（009：信源图片进站即缓存——QQ 链接小时级过期）。 */
   mediaDir: string;
+  /** **信源自己声明的**「媒体占位取字节」实现（D-128；键 = 信源名，由 `registerSources` 填）。
+   *  这张表对 `/api/ingest` 也可见——所以里面只能放「本源的占位、本源的凭据」这类东西。 */
+  mediaFetchers: Map<string, NonNullable<SourceAdapter["fetchMedia"]>>;
+  /** **部署级注入的**取字节实现（D-130；键 = 信源名，由 Router 在投递时填）。
+   *
+   *  为什么必须与上一张分开：Router 的取字节能力握着**部署级凭据**（企业微信 corp secret），
+   *  而 `/api/ingest` 的 `source` 是调用方随便填的——合成一张表，任何登录用户都能
+   *  `POST /api/ingest {"source":"wecom","content":"[图片](wecom-media:<别人的 id>)"}`
+   *  借部署的凭据把**别的客户**的私有媒体下载进自己的库。
+   *
+   *  分表之后：这张只有**同名的信源自己**（经 `ctx.ingest`）能用——归属由构造保证，
+   *  不靠请求体里那个字符串。 */
+  relayMediaFetchers: Map<string, NonNullable<SourceAdapter["fetchMedia"]>>;
 }
 
 /** webhook 登记口：把适配器的 post/get/put/delete 收进本空间处理器表（附源名——网关按「源名+方法+路径」分发）。
  *  路径在**登记处**校验形状（纯字面段、以 `/` 开头——types.ts 已记录参数段边界）：违规走 `reportError`
  *  响亮落地（与设置声明校验同姿势）——静默收下一个永不匹配的路径 = 线上「这个源收不到消息」而无任何日志。 */
-function makeSourceRouter(
+function makeWebhookRegistrar(
   routes: WebhookRoute[],
   source: string,
   reportInvalid: (message: string) => void,
-): SourceRouter {
+): WebhookRegistrar {
   /** 合法路径：以 / 起始的纯字面段（字母/数字/._-；无参数段/通配）。 */
   const LEGAL_PATH = /^\/[A-Za-z0-9._-]+$/;
   /** 造某方法的登记函数（源名/收集表/报错口在闭包）；违规路径不落表、走 reportInvalid 响亮落地。 */
@@ -103,6 +116,14 @@ function makeSourceContext(
           { ...parsed, raw: batch.raw },
           `source:${name}`,
           deps.mediaDir,
+          undefined, // log：ctx.ingest 不另开日志通道（失败已由返回值 + reportError 承载）
+          // 本源自己的取字节实现；本源没有再看部署级注入的那张（D-130：Router 握凭据）。
+          // 只认**本源自己的名字**（闭包里那个 name），调用方传什么都换不了口——
+          // 因而部署级那张表不会被请求体里的 source 借走。
+          (source) =>
+            source === name
+              ? (deps.mediaFetchers.get(name) ?? deps.relayMediaFetchers.get(name))
+              : undefined,
         );
         // 落地成功即恢复正常（reportError 置的 error 不能粘滞——「最近出错」语义要能翻篇）
         state.state = "ok";
@@ -162,15 +183,18 @@ function makeSourceContext(
   };
 }
 
-/** 一个空间的信源装配句柄：start 与 stop（stop 在空间关停时调用）。 */
+/** 一个空间的信源装配句柄：start / stop / 取信源实例。 */
 export interface SourceAssembly {
   /** 启动（三时机之③，**可异步**）：逐个 await `start?.()`，失败或**挂起**（超时）只把本信源标 error。 */
   start(): Promise<void>;
   /** 停止：逐信源 stop + 清理表反向撤销（逐项隔离——任一项失败只留痕继续，同原 onClose 语义）。 */
   stop(): Promise<void>;
+  /** 按名字取已上岗的信源（D-130：Router 投递用）。未上岗返回 undefined
+   *  ——那是「用户没启用这个信源」，不是错误。 */
+  source(name: string): SourceAdapter | undefined;
 }
 
-/** 信源上岗（三时机之②，**同步、按空间**）：为每个信源造 ctx（登记其清理表 + 状态）、经 `SourceRouter`
+/** 信源上岗（三时机之②，**同步、按空间**）：为每个信源造 ctx（登记其清理表 + 状态）、经 `WebhookRegistrar`
  *  登记 webhook、把声明的 schema 落库 `__schema__`；返回 start/stop 句柄。
  *  重复名跳过（防注册表列重导致定时器/监听器叠加）。状态写进 `deps.sourceStates`（唯一通道）。 */
 export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): SourceAssembly {
@@ -199,7 +223,7 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
     const ctx = makeSourceContext(deps, tools, adapter.name, cleanups, state, declaredKeys);
     adapter.register(
       ctx,
-      makeSourceRouter(deps.webhookRoutes, adapter.name, (message) =>
+      makeWebhookRegistrar(deps.webhookRoutes, adapter.name, (message) =>
         ctx.reportError(new Error(message)),
       ),
     );
@@ -242,9 +266,17 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
       }
     });
     states.set(adapter.name, state);
+    // 媒体取字节的实现按源登记（core 只按名字查，不关心是哪家的协议）
+    if (adapter.fetchMedia !== undefined) {
+      const fetchMedia = adapter.fetchMedia.bind(adapter);
+      deps.mediaFetchers.set(adapter.name, fetchMedia);
+    }
     kept.push({ adapter, state });
   }
   return {
+    source(name: string): SourceAdapter | undefined {
+      return kept.find((k) => k.adapter.name === name)?.adapter;
+    },
     async start(): Promise<void> {
       for (const { adapter, state } of kept) {
         try {

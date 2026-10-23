@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   itemName,
-  errText,
   type BoardView,
   type MeView,
   type NoticeView,
@@ -10,7 +9,7 @@ import {
   type TrashView,
   type UncertainInput,
 } from "@summarizing/shared";
-import { api, setOnUnauthorized } from "./api";
+import { api, isUnauthorized, setOnUnauthorized } from "./api";
 import { ActivityBar, type View } from "./components/ActivityBar";
 import { MobileNav } from "./components/MobileNav";
 import { AuthShell } from "./components/AuthShell";
@@ -168,7 +167,9 @@ export default function App() {
         if (alive) setMe(v);
       })
       .catch((err: unknown) => {
-        if (alive && !errText(err).includes("401")) {
+        // 401 = 未登录（首屏的正常路径），其余才是「后端不在」。判据用**状态码**：
+        // 服务端 401 的文案是「未登录」，里面没有 "401"——按文案找会把首屏判成服务器挂了（实测）。
+        if (alive && !isUnauthorized(err)) {
           setAuthProbeError("后端服务未连接——请确认服务已启动（apps/server）");
         }
       })

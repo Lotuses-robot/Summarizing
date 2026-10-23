@@ -15,13 +15,14 @@ afterEach(cleanupAllTestAccounts);
 function makeEchoAdapter(): SourceAdapter {
   return {
     name: "echo",
+    accept: () => ({ ok: true }),
     register(ctx, router) {
       router.post("/ingest", async (req, reply) => {
         const body = z.object({ content: z.string().min(1) }).parse(req.body);
         const r = ctx.ingest({
           content: body.content,
-          sourceType: "echo",
-          sourceIdentity: { sourceLabel: "回声源" },
+          source: "echo",
+          identity: { displayName: "回声源" },
           eventTime: null,
         });
         return reply.code(r.ok ? 202 : 500).send(r);

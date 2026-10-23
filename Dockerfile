@@ -12,6 +12,9 @@ COPY packages/shared/package.json packages/shared/
 # --ignore-scripts 必需：否则 better-sqlite3 触发 node-gyp 源码编译（slim 镜像无 python/make/g++ → 构建失败）。
 # 依赖均自带预编译二进制（better-sqlite3 prebuilds、esbuild 平台包），禁脚本不影响可用性（容器内实测通过）。
 RUN npm ci --ignore-scripts
+# nodejieba（D-127 切词）：有 linux-x64 预编译产物、但安装脚本就是「下载预编译」那一步——
+# --ignore-scripts 把它一并跳过了，故单独补跑（走 node-pre-gyp 下载，不编译；slim 镜像无工具链也能成）。
+RUN npm rebuild nodejieba --foreground-scripts
 
 # 拷源码后构建：前端 vite + 服务端 esbuild 单文件（打包配方复用 scripts/build-server.mjs，与便携包同一出处）
 COPY . .
@@ -38,6 +41,18 @@ COPY --from=build /app/node_modules/@img/sharp-libvips-linux-x64 ./node_modules/
 COPY --from=build /app/node_modules/semver ./node_modules/semver
 COPY --from=build /app/node_modules/detect-libc ./node_modules/detect-libc
 COPY --from=build /app/node_modules/@img/colour ./node_modules/@img/colour
+# nodejieba（D-127 切词）：index.js + 类型 + linux-x64 预编译 .node + 词典。
+# 词典必须齐（5 个文件）：nodejieba 首次切词按默认路径 load 全部词典，缺任一个会 FATAL 退进程
+# （实测：不是可捕获异常）。pos_dict/ 只服务词性标注，本项不用。
+COPY --from=build /app/node_modules/nodejieba/package.json ./node_modules/nodejieba/
+COPY --from=build /app/node_modules/nodejieba/index.js ./node_modules/nodejieba/
+COPY --from=build /app/node_modules/nodejieba/types ./node_modules/nodejieba/types
+COPY --from=build /app/node_modules/nodejieba/build/Release/nodejieba.node ./node_modules/nodejieba/build/Release/
+COPY --from=build /app/node_modules/nodejieba/submodules/cppjieba/dict/jieba.dict.utf8 ./node_modules/nodejieba/submodules/cppjieba/dict/
+COPY --from=build /app/node_modules/nodejieba/submodules/cppjieba/dict/hmm_model.utf8 ./node_modules/nodejieba/submodules/cppjieba/dict/
+COPY --from=build /app/node_modules/nodejieba/submodules/cppjieba/dict/user.dict.utf8 ./node_modules/nodejieba/submodules/cppjieba/dict/
+COPY --from=build /app/node_modules/nodejieba/submodules/cppjieba/dict/idf.utf8 ./node_modules/nodejieba/submodules/cppjieba/dict/
+COPY --from=build /app/node_modules/nodejieba/submodules/cppjieba/dict/stop_words.utf8 ./node_modules/nodejieba/submodules/cppjieba/dict/
 
 # 从构建阶段取产物：服务端单文件 + 前端静态
 COPY --from=build /app/apps/server/dist ./apps/server/dist

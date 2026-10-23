@@ -264,6 +264,58 @@ describe("Board（三段看板，007）", () => {
     expect(opened.hasAttribute("data-swipe-through")).toBe(false);
   });
 
+  it("展开行不接手势：展开体内可交互（用户 2026-10-23）", async () => {
+    const calls: string[] = [];
+    // 与 describe 的默认 stub 一致：拒绝（展开体落在「加载中…」占位），但记录调用以便断言不写库
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        calls.push(String(url));
+        return Promise.reject(new Error("测试环境无后端"));
+      }),
+    );
+    render(
+      <Board
+        board={view({
+          scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
+        })}
+        onRefresh={() => {}}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    const li = document.getElementById("row-s1");
+    const body = li?.children[1];
+    if (!(body instanceof HTMLElement)) throw new Error("找不到行本体");
+    /** 在行本体上横拖一把。 */
+    const swipe = (): void => {
+      Object.defineProperty(body, "clientWidth", { configurable: true, value: 400 });
+      /** 某个横坐标上的「手指」——touch 事件只用到 clientX/clientY。 */
+      const at = (x: number) => ({ clientX: x, clientY: 100 });
+      /** 派发带 touches 的原生事件（组件用原生 touch 监听）。 */
+      const fire = (type: string, touches: { clientX: number; clientY: number }[]) => {
+        const ev = new Event(type, { bubbles: true, cancelable: true });
+        Object.defineProperty(ev, "touches", { value: touches });
+        fireEvent(body, ev);
+      };
+      fire("touchstart", [at(100)]);
+      fire("touchmove", [at(300)]);
+      fire("touchend", []);
+    };
+
+    // 先展开（这一步只测「展开态不接手势」，不必先滑一次）
+    fireEvent.click(body);
+    // 展开体已挂载 = 行处于展开态（展开体是唯一带 max-h-[70dvh] 的那块）
+    expect(li?.querySelector(".max-h-\\[70dvh\\]")).not.toBeNull();
+
+    // 展开态：横滑不接手势 → 不写库、不进撤销窗口
+    swipe();
+    await act(async () => {});
+    expect(screen.queryByTitle("撤销删除")).not.toBeInTheDocument();
+    expect(calls.some((u) => u.endsWith("/api/items/s1/trash"))).toBe(false);
+  });
+
   it("行右缘不再有勾/删除按钮：行操作只有手势（用户 2026-10-22）", () => {
     render(
       <Board

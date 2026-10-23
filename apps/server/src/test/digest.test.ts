@@ -37,8 +37,8 @@ const PASTE = "数据结构 老师说下周要交第三次作业 好像还要交
 function seedRaw(db: ReturnType<typeof makeDb>) {
   return repo.insertRawInput(db, {
     content: PASTE,
-    sourceType: "paste",
-    sourceIdentity: { sourceLabel: "手机备忘录" },
+    source: "paste",
+    identity: { displayName: "手机备忘录" },
     receivedAt: "2026-09-24T10:00:00",
     eventTime: "2026-09-24T10:15:00",
   });
@@ -289,8 +289,8 @@ describe("agent0 消化管线", () => {
     });
     const raw2 = repo.insertRawInput(db, {
       content: "上次没交，这次补交高数作业",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "自己" },
+      source: "chat",
+      identity: { displayName: "自己" },
       receivedAt: "2026-10-22T13:30:00",
       eventTime: null,
     });
@@ -336,8 +336,8 @@ describe("agent0 消化管线", () => {
     });
     const raw2 = repo.insertRawInput(db, {
       content: "给它打个新标签",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "自己" },
+      source: "chat",
+      identity: { displayName: "自己" },
       receivedAt: "2026-10-22T13:00:00",
       eventTime: null,
     });
@@ -383,8 +383,8 @@ describe("agent0 消化管线", () => {
     });
     const raw2 = repo.insertRawInput(db, {
       content: "田家炳报告厅外景如上！",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "班级群" },
+      source: "nc",
+      identity: { displayName: "班级群" },
       receivedAt: "2026-10-22T12:35:00",
       eventTime: null,
     });
@@ -454,8 +454,8 @@ describe("agent0 消化管线", () => {
     });
     const raw2 = repo.insertRawInput(db, {
       content: "社团纳新现场展示改到10月15日",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "社团群" },
+      source: "chat",
+      identity: { displayName: "社团群" },
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
@@ -476,7 +476,7 @@ describe("agent0 消化管线", () => {
     expect(uncertain[0]?.content).toBe("好像还有个材料清单要交");
     expect(uncertain[0]?.needsHuman).toBe(55);
     expect(uncertain[0]?.originRawInputId).toBe(raw2.id);
-    expect(uncertain[0]?.sourceType).toBe("chat");
+    expect(uncertain[0]?.source).toBe("chat");
   });
 });
 
@@ -489,8 +489,8 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
   ): { item: Item; raw: RawInput } {
     const raw = repo.insertRawInput(db, {
       content: `${name}的相关原始记录`,
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "课程群" },
+      source: "chat",
+      identity: { displayName: "课程群" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -552,8 +552,8 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
     });
     const raw2 = repo.insertRawInput(db, {
       content: "【数据结构】第三次作业通知：提交截止10月8日23:59，提交入口见群公告。",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "课程群" },
+      source: "chat",
+      identity: { displayName: "课程群" },
       receivedAt: "2026-09-27T10:00:00",
       eventTime: null,
     });
@@ -600,8 +600,8 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
     });
     const raw = repo.insertRawInput(db, {
       content: "好像数据结构还要交实验报告？",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "课程群" },
+      source: "chat",
+      identity: { displayName: "课程群" },
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
@@ -646,8 +646,8 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
     });
     const raw = repo.insertRawInput(db, {
       content: "【数据结构】第三次作业提交截止时间调整为10月15日23:59",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "课程群" },
+      source: "chat",
+      identity: { displayName: "课程群" },
       receivedAt: "2026-09-26T10:00:00",
       eventTime: null,
     });
@@ -676,8 +676,8 @@ describe("身份判定与去重（S2 §4.11 / D-75·D-76）", () => {
     llm.push({ content: '{"changes":[]}' });
     const raw = repo.insertRawInput(db, {
       content: "食堂下周三有免费试吃活动",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "校园群" },
+      source: "chat",
+      identity: { displayName: "校园群" },
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
@@ -702,8 +702,8 @@ describe("POST /api/ingest（真实 HTTP 入口）", () => {
       url: "/api/ingest",
       payload: {
         content: PASTE,
-        sourceType: "paste",
-        sourceIdentity: { sourceLabel: "手机备忘录" },
+        source: "paste",
+        identity: { displayName: "手机备忘录" },
         eventTime: "2026-09-24T10:15:00",
       },
     });
@@ -726,7 +726,7 @@ describe("POST /api/ingest（真实 HTTP 入口）", () => {
     const res = await t.inject({
       method: "POST",
       url: "/api/ingest",
-      payload: { content: "", sourceType: "paste", sourceIdentity: { sourceLabel: "x" } },
+      payload: { content: "", source: "paste", identity: { displayName: "x" } },
     });
     expect(res.statusCode).toBe(400);
     expect(repo.listRawInputsByState(t.db, "pending")).toHaveLength(0);
@@ -757,8 +757,8 @@ describe("信源阶段 AI 复原（D-85）：碎片入库存疑 → 后续批次
     });
     const rawA = repo.insertRawInput(db, {
       content: "英语课下周三要交口语录音",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "英语课官方群" },
+      source: "chat",
+      identity: { displayName: "英语课官方群" },
       receivedAt: "2026-09-25T10:00:00",
       eventTime: null,
     });
@@ -803,8 +803,8 @@ describe("信源阶段 AI 复原（D-85）：碎片入库存疑 → 后续批次
     });
     const rawB = repo.insertRawInput(db, {
       content: "【英语课】口语录音下周三前交到课程平台，正式作业，计入平时分",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "英语课官方群" },
+      source: "chat",
+      identity: { displayName: "英语课官方群" },
       receivedAt: "2026-09-26T10:00:00",
       eventTime: null,
     });
@@ -827,8 +827,8 @@ describe("矛盾决断（S-6 / D-85）：有据取舍留痕，判不了入库", 
   function seed(db: ReturnType<typeof makeDb>, name: string, dueDate: string): Item {
     const raw = repo.insertRawInput(db, {
       content: `${name}的原始记录`,
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "社团群" },
+      source: "chat",
+      identity: { displayName: "社团群" },
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -892,8 +892,8 @@ describe("矛盾决断（S-6 / D-85）：有据取舍留痕，判不了入库", 
     });
     const raw = repo.insertRawInput(db, {
       content: "【社团官方群】纳新现场展示改到11月8日",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "社团官方群" },
+      source: "chat",
+      identity: { displayName: "社团官方群" },
       receivedAt: "2026-09-28T10:00:00",
       eventTime: null,
     });
@@ -912,58 +912,236 @@ describe("矛盾决断（S-6 / D-85）：有据取舍留痕，判不了入库", 
   });
 });
 
-describe("agent0 检索工具：search_recent_raws（二轮评审 C：原零测试）", () => {
-  it("按 daysBack 窗口检索历史批次；content 截断；不含 raw 归档字段", async () => {
+describe("agent0 检索工具：search_raws（D-127 新增）", () => {
+  /** 造三条各带不同身份/时间的批次（内容有意区分，便于断言命中集合）。 */
+  function seedSearchFixture() {
     const db = makeDb(":memory:");
-    // 一条窗口内、一条窗口外（receivedAt 用过去时间）
     repo.insertRawInput(db, {
-      content: "窗口内的通知",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群A" },
-      receivedAt: "2026-09-26T10:00:00",
+      content: "高数作业第三章习题",
+      source: "nc",
+      identity: { displayName: "英语课群", groupId: "10001", sender: "学习委员" },
+      receivedAt: "2026-10-20T10:00:00",
       eventTime: null,
     });
     repo.insertRawInput(db, {
-      content: "很久以前的",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群A" },
-      receivedAt: "2026-09-01T10:00:00",
+      content: "图书馆闭馆调整通知",
+      source: "nc",
+      identity: { displayName: "班级通知群", groupId: "10002" },
+      receivedAt: "2026-10-21T10:00:00",
       eventTime: null,
     });
+    repo.insertRawInput(db, {
+      content: "期末考试安排（教务处）",
+      source: "paste",
+      identity: { displayName: "教务处" },
+      receivedAt: "2026-10-22T10:00:00",
+      eventTime: null,
+    });
+    return db;
+  }
+
+  it("关键词模糊匹配：部分词命中（搜「课群」命中「英语课群」的身份）", async () => {
+    const db = seedSearchFixture();
     const tools = makeAgentTools(db, "");
-    // 用「当前时刻回溯」不好控——直接测 daysBack 极大（全回）与极大窗口外
-    const all = await tools.searchRecentRaws(
-      { daysBack: 90, sameSourceOnly: false },
-      { sourceIdentity: { sourceLabel: "群B" }, eventTime: null },
-    );
-    expect(all.raws.length).toBe(2); // 90 天窗口含两条
-    expect(all.raws[0]?.content).toBeDefined();
-    // 结果不含 digestState 等内部字段（契约形状）
-    expect(Object.keys(all.raws[0] ?? {})).not.toContain("digestState");
+    const res = await tools.searchRaws({ query: "课群" });
+    // 前两条的身份词袋都含「课群」（英语课群 / 班级通知群 → 通知群…课群二元组）
+    expect(res.hits.length).toBeGreaterThan(0);
+    expect(
+      res.hits.every(
+        (h) =>
+          h.identity["displayName"] === "英语课群" || h.identity["displayName"] === "班级通知群",
+      ),
+    ).toBe(true);
   });
 
-  it("sameSourceOnly：只回同来源（同群名）批次", async () => {
-    const db = makeDb(":memory:");
-    repo.insertRawInput(db, {
-      content: "群A的",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群A" },
-      receivedAt: "2026-09-26T10:00:00",
-      eventTime: null,
+  it("内容关键词命中，且结果按接收时间倒序", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ query: "闭馆" });
+    expect(res.hits.map((h) => h.identity["displayName"])).toEqual(["班级通知群"]);
+    expect(res.total).toBe(1);
+    expect(res.more).toBe(0);
+  });
+
+  it("身份精确匹配（json_extract 等值，不走模糊）", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ identity: [{ key: "groupId", value: "10002" }] });
+    expect(res.hits.map((h) => h.identity["displayName"])).toEqual(["班级通知群"]);
+  });
+
+  it("mode=all：关键词 + 身份精确 取交集", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    // 关键词「作业」在第一条；group 10002 在第二条——交集应为空
+    const empty = await tools.searchRaws({
+      query: "作业",
+      identity: [{ key: "groupId", value: "10002" }],
+      mode: "all",
     });
+    expect(empty.hits).toHaveLength(0);
+    // 换成匹配的那条：关键词「作业」+ group 10001
+    const hit = await tools.searchRaws({
+      query: "作业",
+      identity: [{ key: "groupId", value: "10001" }],
+      mode: "all",
+    });
+    expect(hit.hits.map((h) => h.identity["displayName"])).toEqual(["英语课群"]);
+  });
+
+  it("mode=any：关键词 或 身份 取并集", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({
+      query: "闭馆",
+      identity: [{ key: "groupId", value: "10001" }],
+      mode: "any",
+    });
+    const names = res.hits.map((h) => h.identity["displayName"]).sort();
+    expect(names).toEqual(["班级通知群", "英语课群"].sort());
+  });
+
+  it("source 维度：按信源种类过滤", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ source: "paste" });
+    expect(res.hits.map((h) => h.identity["displayName"])).toEqual(["教务处"]);
+  });
+
+  it("时间区间过滤（received_at 墙钟字典序）", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ after: "2026-10-21T00:00:00" });
+    expect(res.hits.map((h) => h.identity["displayName"]).sort()).toEqual(["教务处", "班级通知群"]);
+  });
+
+  it("limit 生效，more 如实计数", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ after: "2026-10-19T00:00:00", limit: 1 });
+    expect(res.hits).toHaveLength(1);
+    expect(res.total).toBe(3);
+    expect(res.more).toBe(2);
+  });
+
+  it("截断如实标注（truncated + contentLength），且原文长度是真长度", async () => {
+    const db = makeDb(":memory:");
+    const long = "很长的通知正文".repeat(60); // 420 字 > 150 上限
     repo.insertRawInput(db, {
-      content: "群B的",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群B" },
-      receivedAt: "2026-09-26T10:00:00",
+      content: long,
+      source: "nc",
+      identity: { displayName: "长文群" },
+      receivedAt: "2026-10-20T10:00:00",
       eventTime: null,
     });
     const tools = makeAgentTools(db, "");
-    const same = await tools.searchRecentRaws(
-      { daysBack: 90, sameSourceOnly: true },
-      { sourceIdentity: { sourceLabel: "群A" }, eventTime: null },
+    const res = await tools.searchRaws({ query: "通知" });
+    const hit = res.hits[0];
+    if (hit === undefined) throw new Error("应命中一条");
+    expect(hit.truncated).toBe(true);
+    expect(hit.contentLength).toBe(long.length);
+    expect(hit.content.length).toBeLessThan(long.length);
+  });
+
+  it("短内容不标截断", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ query: "闭馆" });
+    expect(res.hits[0]?.truncated).toBe(false);
+    expect(res.hits[0]?.contentLength).toBe("图书馆闭馆调整通知".length);
+  });
+
+  it("结果不含内部字段（digestState / raw 归档）", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    const res = await tools.searchRaws({ query: "闭馆" });
+    const hit = res.hits[0] ?? {};
+    expect(Object.keys(hit)).not.toContain("digestState");
+    expect(Object.keys(hit)).not.toContain("raw");
+  });
+
+  it("参数越界直接报错（不静默改写）：limit / mode / 键名 / 时间格式 / 空条件", async () => {
+    const db = seedSearchFixture();
+    const tools = makeAgentTools(db, "");
+    await expect(tools.searchRaws({ query: "a", limit: 0 })).rejects.toThrow(/limit/);
+    await expect(tools.searchRaws({ query: "a", limit: 99 })).rejects.toThrow(/limit/);
+    await expect(tools.searchRaws({ query: "a", before: "昨天" })).rejects.toThrow(/时间格式/);
+    await expect(
+      tools.searchRaws({ after: "2026-10-22T00:00:00", before: "2026-10-20T00:00:00" }),
+    ).rejects.toThrow(/区间反了/);
+    await expect(
+      tools.searchRaws({ after: "2026-01-01T00:00:00", before: "2026-10-20T00:00:00" }),
+    ).rejects.toThrow(/90 天/);
+    await expect(tools.searchRaws({ identity: [{ key: "evilKey", value: "x" }] })).rejects.toThrow(
+      /不支持按该键查/,
     );
-    expect(same.raws.map((r) => r.content)).toEqual(["群A的"]);
+    await expect(tools.searchRaws({})).rejects.toThrow(/至少给一个条件/);
+    await expect(tools.searchRaws({ query: "x".repeat(201) })).rejects.toThrow(/关键词太长/);
+  });
+});
+
+describe("agent0 检索工具：get_raw（D-127 补齐检索闭环）", () => {
+  /** 造一条长批次 + 返回它的 id。 */
+  function seedLongRaw(db: ReturnType<typeof makeDb>, content: string): string {
+    return repo.insertRawInput(db, {
+      content,
+      source: "nc",
+      identity: { displayName: "长文群", groupId: "10009" },
+      receivedAt: "2026-10-20T10:00:00",
+      eventTime: null,
+    }).id;
+  }
+
+  it("按精确 id 取回全文（短批次不截断）", async () => {
+    const db = makeDb(":memory:");
+    const id = seedLongRaw(db, "图书馆闭馆调整通知");
+    const got = await makeAgentTools(db, "").getRaw({ id });
+    expect(got.content).toBe("图书馆闭馆调整通知");
+    expect(got.truncated).toBe(false);
+    expect(got.contentLength).toBe("图书馆闭馆调整通知".length);
+    expect(got.identity["displayName"]).toBe("长文群");
+  });
+
+  it("取回的正文比 search_raws 的摘要长——这正是它存在的理由", async () => {
+    const db = makeDb(":memory:");
+    const long = "很长的通知正文。".repeat(60); // 480 字：超摘要上限、未超 get_raw 上限
+    seedLongRaw(db, long);
+    const tools = makeAgentTools(db, "");
+
+    const search = await tools.searchRaws({ query: "通知" });
+    const hit = search.hits[0];
+    if (hit === undefined) throw new Error("应命中一条");
+    expect(hit.truncated).toBe(true); // 摘要被截断
+    expect(hit.contentLength).toBe(long.length);
+
+    const full = await tools.getRaw({ id: hit.id });
+    expect(full.content).toBe(long); // 全文完整
+    expect(full.truncated).toBe(false);
+  });
+
+  it("超长批次仍会截断，并如实标注真实长度（不静默）", async () => {
+    const db = makeDb(":memory:");
+    const huge = "字".repeat(5_000);
+    const id = seedLongRaw(db, huge);
+    const got = await makeAgentTools(db, "").getRaw({ id });
+    expect(got.truncated).toBe(true);
+    expect(got.contentLength).toBe(5_000); // 真实长度
+    expect(got.content.length).toBeLessThan(5_000); // 返回的是截断后的
+  });
+
+  it("id 不存在 → 报错并给正确用法（不模糊匹配、不返回空壳）", async () => {
+    const db = makeDb(":memory:");
+    await expect(makeAgentTools(db, "").getRaw({ id: "no-such-id" })).rejects.toThrow(
+      /没有这个批次 id/,
+    );
+    // 报错文案要告诉模型 id 从哪来
+    await expect(makeAgentTools(db, "").getRaw({ id: "x" })).rejects.toThrow(/search_raws/);
+  });
+
+  it("只精确匹配：给一个近似 id 不会命中（批次原文是证据终端，不做第二个检索入口）", async () => {
+    const db = makeDb(":memory:");
+    const id = seedLongRaw(db, "闭馆通知");
+    await expect(makeAgentTools(db, "").getRaw({ id: id.slice(0, 8) })).rejects.toThrow();
   });
 });
 
@@ -1046,8 +1224,8 @@ describe("启动自动重试被打断的批次（D-116）", () => {
     const seed = (state: RawInput["digestState"]): RawInput => {
       const raw = repo.insertRawInput(t.db, {
         content: `重启夹具-${state}`,
-        sourceType: "paste",
-        sourceIdentity: { sourceLabel: "s" },
+        source: "paste",
+        identity: { displayName: "s" },
         receivedAt: "2026-10-21T10:00:00",
         eventTime: null,
       });
@@ -1373,8 +1551,8 @@ describe("用户拒收规则进入提示词（D-107：真实消化链路）", ()
   function seedRaw(db: ReturnType<typeof makeDb>): RawInput {
     return repo.insertRawInput(db, {
       content: "帮我砍一下，拼多多链接 xxx，还差 0.01 元",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "班级群" },
+      source: "paste",
+      identity: { displayName: "班级群" },
       receivedAt: "2026-10-17T10:00:00",
       eventTime: null,
     });
@@ -1439,8 +1617,8 @@ describe("record_note 批次留痕（2026-10-19 拒收复盘）", () => {
     const db = makeDb(":memory:");
     const raw = repo.insertRawInput(db, {
       content: "测试通知1：测试1、测试通知2、测试通知3",
-      sourceType: "chat",
-      sourceIdentity: { sourceLabel: "前台" },
+      source: "chat",
+      identity: { displayName: "前台" },
       receivedAt: "2026-10-19T22:24:23",
       eventTime: null,
     });
@@ -1456,15 +1634,15 @@ describe("简报里的时刻（2026-10-22：agent0 得知道「现在」与对�
   /** 造一条批次并跑完消化，返回第一次调用的 user 简报。 */
   async function briefOf(args: {
     content: string;
-    sourceType: string;
+    source: string;
     receivedAt: string;
     eventTime: string | null;
   }): Promise<string> {
     const db = makeDb(":memory:");
     const stored = repo.insertRawInput(db, {
       content: args.content,
-      sourceType: args.sourceType,
-      sourceIdentity: { sourceLabel: "夹具" },
+      source: args.source,
+      identity: { displayName: "夹具" },
       receivedAt: args.receivedAt,
       eventTime: args.eventTime,
     });
@@ -1479,7 +1657,7 @@ describe("简报里的时刻（2026-10-22：agent0 得知道「现在」与对�
   it("对话批次：给「提交时间」并声明相对日期以它为锚，同时给「消化时间」", async () => {
     const brief = await briefOf({
       content: "明天下午三点开会",
-      sourceType: "chat",
+      source: "chat",
       receivedAt: "2026-10-22T09:30:00",
       eventTime: null,
     });
@@ -1491,7 +1669,7 @@ describe("简报里的时刻（2026-10-22：agent0 得知道「现在」与对�
   it("非对话批次：仍不给「提交时间」，事件时间缺失时保留「禁止按接收时间兜底」", async () => {
     const brief = await briefOf({
       content: PASTE,
-      sourceType: "paste",
+      source: "paste",
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -1504,7 +1682,7 @@ describe("简报里的时刻（2026-10-22：agent0 得知道「现在」与对�
     const before = nowWallClock();
     const brief = await briefOf({
       content: PASTE,
-      sourceType: "paste",
+      source: "paste",
       receivedAt: "2026-09-24T10:00:00",
       eventTime: null,
     });
@@ -1523,8 +1701,8 @@ describe("读后留存联动（009 刀 4：读过未引用 3 天 / 被引用 90 
   function seedImageRaw(db: ReturnType<typeof makeDb>): RawInput {
     return repo.insertRawInput(db, {
       content: `看 [图片](${IMG_URL}) 这张`,
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "班级群" },
+      source: "nc",
+      identity: { displayName: "班级群" },
       receivedAt: "2026-10-20T10:00:00",
       eventTime: null,
     });

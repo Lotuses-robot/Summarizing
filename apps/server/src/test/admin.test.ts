@@ -165,6 +165,52 @@ describe("运维命令内核（contracts/cli.md）", () => {
     ).rejects.toThrow("作废失败");
   });
 
+  it("router:set / get / list：写入生效，list 里凭据只露尾 4 位、未配的显示未配置", async () => {
+    const root = tmpDataRoot();
+    await runAdmin(["router:set", "wecom.secret", "super-secret-value"], {
+      dataRoot: root,
+      io: scriptedIo(),
+    });
+    await runAdmin(["router:set", "wecom.corpId", "ww1234"], { dataRoot: root, io: scriptedIo() });
+
+    // get 打原文（排障用）
+    const getIo = scriptedIo();
+    await runAdmin(["router:get", "wecom.secret"], { dataRoot: root, io: getIo });
+    expect(getIo.logs).toEqual(["super-secret-value"]);
+
+    // list：凭据掩码、非凭据原样、未配置如实说
+    const listIo = scriptedIo();
+    await runAdmin(["router:list"], { dataRoot: root, io: listIo });
+    const out = listIo.logs.join("\n");
+    expect(out).toContain("wecom.corpId\tww1234");
+    expect(out).toContain("wecom.secret\t****alue");
+    expect(out).not.toContain("super-secret-value");
+    expect(out).toContain("wecom.pullToken\t（未配置）");
+  });
+
+  it("router:list 给出要填进企业微信的回调地址（地址属 Router，运维要查得到）", async () => {
+    const root = tmpDataRoot();
+    const withBase = scriptedIo();
+    await runAdmin(["router:list"], {
+      dataRoot: root,
+      io: withBase,
+      baseUrl: "https://sum.example.cn",
+    });
+    expect(withBase.logs.join("\n")).toContain("https://sum.example.cn/relay/wecom/callback");
+
+    // 没配 BASE_URL 时也说得清（而不是给一个残缺的相对路径当完整地址）
+    const noBase = scriptedIo();
+    await runAdmin(["router:list"], { dataRoot: root, io: noBase });
+    expect(noBase.logs.join("\n")).toContain("配 BASE_URL 后显示完整地址");
+  });
+
+  it("router:set 未知键 → 拒绝（写错键名 = 永远不生效的黑洞）", async () => {
+    const root = tmpDataRoot();
+    await expect(
+      runAdmin(["router:set", "wecom.typo", "x"], { dataRoot: root, io: scriptedIo() }),
+    ).rejects.toThrow("未知的 Router 设置项");
+  });
+
   it("未知命令：打用法并失败", async () => {
     const root = tmpDataRoot();
     const io = scriptedIo();

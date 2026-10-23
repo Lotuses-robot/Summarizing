@@ -23,7 +23,7 @@ function notice(overrides: Partial<NoticeRow> = {}): NoticeRow {
     },
     updatedAt: "2026-10-17 10:00",
     viewed: false,
-    sourceLabel: null,
+    displayName: null,
     ...overrides,
   };
 }
@@ -194,6 +194,42 @@ describe("NoticePanel（D-108 主卡阅读器）", () => {
     expect(spy).toHaveBeenCalledWith("n1");
   });
 
+  it("锁：关锁后横滑不再生效；开锁恢复（2026-10-23 卡内可交互）", async () => {
+    vi.useFakeTimers();
+    const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
+    render(<NoticePanel notices={[notice()]} filter={ALL} onRefresh={() => {}} />);
+
+    // 默认开锁：能滑（这条断言的是「锁没误伤默认路径」）
+    fireEvent.click(screen.getByRole("button", { name: "锁定（固定卡片、可操作内容）" }));
+    swipeCard(200);
+    expect(screen.queryByText("已清除")).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+
+    // 开锁后恢复
+    fireEvent.click(screen.getByRole("button", { name: "解锁（恢复横滑）" }));
+    swipeCard(200);
+    expect(screen.getByText("已清除")).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(spy).toHaveBeenCalledWith("n1");
+  });
+
+  it("切换通知时自动回到开锁（每条默认可滑）", async () => {
+    vi.useFakeTimers();
+    const a = notice();
+    const b = notice({ item: { ...a.item, id: "n2" } });
+    render(<NoticePanel notices={[a, b]} filter={ALL} onRefresh={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "锁定（固定卡片、可操作内容）" }));
+    expect(screen.getByRole("button", { name: "解锁（恢复横滑）" })).toBeInTheDocument();
+    // 切到第二条（列表行按钮）→ 锁自动复位
+    const listButtons = within(screen.getByRole("list")).getAllByRole("button");
+    const second = listButtons[1];
+    if (second === undefined) throw new Error("列表里没有第二条");
+    fireEvent.click(second);
+    expect(
+      screen.getByRole("button", { name: "锁定（固定卡片、可操作内容）" }),
+    ).toBeInTheDocument();
+  });
+
   it("撤回：倒计时内点撤销钮 → 什么都不发生", async () => {
     vi.useFakeTimers();
     const spy = vi.spyOn(api, "trash").mockResolvedValue(itemFixture("n1", "trashed", "notice"));
@@ -291,7 +327,7 @@ describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
   it("有来源时显示徽标；无来源（null）不显示也不编造", () => {
     const { unmount } = render(
       <NoticePanel
-        notices={[notice({ sourceLabel: "数据结构课群" })]}
+        notices={[notice({ displayName: "数据结构课群" })]}
         filter={ALL}
         onRefresh={() => {}}
       />,
@@ -299,7 +335,7 @@ describe("NoticePanel：来源徽标（FR-004 / US1-2）", () => {
     expect(screen.getAllByText("数据结构课群").length).toBeGreaterThan(0);
     unmount();
     render(
-      <NoticePanel notices={[notice({ sourceLabel: null })]} filter={ALL} onRefresh={() => {}} />,
+      <NoticePanel notices={[notice({ displayName: null })]} filter={ALL} onRefresh={() => {}} />,
     );
     expect(screen.queryByText("数据结构课群")).not.toBeInTheDocument();
     expect(screen.queryByText("未知来源")).not.toBeInTheDocument(); // 不编造

@@ -461,8 +461,8 @@ describe("详情接口的 media 映射（009 刀 2；前端 MediaText 的唯一�
 
     const raw = repo.insertRawInput(db, {
       content: `看这张 [图片](/api/media/${stored.id}) 还有这张 [图片](https://qq.example/expired.jpg)`,
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-28T10:00:00",
       eventTime: null,
     });
@@ -501,8 +501,8 @@ describe("详情接口的 media 映射（009 刀 2；前端 MediaText 的唯一�
     const db = makeDb(":memory:");
     const raw = repo.insertRawInput(db, {
       content: "纯文字，没有图",
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-09-28T10:00:00",
       eventTime: null,
     });
@@ -536,7 +536,7 @@ describe("进站缓存走真实入口（刀 3：路由必须把媒体目录传�
     const res = await t.inject({
       method: "POST",
       url: "/api/ingest",
-      payload: { content: original, sourceType: "paste", sourceIdentity: { sourceLabel: "s" } },
+      payload: { content: original, source: "paste", identity: { displayName: "s" } },
     });
     expect(res.statusCode).toBe(202);
 
@@ -611,8 +611,8 @@ describe("引用续命 + 每小时清理（009 刀 4）", () => {
   function seedRaw(db: ReturnType<typeof makeDb>, content: string) {
     return repo.insertRawInput(db, {
       content,
-      sourceType: "paste",
-      sourceIdentity: { sourceLabel: "s" },
+      source: "paste",
+      identity: { displayName: "s" },
       receivedAt: "2026-10-20T10:00:00",
       eventTime: null,
     });
@@ -744,8 +744,8 @@ describe("重试与对话路径也缓存图片（009 修复：缓存挂在 kickD
     const dir = tmpDir();
     const raw = repo.insertRawInput(db, {
       content: "看 [图片](https://pic.invalid/retry.png)",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群" },
+      source: "nc",
+      identity: { displayName: "群" },
       receivedAt: "2026-10-21T10:00:00",
       eventTime: null,
     });
@@ -767,8 +767,8 @@ describe("进站缓存的重试（009：只对瞬态错误重试一次）", () =
     const dir = tmpDir();
     const raw = repo.insertRawInput(db, {
       content: "看 [图片](https://pic.invalid/retry-ok.png)",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群" },
+      source: "nc",
+      identity: { displayName: "群" },
       receivedAt: "2026-10-21T10:00:00",
       eventTime: null,
     });
@@ -790,8 +790,8 @@ describe("进站缓存的重试（009：只对瞬态错误重试一次）", () =
     const dir = tmpDir();
     const raw = repo.insertRawInput(db, {
       content: "看 [图片](https://pic.invalid/gone.png)",
-      sourceType: "nc",
-      sourceIdentity: { sourceLabel: "群" },
+      source: "nc",
+      identity: { displayName: "群" },
       receivedAt: "2026-10-21T10:00:00",
       eventTime: null,
     });

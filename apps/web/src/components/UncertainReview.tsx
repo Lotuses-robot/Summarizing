@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, Check, X } from "lucide-react";
-import { sourceIdentityLabel, type UncertainInput } from "@summarizing/shared";
+import { displayNameWithDetails, type UncertainInput } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { pushEscLayer } from "../lib/escLayer";
@@ -133,7 +133,7 @@ export function UncertainReview({
                   <span>{it.reason}</span>
                 </p>
                 <p className="mt-0.5 text-xs text-ink-muted">
-                  {sourceIdentityLabel(it.sourceIdentity)} · {fmtFullTime(it.createdAt)}
+                  {displayNameWithDetails(it.identity)} · {fmtFullTime(it.createdAt)}
                 </p>
               </div>
               <RemoveButton onConfirm={() => remove(it.id)} />

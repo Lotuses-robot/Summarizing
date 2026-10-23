@@ -207,22 +207,22 @@ export type DigestState = z.infer<typeof DigestState>;
 /** 消化工具循环最大轮数（超出即判失败）——server 硬约束与流水视图轮次进度条共用单一出处。 */
 export const DIGEST_MAX_ROUNDS = 8;
 
-/** 来源身份：**弹性字典**（D-84）——core 契约只约束「是对象 + 保留键 sourceLabel（非空）」，
+/** 身份：**弹性字典**（D-84）——core 契约只约束「是对象 + 保留键 displayName（非空）」，
  *  适配器自由扩展（QQ 有群/发信人、邮件有发件地址、网页有站点名）；整体 JSON.stringify 进 agent0 提示词。
- *  保留键 `sourceLabel`（D-88 由 `name` 改名）= 给人看的文本来源，区别于 `groupId` 类 id 字段。
- *  存量字符串由读路径防御性解析为 { sourceLabel: 原串 }（不重置库）。 */
-export const SourceIdentitySchema = z
+ *  保留键 `displayName`（D-127 由 `sourceLabel` 改名）= 给人看的文本来源，区别于 `groupId` 类 id 字段。
+ *  存量字符串由读路径防御性解析为 { displayName: 原串 }（不重置库）。 */
+export const IdentitySchema = z
   .record(z.string(), z.unknown())
-  .refine((v) => typeof v["sourceLabel"] === "string" && v["sourceLabel"].trim() !== "", {
-    message: "sourceIdentity 必须含非空 sourceLabel 键（来源身份的最低要求）",
+  .refine((v) => typeof v["displayName"] === "string" && v["displayName"].trim() !== "", {
+    message: "identity 必须含非空 displayName 键（身份的最低要求）",
   });
-export type SourceIdentity = z.infer<typeof SourceIdentitySchema>;
+export type Identity = z.infer<typeof IdentitySchema>;
 
 export const RawInputSchema = z.object({
   id: z.string(),
   content: z.string().min(1), // 原始文本，永不丢失
-  sourceType: z.string(), // chat / paste / nc / …
-  sourceIdentity: SourceIdentitySchema, // 来源身份——推理依据 + 外发粒度 + 矛盾取舍的官方性判据（D-84）
+  source: z.string(), // 信源种类：chat / paste / nc / …
+  identity: IdentitySchema, // 身份——推理依据 + 外发粒度 + 矛盾取舍的官方性判据（D-84）
   receivedAt: z.string(), // 接收时间（北京墙钟）
   eventTime: z.string().nullable(), // 事件时间（事情发生时）；相对日期按它锚定
   digestState: DigestState,
@@ -232,47 +232,49 @@ export type RawInput = z.infer<typeof RawInputSchema>;
 /** ingest 请求体（HTTP 边界校验用同一份 schema）。 */
 export const IngestRequestSchema = z.object({
   content: z.string().min(1),
-  sourceType: z.string().min(1),
-  sourceIdentity: SourceIdentitySchema,
+  source: z.string().min(1),
+  identity: IdentitySchema,
   // 事件时间：合法即**北京墙钟串**或 null（无事件时间）——入口与 dueDate 出口同口径（D-97 走查收紧：
   // 裸 string 会放脏串进库、被 digest 当相对日期锚点喂 LLM；带 Z/偏移的串更会与库内 +08 口径混时区）。
   eventTime: wallClockSchema.nullable().default(null),
 });
 export type IngestRequest = z.infer<typeof IngestRequestSchema>;
 
-/** 存量迁移/防御解析：字符串身份 → 弹性字典 { sourceLabel: 原串 }；对象原样（不重置库）。
- *  对象只带旧保留键 name（迁移漏网/手改库）→ 把 name 升为 sourceLabel（别把来源整个丢成「未知来源」）。
- *  DB 的 source_identity 列在迁移前可能是裸字符串，读路径统一过它。 */
-export function normalizeSourceIdentity(value: unknown): SourceIdentity {
-  const parsed = SourceIdentitySchema.safeParse(value);
+/** 存量迁移/防御解析：字符串身份 → 弹性字典 { displayName: 原串 }；对象原样（不重置库）。
+ *  对象只带旧保留键 `sourceLabel`（D-127 前）或更早的 `name`（D-88 前）→ 升为 `displayName`
+ *  （别把来源整个丢成「未知来源」）。DB 的 identity_json 列在迁移前可能是裸字符串，读路径统一过它。 */
+export function normalizeIdentity(value: unknown): Identity {
+  const parsed = IdentitySchema.safeParse(value);
   if (parsed.success) return parsed.data;
-  // 裸字符串（存量）→ { sourceLabel: 原串 }；其他坏形状 → 兜底 sourceLabel
-  if (typeof value === "string" && value.trim() !== "") return { sourceLabel: value };
+  // 裸字符串（存量）→ { displayName: 原串 }；其他坏形状 → 兜底 displayName
+  if (typeof value === "string" && value.trim() !== "") return { displayName: value };
   if (typeof value === "object" && value !== null) {
-    const name = Object.entries(value).find(
-      ([k, v]) => k === "name" && typeof v === "string" && v.trim() !== "",
+    const legacyKey = Object.entries(value).find(
+      ([k, v]) => (k === "sourceLabel" || k === "name") && typeof v === "string" && v.trim() !== "",
     );
-    if (name !== undefined && typeof name[1] === "string") {
-      const rest = Object.fromEntries(Object.entries(value).filter(([k]) => k !== "name"));
-      return { sourceLabel: name[1], ...rest };
+    if (legacyKey !== undefined && typeof legacyKey[1] === "string") {
+      const rest = Object.fromEntries(
+        Object.entries(value).filter(([k]) => k !== legacyKey[0] && k !== "displayName"),
+      );
+      return { displayName: legacyKey[1], ...rest };
     }
   }
-  return { sourceLabel: "未知来源" };
+  return { displayName: "未知来源" };
 }
 
-/** 裸 label 取值（保留键 sourceLabel；缺失兜「未知来源」）——只见裸串的场景（如引文旁标）用它，
- *  与 sourceIdentityLabel（会折叠其余键）共用同一口径。 */
-export function sourceLabelOf(identity: SourceIdentity): string {
-  return typeof identity["sourceLabel"] === "string" ? identity["sourceLabel"] : "未知来源";
+/** 裸显示名取值（保留键 displayName；缺失兜「未知来源」）——只见裸串的场景（如引文旁标）用它，
+ *  与 displayNameWithDetails（会折叠其余键）共用同一口径。 */
+export function displayNameOf(identity: Identity): string {
+  return typeof identity["displayName"] === "string" ? identity["displayName"] : "未知来源";
 }
 
-/** 来源身份的显示串（UI 展示用，D-84）：优先 sourceLabel，其余键折叠为 `sourceLabel（k=v · …）`；
- *  无其余键时只显示 sourceLabel。弹性字典的形状差异在这里收敛为一个可读串。 */
-export function sourceIdentityLabel(identity: SourceIdentity): string {
-  const label = sourceLabelOf(identity);
-  const rest = Object.entries(identity).filter(([k]) => k !== "sourceLabel");
-  if (rest.length === 0) return label;
-  return `${label}（${rest.map(([k, v]) => `${k}=${String(v)}`).join(" · ")}）`;
+/** 身份的显示串（UI 展示用，D-84）：优先 displayName，其余键折叠为 `displayName（k=v · …）`；
+ *  无其余键时只显示 displayName。弹性字典的形状差异在这里收敛为一个可读串。 */
+export function displayNameWithDetails(identity: Identity): string {
+  const name = displayNameOf(identity);
+  const rest = Object.entries(identity).filter(([k]) => k !== "displayName");
+  if (rest.length === 0) return name;
+  return `${name}（${rest.map(([k, v]) => `${k}=${String(v)}`).join(" · ")}）`;
 }
 
 // ──────────────── 事项版本链（00 契约 §五：追加式，可撤回）────────────────
@@ -280,7 +282,7 @@ export function sourceIdentityLabel(identity: SourceIdentity): string {
 // 撤回功能暂缓下架（D-79）；定稿设计（追加 revert_version 节点）见 00 契约 §五与台账。
 
 /** 变更署名（D-88）：谁 + 什么模型——`actor` 自由字符串（agent0 / 前台 / 用户 / 系统 / 清扫(…)/…），
- *  `model` 无则 null。**不含来源**——信源身份走证据链（版本→证据→片段→批次→sourceIdentity），
+ *  `model` 无则 null。**不含来源**——信源身份走证据链（版本→证据→片段→批次→identity），
  *  版本上不再存第二个「来源」概念。 */
 export const ProvenanceSchema = z.object({
   actor: z.string(),
@@ -416,8 +418,8 @@ export type UncertainStatus = z.infer<typeof UncertainStatus>;
 export const UncertainInputSchema = z.object({
   id: z.string(),
   content: z.string().min(1), // 原话逐字
-  sourceType: z.string(),
-  sourceIdentity: SourceIdentitySchema, // 信源快照（供接近度匹配：同群/同发信人）
+  source: z.string(),
+  identity: IdentitySchema, // 信源快照（供接近度匹配：同群/同发信人）
   eventTime: z.string().nullable(),
   receivedAt: z.string(),
   originRawInputId: z.string().nullable(), // 从哪个批次摘出（可回溯原文）
@@ -491,26 +493,69 @@ export type SearchKbResult = z.infer<typeof SearchKbResultSchema>;
 
 // ─────────── agent0 信源阶段检索工具（D-85/D-76）───────────
 
-/** search_recent_raws：散落碎片的兄弟找齐（时间相近 + 同来源检索历史批次）。
- *  daysBack = 回看天数（默认 7）；agent0 可显式给，也可省。 */
-export const SearchRecentRawsArgsSchema = z.object({
-  daysBack: z.number().int().min(1).max(90).default(7),
-  sameSourceOnly: z.boolean().default(false), // true = 只找同来源（同群/同发信人）
+/** search_raws：检索历史进站批次（原文档案）。D-127 起取代旧的 search_recent_raws。
+ *
+ * 维度可任意组合：关键词（内容 + 身份模糊）/ 信源 / 身份键值精确 / 时间区间；
+ * `mode=all` 取交集、`mode=any` 取并集；`limit` 上限 50（越界由服务端报错，不静默截断）。
+ * 参数**不在 schema 里兜底**（没有 .default）——默认值与越界判定都在 search/query.ts：
+ * 一处校验、文案集中，避免「schema 悄悄改输入」与 D-103 冲突。 */
+export const SearchRawsArgsSchema = z.object({
+  query: z.string().optional(), // 关键词：切词后模糊匹配内容与身份
+  source: z.string().optional(), // 信源种类（nc/chat/paste）或身份显示名
+  identity: z.array(z.object({ key: z.string(), value: z.string() })).optional(), // 身份精确键值对（key 走白名单）
+  before: z.string().optional(), // 时间上界（+08:00 墙钟）
+  after: z.string().optional(), // 时间下界
+  mode: z.enum(["all", "any"]).optional(), // all=交集 / any=并集
+  limit: z.number().optional(), // 返回条数上限（1~50）
 });
-export type SearchRecentRawsArgs = z.infer<typeof SearchRecentRawsArgsSchema>;
+export type SearchRawsArgs = z.infer<typeof SearchRawsArgsSchema>;
 
-/** 结果一条 = 历史批次摘要（不含 raw 归档；给 agent0 的量控）。 */
-export const RecentRawItemSchema = z.object({
+/** 结果一条 = 历史批次摘要（不含 raw 归档；截断如实标注）。 */
+export const SearchRawHitSchema = z.object({
   id: z.string(),
-  content: z.string(),
-  sourceType: z.string(),
-  sourceIdentity: SourceIdentitySchema,
+  content: z.string(), // 原文（可能被截断——看 truncated）
+  truncated: z.boolean(), // content 是否被截断
+  contentLength: z.number().int(), // 原文真实长度（字符数）
+  source: z.string(),
+  identity: IdentitySchema,
   receivedAt: z.string(),
   eventTime: z.string().nullable(),
 });
-export type RecentRawItem = z.infer<typeof RecentRawItemSchema>;
-export const SearchRecentRawsResultSchema = z.object({ raws: z.array(RecentRawItemSchema) });
-export type SearchRecentRawsResult = z.infer<typeof SearchRecentRawsResultSchema>;
+export type SearchRawHit = z.infer<typeof SearchRawHitSchema>;
+
+/** 检索结果：hits + 总数 + 未返回条数（`more` 让模型知道「还有，只是没给你」）。
+ *  截断与省略都**如实告知**——静默截断会让模型基于残缺信息下结论（D-127）。 */
+export const SearchRawsResultSchema = z.object({
+  hits: z.array(SearchRawHitSchema),
+  total: z.number().int(), // 命中总数（不受 limit 影响）
+  more: z.number().int(), // 还有多少条命中但未返回
+});
+export type SearchRawsResult = z.infer<typeof SearchRawsResultSchema>;
+
+/** get_raw：按**精确 id** 读一条批次的全文（D-127 补齐检索闭环）。
+ *
+ *  为什么需要它：`search_raws` 的单条摘要有字数上限（够认出是哪条，不够下结论）——超长批次会
+ *  标 `truncated: true`。没有本工具时那是个死胡同：模型被告知「还有更多」，却没有任何办法取到，
+ *  只能靠换关键词重搜碰运气（实测这么干的代价是又一次完整系统提示词往返）。
+ *
+ *  为什么是「精确 id」而不是模糊：批次原文是**证据终端**。允许模糊就会有人拿它当第二个检索入口，
+ *  绕过 search 的量控与排序。id 只能从 search_raws / 当前批次简报里拿（都是真实 id）。
+ *
+ *  为什么还要限长：单批正文理论上可达 64KB（字节闸上限）。不限长等于给了一条绕过一切预算的通道。 */
+export const GetRawArgsSchema = z.object({ id: z.string().min(1) });
+export type GetRawArgs = z.infer<typeof GetRawArgsSchema>;
+
+export const GetRawResultSchema = z.object({
+  id: z.string(),
+  content: z.string(), // 原文（可能截断——看 truncated）
+  truncated: z.boolean(), // content 是否被截断
+  contentLength: z.number().int(), // 原文真实长度（字符数）
+  source: z.string(),
+  identity: IdentitySchema,
+  receivedAt: z.string(),
+  eventTime: z.string().nullable(),
+});
+export type GetRawResult = z.infer<typeof GetRawResultSchema>;
 
 /** search_uncertain：检索存疑信息库 open 条目（复原通道 + 对话翻池）。
  *  服务端隐式携带当前消化批次的信源+时刻做参照（agent0 不拼参数）——见 AgentTools 实现。 */
@@ -523,7 +568,7 @@ export type SearchUncertainArgs = z.infer<typeof SearchUncertainArgsSchema>;
 export const UncertainHitSchema = z.object({
   id: z.string(),
   content: z.string(),
-  sourceIdentity: SourceIdentitySchema,
+  identity: IdentitySchema,
   eventTime: z.string().nullable(),
   createdAt: z.string(),
   needsHuman: z.number().int(),
@@ -565,12 +610,12 @@ export type BoardView = z.infer<typeof BoardViewSchema>;
 // ───────────────────────── 通知页（007：kind=notice 的独立查看入口）─────────────────────────
 
 // 通知行：题面同 Item，倒序按 updatedAt（有更新即上浮）；viewed 复用 item_views（点开即消）。
-// sourceLabel = 来源显示名（取最近一条证据所属批次；无证据时 null——不编造来源，FR-004 来源徽标）。
+// displayName = 来源显示名（取最近一条证据所属批次；无证据时 null——不编造来源，FR-004 来源徽标）。
 export const NoticeRowSchema = z.object({
   item: ItemSchema,
   updatedAt: z.string(),
   viewed: z.boolean(),
-  sourceLabel: z.string().nullable(),
+  displayName: z.string().nullable(),
 });
 export type NoticeRow = z.infer<typeof NoticeRowSchema>;
 
@@ -870,6 +915,39 @@ export const SourceSummarySchema = z.object({
 });
 export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 
+// ──────────────── Router（部署级接入，D-130）────────────────
+
+/** 账户侧的 Router 视图：**只有两样**——收不收（开关）、我的绑定码（external_userid 原文）。
+ *
+ *  凭据（corpId / secret / Token / AESKey）一概不在这里：它们属于部署方，走运维命令行
+ *  （FR-040）。账户主人不需要知道微信另一端长什么样，只需要「让消息进得来」。
+ *
+ *  `bindings` 是**可能多条**的：一个人可以有多个微信（同一 uid 绑多个 external_userid），
+ *  全列出来他才知道都有谁在往自己这儿送消息。 */
+export const RouterAccountViewSchema = z.object({
+  /** 是否接收分发（缺省 true——新账户无需先点开关）。 */
+  enabled: z.boolean(),
+  /** 当前绑到本账户的绑定码（external_userid 原文；按字典序，便于对照）。 */
+  bindings: z.array(z.string()),
+});
+export type RouterAccountView = z.infer<typeof RouterAccountViewSchema>;
+
+/** PUT /api/router/bindings 的请求体：**整段覆盖**本账户的绑定码列表。
+ *
+ *  为什么是整段覆盖而不是逐条增删：一个人手上就那几条，整段提交省掉「加/删」两个端点与
+ *  它们各自的幂等语义；前端把编辑后的数组原样交回，后端据此算增删。
+ *
+ *  码 = external_userid 原文（本轮不哈希——用户 2026-10-23 定），**不做格式校验**：
+ *  它就是一项配置，填错了自然收不到消息（D-130）。所以这里只限形状（字符串、去空、去重）。 */
+export const RouterBindingsInputSchema = z.object({
+  bindings: z.array(z.string().trim().min(1)),
+});
+export type RouterBindingsInput = z.infer<typeof RouterBindingsInputSchema>;
+
+/** PUT /api/router/enabled 的请求体。 */
+export const RouterEnabledInputSchema = z.object({ enabled: z.boolean() });
+export type RouterEnabledInput = z.infer<typeof RouterEnabledInputSchema>;
+
 // ──────────────── 通用工具（跨 web/server 两端共用）────────────────
 
 /** err → 人话单行（Error.message / String 兜底）。web 设置面与 server 日志/回喂共用；
@@ -896,8 +974,8 @@ export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
 /** 进站台账行：一个批次的概要（不含正文——正文在详情接口）。流水视图列表的数据源（specs/005）。 */
 export const PipelineRunSchema = z.object({
   id: z.string(),
-  sourceType: z.string(),
-  sourceLabel: z.string(), // 来源显示名（sourceIdentity.sourceLabel）
+  source: z.string(),
+  displayName: z.string(), // 来源显示名（identity.displayName）
   receivedAt: z.string(),
   eventTime: z.string().nullable(),
   digestState: DigestState,

@@ -4,6 +4,7 @@ import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import { nowWallClock } from "../shared/time";
 import { kickDigest } from "../agent0/digest";
+import type { MediaFetcherLookup } from "./mediaIngest";
 import type { AgentTools } from "../agent0/tools";
 
 // 进站装配（D-84 唯一出处）：HTTP 路由与 SourceContext.ingest 共用同一段
@@ -26,9 +27,22 @@ export function ingestBatch(
   from: string,
   mediaDir: string,
   log?: (msg: string) => void,
+  /** 按信源名查「媒体占位取字节」实现（见 `MediaFetcherLookup`——**按 source 查**，
+   *  这样重试、启动重试、对话等所有消化路径都能拿到同一份，不会某条路漏传）。 */
+  mediaLookup?: MediaFetcherLookup,
 ): { raw: RawInput; digestState: DigestState } {
   const raw = repo.insertRawInput(db, { ...payload, receivedAt: nowWallClock() });
   const client = llmRef.current;
-  const digestState = kickDigest(db, client, tools, client.modelTag, raw, from, mediaDir, log);
+  const digestState = kickDigest(
+    db,
+    client,
+    tools,
+    client.modelTag,
+    raw,
+    from,
+    mediaDir,
+    log,
+    mediaLookup,
+  );
   return { raw, digestState };
 }

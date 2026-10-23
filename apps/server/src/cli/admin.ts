@@ -13,6 +13,7 @@ import {
   type RegistryDb,
 } from "../storage/registry";
 import { backupAll, restoreAll } from "../storage/backup";
+import { listRouterSettings, readRouterSetting, writeRouterSetting } from "../router/settings";
 import { nowWallClock } from "../shared/time";
 import { hashPassword } from "../auth/password";
 
@@ -46,7 +47,10 @@ const ADMIN_USAGE = `用法（运维命令）：
   invite:new [--days N]      生成一次性邀请码（默认 7 天；设 BASE_URL 时附完整注册链接）
   invite:revoke <code>       作废未使用的邀请码
   backup [--out DIR]         在线备份全部库与图片（system.db + users/*.db + media/ → DIR，默认 <dataRoot>/backups/<时间戳>）
-  restore <DIR>              从备份目录还原全部库与图片（**须先停服**）`;
+  restore <DIR>              从备份目录还原全部库与图片（**须先停服**）
+  router:list                列出 Router 的部署级设置 + 要填进企业微信的**回调地址**（凭据只显示尾 4 位）
+  router:set <key> <value>   写一条 Router 设置（微信凭据等；键名见 router:list）
+  router:get <key>           打印一条 Router 设置原文（凭据会明文进终端历史——排障用）`;
 
 /** 按用户名取账户；不存在/格式坏抛人话错误。 */
 function mustFind(db: RegistryDb, usernameRaw: string) {
@@ -181,6 +185,36 @@ export async function runAdmin(argv: string[], deps: AdminDeps): Promise<void> {
         const password = await askPasswordTwice(io);
         setPasswordHashAndBumpTokenVersion(db, account.uid, await hashPassword(password));
         io.log(`账户 ${account.username} 密码已重置（该账户全部旧会话已下线）`);
+        return;
+      }
+      case "router:list": {
+        if (arg !== undefined) throw new Error("用法：router:list");
+        for (const row of listRouterSettings(db)) {
+          io.log(`${row.key}\t${row.value}\t${row.label}`);
+        }
+        // 回调地址也在这里给出：微信客服的地址属于 Router（不在任何账户的设置页，
+        // D-130 FR-025），而「把地址填进企业微信后台」是运维的活——那就得让运维查得到。
+        const base = (deps.baseUrl ?? "").replace(/\/$/, "");
+        io.log(
+          base === ""
+            ? "\n回调地址（企业微信 → 微信客服 → API 接收消息）\t/relay/wecom/callback（配 BASE_URL 后显示完整地址）"
+            : `\n回调地址（企业微信 → 微信客服 → API 接收消息）\t${base}/relay/wecom/callback`,
+        );
+        return;
+      }
+      case "router:set": {
+        const value = argv[2];
+        if (arg === undefined || value === undefined) {
+          throw new Error("用法：router:set <key> <value>（键名见 router:list）");
+        }
+        writeRouterSetting(db, arg, value);
+        io.log(`已写入 ${arg}`);
+        return;
+      }
+      case "router:get": {
+        if (arg === undefined) throw new Error("用法：router:get <key>");
+        const value = readRouterSetting(db, arg);
+        io.log(value ?? "（未配置）");
         return;
       }
       case "count:accounts": {

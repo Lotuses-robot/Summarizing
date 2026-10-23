@@ -18,6 +18,7 @@ import type {
   RegisterRequest,
   RejectionRulesView,
   RotateTokenResponse,
+  RouterAccountView,
   SourceSummary,
   TrashView,
   UncertainInput,
@@ -54,6 +55,36 @@ async function req(url: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
+/** HTTP 错误：带**状态码**的错误（不只是文案）。
+ *
+ *  为什么需要：调用方要按「是不是 401」分流（未登录 vs 后端挂了），而**在文案里找 "401"
+ *  是不可靠的**——服务端 401 回的是 `{"error":"未登录"}`（里面根本没有 "401"），
+ *  于是「未登录」被误判成「后端没起来」（用户实测踩到）。判据必须来自状态码这个结构化事实。
+ *
+ *  仍然是 `Error` 子类：`errText(err)` 照常取到人话文案，现有调用方零改动。 */
+export class ApiError extends Error {
+  readonly status: number;
+
+  /** 造一个带状态码的错误。
+   *
+   *  @param status HTTP 状态码
+   *  @param message 服务端文案（或兜底文案）
+   */
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+/** 判断一个错误是不是「未登录」（401）。
+ *
+ *  @param err 任意抛出的值（不是 ApiError 的值一律判 false——网络故障没有状态码）
+ */
+export function isUnauthorized(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
 /** 统一响应处理：非 2xx 抛服务端文案；2xx 返回按泛型标注的 JSON（调用方用 shared 类型标注）。 */
 async function to<T>(res: Response): Promise<T> {
   await ensureOk(res);
@@ -62,7 +93,7 @@ async function to<T>(res: Response): Promise<T> {
 
 /** 无响应体的写操作守卫：非 2xx 抛服务端文案（与 to 同一错误口径）。 */
 async function ensureOk(res: Response): Promise<void> {
-  if (!res.ok) throw new Error(await apiErrorText(res));
+  if (!res.ok) throw new ApiError(res.status, await apiErrorText(res));
 }
 
 /** 从 unknown 安全提取 `issues[].message`（运行时类型守卫——不用 as 让编译器闭嘴，工程红线）。
@@ -116,14 +147,14 @@ async function apiErrorText(res: Response): Promise<string> {
 
 /** 认证端点响应（有体）：非 2xx 优先抛服务端 error 文案（登录表单要显示「账户已停用」等）；2xx 解析 JSON。 */
 async function toAuth<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new Error(await apiErrorText(res));
+  if (!res.ok) throw new ApiError(res.status, await apiErrorText(res));
   return (await res.json()) as T;
 }
 
 /** 认证端点（成功态无体，如改密 204）：非 2xx 抛服务端文案；2xx 不解析 body
  *  （评审修复：toAuth 对 204 空体 res.json() 会抛 SyntaxError——改密明明成功了却报失败）。 */
 async function ensureAuthOk(res: Response): Promise<void> {
-  if (!res.ok) throw new Error(await apiErrorText(res));
+  if (!res.ok) throw new ApiError(res.status, await apiErrorText(res));
 }
 
 /** 构造 JSON 写请求的 fetch 参数（POST/PUT 共用——C1 教训：方法与后端注册的路由须一致）。 */
@@ -261,6 +292,20 @@ export const api = {
   /** 测试连接：表单值实测一次最小请求，不动当前客户端。 */
   testAiSettings: (s: AiSettings): Promise<AiTestResult> =>
     req("/api/settings/ai/test", post(s)).then((r) => to<AiTestResult>(r)),
+
+  // ── Router（D-130：账户侧只有开关与绑定码）──
+
+  /** 我的 Router 视图：收不收 + 我名下的绑定码。 */
+  router: (): Promise<RouterAccountView> =>
+    req("/api/router").then((r) => to<RouterAccountView>(r)),
+
+  /** 整段覆盖我的绑定码（增的绑过来、删的解绑）。 */
+  saveRouterBindings: (bindings: string[]): Promise<void> =>
+    req("/api/router/bindings", put({ bindings })).then((r) => ensureOk(r)),
+
+  /** 开/关分发（关掉时消息不进来，客户收到「暂不可用」）。 */
+  setRouterEnabled: (enabled: boolean): Promise<void> =>
+    req("/api/router/enabled", put({ enabled })).then((r) => ensureOk(r)),
 
   // ── 信源（D-89 信源区真界面 / 审核页）──
 
