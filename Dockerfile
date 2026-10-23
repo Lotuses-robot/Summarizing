@@ -1,6 +1,6 @@
 # ── 构建阶段：编译前端 + esbuild 打包服务端单文件 ──
 # 只在 CI/本地构建镜像时用；服务器只 pull（避开 2C2G 构建内存尖峰，见 docs/11 阶段 2）。
-FROM node:22-slim AS build
+FROM node:22-trixie-slim AS build
 WORKDIR /app
 
 # 先只拷依赖清单（缓存层：依赖不变则跳过 install）
@@ -9,12 +9,19 @@ COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/shared/package.json packages/shared/
 # 全量安装（含 devDeps：构建要 vite/esbuild/typescript）——npm ci 按 lockfile 精确复现。
-# --ignore-scripts 必需：否则 better-sqlite3 触发 node-gyp 源码编译（slim 镜像无 python/make/g++ → 构建失败）。
+# --ignore-scripts 必需：否则 better-sqlite3 触发 node-gyp 源码编译（slim 镜像无工具链 → 构建失败）。
 # 依赖均自带预编译二进制（better-sqlite3 prebuilds、esbuild 平台包），禁脚本不影响可用性（容器内实测通过）。
 RUN npm ci --ignore-scripts
 # nodejieba（D-127 切词）：有 linux-x64 预编译产物、但安装脚本就是「下载预编译」那一步——
-# --ignore-scripts 把它一并跳过了，故单独补跑（走 node-pre-gyp 下载，不编译；slim 镜像无工具链也能成）。
+# --ignore-scripts 把它一并跳过了，故单独补跑（走 node-pre-gyp 下载，不编译）。
+#
+# ⚠️ 基础镜像必须是 **trixie**（Debian 13 / glibc 2.41），不能是 bookworm（glibc 2.36）：
+# nodejieba 每个 Node ABI 只发布一份 linux-x64 产物，官方在 ubuntu-latest（glibc 2.39）上编译，
+# 该二进制要求 **GLIBC_2.38**。用 bookworm 时容器里会 `ERR_DLOPEN_FAILED: version GLIBC_2.38
+# not found` → 进程在 listen 之前就死（v0.7.0 上线事故）。本地 Windows 测不出来（用 win32 产物）。
 RUN npm rebuild nodejieba --foreground-scripts
+# 构建期冒烟：加载 .node 并真切一个词——与运行镜像 glibc 不匹配时在这里就失败，而不是等服务器 502。
+RUN node -e "const j=require('nodejieba'); j.load(); const w=j.cut('图书馆闭馆通知'); if(!Array.isArray(w)||w.length===0) throw new Error('切词结果为空'); console.log('nodejieba 冒烟通过:', w.join('/'))"
 
 # 拷源码后构建：前端 vite + 服务端 esbuild 单文件（打包配方复用 scripts/build-server.mjs，与便携包同一出处）
 COPY . .
@@ -22,7 +29,7 @@ RUN npm run build -w @summarizing/web \
  && node scripts/build-server.mjs .
 
 # ── 运行阶段：只带运行需要的东西（无 devDeps / 无源码 / 无前端源码依赖）──
-FROM node:22-slim AS runtime
+FROM node:22-trixie-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -57,6 +64,10 @@ COPY --from=build /app/node_modules/nodejieba/submodules/cppjieba/dict/stop_word
 # 从构建阶段取产物：服务端单文件 + 前端静态
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
+
+# 运行镜像里再冒烟一次切词：上面验的是「构建阶段能加载」，这里验「**运行镜像**能加载」——
+# 两者基础镜像若不同（或运行时精简掉了什么），只有这一次才会暴露。
+RUN node -e "const j=require('nodejieba'); j.load(); const w=j.cut('图书馆闭馆通知'); if(!Array.isArray(w)||w.length===0) throw new Error('切词结果为空'); console.log('runtime nodejieba OK:', w.join('/'))"
 
 # data/ 目录（运行时会 bind mount 到宿主机；容器内只作挂载点）。
 # chown 给 node：命名卷场景属主从镜像初始化；bind mount 场景宿主机目录需可写（见 docs/11 部署注意）
