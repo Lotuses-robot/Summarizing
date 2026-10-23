@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { RegistryDb } from "../storage/registry";
 import type { SpaceHub } from "../spaces";
-import { makeWecomIngress } from "./wecom/ingress";
 import {
   makeBindingStore,
   makeDeliverySwitch,
@@ -98,8 +97,19 @@ export type IngressFactory = (args: {
   log: RouterLog;
 }) => RelayIngress;
 
-/** 生产接入表：**加一个接入 = 这里加一行**。每行自带它的名字与账户侧文案。 */
-const INGRESS_FACTORIES: IngressFactory[] = [({ db, hub, log }) => makeWecomIngress(db, hub, log)];
+/** 生产接入表：**加一个接入 = 这里加一行**。每行自带它的名字与账户侧文案。
+ *
+ *  ⚠️ **当前为空：微信接入已停用**（2026-10-23）。
+ *
+ *  原因：企业微信以《用户账号使用规范》为由限制了账号，我们对规则的理解不足——
+ *  测试期把自动回执间隔调到 6 秒连测数次（3.5.11.3 骚扰及垃圾信息），
+ *  并为让客户收到回执写过「自动转入人工再结束会话」的状态流转，等于绕开平台对
+ *  会话状态的管理（3.2.2 恶意绕开或者对抗腾讯规则）。申诉期间全部停止。
+ *
+ *  恢复时把这一行加回来即可（代码与测试都保留，未被删除）：
+ *    ({ db, hub, log }) => makeWecomIngress(db, hub, log)
+ *  恢复前必须先改掉上面两处行为：回执间隔回到保守值、不再自动流转会话状态。 */
+const INGRESS_FACTORIES: IngressFactory[] = [];
 
 /** 造 Router。
  *

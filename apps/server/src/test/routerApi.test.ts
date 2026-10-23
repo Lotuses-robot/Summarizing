@@ -6,6 +6,7 @@ import {
   type TestAccount,
 } from "./helpers/app";
 import { makeBindingStore, makeDeliverySwitch } from "../router/store";
+import { makeWecomIngress } from "../router/wecom/ingress";
 import type { RouterChannel } from "@summarizing/shared";
 
 // 账户侧的 Router 入口（D-130 / D-134）：`GET /api/router`、`PUT /api/router/:kind/bindings`、
@@ -22,7 +23,11 @@ afterEach(async () => {
 /** 造一个带两个账户的实例（隔离用例需要同实例多账户）。
  *  装 Router（账户侧视图的接入清单来自它——`ingresses()`）。 */
 async function twoAccounts(): Promise<{ realm: TestRealm; a: TestAccount; b: TestAccount }> {
-  const realm = await makeTestRealm({ withRouter: true });
+  // 显式注入 wecom 接入（生产表已停用）——这些用例测的是账户侧路由本身
+  const realm = await makeTestRealm({
+    withRouter: true,
+    ingressFactories: [({ db, hub, log }) => makeWecomIngress(db, hub, log)],
+  });
   const a = await realm.addAccount({ username: "alpha" });
   const b = await realm.addAccount({ username: "beta" });
   return { realm, a, b };
@@ -40,6 +45,25 @@ function channelOf(body: unknown, kind: string): RouterChannel {
   if (found === undefined) throw new Error(`视图里没有 ${kind} 这一组`);
   return found;
 }
+
+describe("微信接入当前已停用（2026-10-23 申诉期间）", () => {
+  it("生产接入表为空：不挂 /relay 路由、不轮询、不拉取、不发回执", async () => {
+    // 停用是靠「生产 INGRESS_FACTORIES 为空」实现的，不是删代码——
+    // 这条断言守住「不会有人误把 wecom 加回去而没注意当前状态」。
+    const realm = await makeTestRealm({ withRouter: true });
+    const res = await realm.app.inject({
+      method: "POST",
+      url: "/relay/wecom/callback",
+      payload: "<xml></xml>",
+      headers: { "content-type": "text/xml" },
+    });
+    expect(res.statusCode).toBe(404); // 路由没挂 = 外部打不进来
+
+    const a = await realm.addAccount({ username: "alpha" });
+    const view = await a.inject({ method: "GET", url: "/api/router" });
+    expect(view.json<{ channels: unknown[] }>().channels).toEqual([]); // 界面上也没有这一组
+  });
+});
 
 describe("Router 账户侧：按接入分组", () => {
   it("视图是 channels 数组，每组自带 label / description / enabled / bindings", async () => {

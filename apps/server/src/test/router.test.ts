@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTestRealm, cleanupAllTestAccounts, type TestRealm } from "./helpers/app";
 import { makeWecomAdapter } from "../sources/wecom";
+import { makeWecomIngress } from "../router/wecom/ingress";
 import { makeBindingStore } from "../router/store";
 import { setAccountStatus } from "../storage/registry";
 import { writeRouterSetting } from "../router/settings";
@@ -94,7 +95,13 @@ async function makeRelayRealm(factories?: Array<() => SourceAdapter>): Promise<R
       };
     },
   ];
-  const realm = await makeTestRealm({ adapters: observed, withRouter: true });
+  // ⚠️ 生产接入表当前为空（微信已停用）——测试显式注入，不依赖生产注册表：
+  // 这些用例测的是「接入实现本身对不对」，与「当前是否启用」是两件事。
+  const realm = await makeTestRealm({
+    adapters: observed,
+    withRouter: true,
+    ingressFactories: [({ db, hub, log }) => makeWecomIngress(db, hub, log)],
+  });
   for (const [key, value] of Object.entries(CREDENTIALS)) {
     writeRouterSetting(realm.registry, key, value);
   }
@@ -226,7 +233,11 @@ describe("Router · 微信回调（真实 HTTP 入口）", () => {
   });
 
   it("未配置 Token/AESKey → 500（配置错误要响亮，不静默）", async () => {
-    const realm = await makeTestRealm({ withRouter: true }); // 不写凭据
+    // 不写凭据；显式注入 wecom 接入（生产表已停用）
+    const realm = await makeTestRealm({
+      withRouter: true,
+      ingressFactories: [({ db, hub, log }) => makeWecomIngress(db, hub, log)],
+    });
     const echo = encryptForTest("echo", CORP_ID);
     const res = await realm.app.inject({
       method: "GET",
