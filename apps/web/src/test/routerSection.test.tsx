@@ -153,12 +153,43 @@ describe("路由区：写", () => {
     expect(call?.body).toEqual({ bindings: ["cust-A"] });
   });
 
+  it("点「添加绑定码」后失焦 → **不发请求**（空行不该把已绑的码全删掉）", async () => {
+    // 2026-10-23 线上事故：打开设置页点「添加」再点别处，整段覆盖成 []，
+    // 绑定表被清空、所有客户的消息开始丢弃。判据：与已保存的一致就不发。
+    const { calls } = stubRouter(channel({ enabled: true, bindings: ["cust-A"] }));
+    render(<RouterSection />);
+    await waitFor(() => expect(screen.getByDisplayValue("cust-A")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByText("添加绑定码"));
+    const empty = screen.getAllByPlaceholderText("粘贴客户给你的绑定码")[1];
+    fireEvent.blur(empty as HTMLElement);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(calls.filter((c) => c.url.includes("/bindings"))).toHaveLength(0);
+  });
+
+  it("真的删光 → 仍然提交空数组（用户确实要清空时不能被挡住）", async () => {
+    const { calls } = stubRouter(channel({ enabled: true, bindings: ["cust-A"] }));
+    render(<RouterSection />);
+    await waitFor(() => expect(screen.getByDisplayValue("cust-A")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle("删这一条"));
+    await waitFor(() => {
+      expect(calls.some((c) => c.url.includes("/bindings"))).toBe(true);
+    });
+    const call = calls.find((c) => c.url.includes("/bindings"));
+    expect(call?.body).toEqual({ bindings: [] });
+  });
+
   it("保存失败 → 常驻红字（不静默）", async () => {
     stubRouter(channel({ enabled: true, bindings: ["cust-A"] }), { failPut: true });
     render(<RouterSection />);
     await waitFor(() => expect(screen.getByDisplayValue("cust-A")).toBeInTheDocument());
 
-    fireEvent.blur(screen.getByDisplayValue("cust-A"));
+    // 先真的改内容（原样失焦现在不发请求——见「加空行后失焦」那条）
+    const input = screen.getByDisplayValue("cust-A");
+    fireEvent.change(input, { target: { value: "cust-B" } });
+    fireEvent.blur(input);
     await waitFor(() => {
       expect(screen.getByText(/保存失败/)).toBeInTheDocument();
     });
