@@ -397,6 +397,15 @@ export function makeNcAdapter(): SourceAdapter {
       return "填进 nc 的「网络配置 → HTTP 服务器 → 反向 WebSocket / HTTP 上报」，勾选「群消息」；再在下方白名单填群号。";
     },
 
+    /** 告诉 agent0 这批消息是什么场景（L27：此前硬编码在 prompt.ts 里）。 */
+    digestHint(): string {
+      return [
+        "**QQ 群消息**：多人对话，一批通常是一段群聊的合并。",
+        "- 身份里有群号/群名/发信人；同一批里发信人可能不止一个——判类时看是谁在说；",
+        "- 群里的通知、转述、闲聊混在一起是常态：拿不准是否与用户本人有关时，按「条件受众」规则处理。",
+      ].join("\n");
+    },
+
     activity(): ActivitySignal[] {
       // 「收到」= 命中上报路径（本源的观测口径，见 register 里的 markActivity）；
       // 「入库」= 保留键，由 core 在成功落库时打点、重启后从库恢复。

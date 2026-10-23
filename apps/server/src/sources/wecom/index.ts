@@ -158,6 +158,9 @@ export function makeWecomAdapter(): SourceAdapter {
       if (kfid === "" || ext === "") return { ok: false, reason: "缺 open_kfid / external_userid" };
       if (isDuplicate(line.messageId)) return { ok: false, reason: "重复消息（已在缓冲或已封批）" };
       appendLine(buffers, streamKey(kfid, ext), displayNameOf(ext), line, receivedAt);
+      // 「收到」= Router 把一条消息交到本信源手里。它发生在 accept 里，所以信源自己知道——
+      // 不需要 Router 反向通知（那会让 Router 去认识信源的展示口径，破坏 D-130 的单向依赖）。
+      runtime?.ctx.markActivity("receive");
       return { ok: true };
     },
 
@@ -218,11 +221,24 @@ export function makeWecomAdapter(): SourceAdapter {
       return "企业微信管理后台 →「微信客服」→「API 接收消息」→ 接收消息服务器配置：URL 填运维给的 /relay/wecom/callback，Token / EncodingAESKey 与运维配置的一致；消息加密方式选「安全模式」。";
     },
 
-    activity(): ActivitySignal[] {
-      // 只声明本层真会打的两个键：`seal` 是 WECOM 自己的口径，`ingest` 是保留键
-      // （core 落库成功时自动打点）。回调/拉取发生在 Router，信源看不见，不在本卡展示。
+    /** 告诉 agent0 这批消息是什么场景（L27：此前硬编码在 prompt.ts 里）。 */
+    digestHint(): string {
       return [
-        { key: "seal", label: "封批" },
+        "**企业微信·微信客服**：这是**外部客户发给「你所属企业」的客服咨询**，不是你自己的记录。",
+        "- 身份里 displayName 是「客户 <尾号>」、externalUserId 是客户 id、openKfid 是客服账号；",
+        "- 对话双方是「客户」与「企业（客服）」——客户说「我要退货」「发票怎么开」是**客户的需求**，" +
+          "不是用户本人的待办，不要据此建事项；",
+        "- 客服的回复署名为「客服 <接待人 id>」，同一批里客户与客服的话会交替出现——判类时看是谁在说；",
+        "- 确属企业方要跟进的动作（原文明确指向「我们」该做什么）才建事项。",
+      ].join("\n");
+    },
+
+    activity(): ActivitySignal[] {
+      // 「收到」= 消息交到本信源的时刻（accept 里打点）——用户想知道的是「最近有没有新消息」，
+      // 那是这一项，不是封批。「入库」是保留键（core 落库成功时自动打点）。
+      // ⚠️ 回调与拉取发生在 Router，信源看不见，不在本卡展示（那是 Router 的事）。
+      return [
+        { key: "receive", label: "收到" },
         { key: "ingest", label: "入库" },
       ];
     },

@@ -662,7 +662,7 @@ async function chatWithImageFallback(
   messages: ChatMsg[],
 ): Promise<{ content: string | null; toolCalls: ToolCall[]; degraded: boolean }> {
   const args = {
-    system: buildDigestPrompt(repo.readRejectionRules(db)),
+    system: buildDigestPrompt(repo.readRejectionRules(db), readSourceHints(db)),
     messages,
     tools: TOOL_DEFS,
   };
@@ -711,7 +711,7 @@ async function requestRepair(
   rejected: { item: ChangeList["changes"][number]; reason: string }[],
 ): Promise<{ ok: true; list: ChangeList } | { ok: false; reason: string }> {
   const res = await llm.chat({
-    system: buildDigestPrompt(repo.readRejectionRules(db)),
+    system: buildDigestPrompt(repo.readRejectionRules(db), readSourceHints(db)),
     tools: [],
     messages: [
       {
@@ -729,6 +729,39 @@ async function requestRepair(
  *  相对日期与补年份才有据可锚（见 prompt.ts【ddl 推断】）。
  *  - 对话来源（chat）：前台提交即用户亲口说的时刻，是**有据锚点**；
  *  - 其余来源（粘贴/信源）：接收时间仍禁止当锚（积压粘贴是常态，01§5.3）。 */
+/** 读各信源声明的「来源说明」（L27：装配期由 registerSources 落库，这里原样拼给提示词）。
+ *
+ *  `chat` 不是适配器（它在 `application/chat.ts` 里直接 ingest），所以它的说明**内置在这里**——
+ *  这是唯一一处不走适配器声明的来源。
+ *
+ *  @param db 账户库
+ */
+function readSourceHints(db: Db): Array<{ name: string; hint: string }> {
+  const hints = repo.listSourceNames(db).flatMap((name) => {
+    const raw = repo.getSourceSetting(db, name, repo.SOURCE_DIGEST_HINT_KEY);
+    if (raw === null) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return typeof parsed === "string" ? [{ name, hint: parsed }] : [];
+    } catch {
+      return []; // 坏串忽略（装配期写的是 JSON.stringify，读到坏数据说明手改过库）
+    }
+  });
+  // chat 的内置说明排最前（它是最常用的入口）
+  return [
+    {
+      name: "chat",
+      hint: "**用户本人在对话里说的话**。说给他自己听的，第一人称、省略多——缺的字段不要猜，缺日期就进「日期未知」。",
+    },
+    ...hints,
+  ];
+}
+
+/** 拼「这条信息」的用户消息（D-118 的三个时刻：事件时间 / 提交时间 / 消化时间）。
+ *
+ *  @param raw 待消化的批次
+ *  @param now 消化时刻（整轮不变——模型判「今年/是否已过期」的「现在」）
+ */
 function buildUserBrief(raw: RawInput, now: string): string {
   const isChat = raw.source === "chat";
   return [

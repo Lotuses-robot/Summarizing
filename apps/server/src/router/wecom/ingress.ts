@@ -5,7 +5,7 @@ import { nowWallClock } from "../../shared/time";
 import { getRelaySetting, setRelaySetting } from "../../storage/relay-kv";
 import type { RegistryDb } from "../../storage/registry";
 import type { SpaceHub } from "../../spaces";
-import type { RelayIngress, RouterLog } from "..";
+import type { RelayIngress, RelayState, RouterLog } from "..";
 import { deliver } from "../deliver";
 import { makeIngressStores } from "..";
 import { callbackSignature, decryptCallback, signatureMatches, xmlField } from "./crypto";
@@ -180,6 +180,16 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
    *  它不是配置项——企业微信在 `kf_msg_or_event` 事件里现给，用完即弃。官方也允许不填，
    *  但「不填接口有严格的频率限制」，所以能拿到就带上。过期后自然回落到不带令牌拉取。 */
   let pullToken: { value: string; until: number } | null = null;
+  /** 最近的运行状态（L28：让界面上看得见「最近出错」，不必 SSH 翻日志）。 */
+  let relayState: RelayState = { state: "ok" };
+  /** 记一次失败（界面状态 + 日志一次完成——两处口径不会漂）。 */
+  function noteError(message: string): void {
+    relayState = { state: "error", lastError: message, lastErrorAt: nowWallClock() };
+  }
+  /** 记一次成功（状态翻篇——「最近出错」要能过去，不能粘滞）。 */
+  function noteOk(): void {
+    if (relayState.state !== "ok") relayState = { state: "ok" };
+  }
   /** 回调来源白名单（`null` = 还没拉过；空清单 = 拉过但一条都没解析出来，按放行处理并留痕）。 */
   let allowList: IpAllowList | null = null;
   let ipTimer: ReturnType<typeof setInterval> | null = null;
@@ -279,10 +289,11 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
         // 只有这个错误码值得多查一次——其余失败（配额、网络）与状态无关。
         const state =
           res.errcode === 95018 ? await getServiceState(token, openKfid, externalUserId) : null;
-        log.warn(
+        const msg =
           `回执未送达（${externalUserId}）：${wecomError(res)}` +
-            (state === null ? "" : `｜会话状态 ${state}：${serviceStateText(state)}`),
-        );
+          (state === null ? "" : `｜会话状态 ${state}：${serviceStateText(state)}`);
+        log.warn(msg);
+        noteError(msg);
       }
     } catch (err) {
       repliedUntil.delete(externalUserId); // 同上：网络/鉴权抖动不该连累后续 10 分钟
@@ -438,7 +449,9 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       const corpId = cred(db, "corpId");
       const secret = cred(db, "secret");
       if (corpId === "" || secret === "") {
-        log.warn("未配置 corpId / secret，无法拉取客服消息");
+        const msg = "未配置 corpId / secret，无法拉取客服消息";
+        log.warn(msg);
+        noteError(msg);
         return;
       }
       const accessToken = await getAccessToken(corpId, secret);
@@ -446,9 +459,12 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
         const cursor = getRelaySetting(db, cursorKey(openKfid)) ?? "";
         const res = await syncKfMessages(accessToken, cursor, currentPullToken(), openKfid);
         if (!wecomOk(res)) {
-          log.error(`sync_msg 失败：${wecomError(res)}`);
+          const msg = `拉取失败：${wecomError(res)}`;
+          log.error(msg);
+          noteError(msg);
           return;
         }
+        noteOk(); // 拉到了（哪怕 0 条）——上一次的错误就此翻篇
         const list = res.msg_list ?? [];
         // 成功路径也要说话：否则「没动静」时无法区分「回调没到」「拉到了但没消息」
         // 「拉到了但全被拒」——三种情况在日志里长得一模一样。
@@ -534,6 +550,7 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       )
     ) {
       log.warn("回调签名不匹配");
+      // 不记入状态：公网被扫是常态，签名不过不代表本接入有问题（记了会常态化「最近出错」）
       return { ok: false, status: 401, error: "签名不匹配" };
     }
     let payload;
@@ -652,6 +669,8 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     description: "客户在微信里发给客服号的消息——按绑定码分流到各账户",
     bindings,
     delivery,
+    // 界面用的运行状态（L28：Router 的失败原先只进 stderr）
+    state: () => relayState,
 
     start(): void {
       if (timer !== null) return; // 幂等

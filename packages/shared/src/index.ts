@@ -932,6 +932,13 @@ export const RouterChannelSchema = z.object({
   enabled: z.boolean(),
   /** 当前绑到本账户的绑定码（按字典序，便于对照）。 */
   bindings: z.array(z.string()),
+  /** 本接入最近的运行状态（L28）：出错时在卡头显示「最近出错」，
+   *  不必 SSH 翻日志。缺席 = 该接入不维护状态。 */
+  state: z.enum(["ok", "error"]).optional(),
+  /** 最近一次错误的人话原因（`state=error` 时显示）。 */
+  lastError: z.string().optional(),
+  /** 最近一次出错时刻（北京墙钟）。 */
+  lastErrorAt: z.string().optional(),
 });
 export type RouterChannel = z.infer<typeof RouterChannelSchema>;
 

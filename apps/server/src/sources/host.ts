@@ -6,7 +6,7 @@ import { nowWallClock } from "../shared/time";
 import { ingestBatch } from "../application/ingest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { TaggedLlm } from "../shared/llm";
-import { SOURCE_SCHEMA_KEY } from "../storage/repo";
+import { SOURCE_DIGEST_HINT_KEY, SOURCE_SCHEMA_KEY } from "../storage/repo";
 import type {
   SourceAdapter,
   SourceBatch,
@@ -227,6 +227,18 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
         ctx.reportError(new Error(message)),
       ),
     );
+    // 来源说明（L27）：纯文本声明，落库供 agent0 提示词按实际启用的源拼接
+    if (adapter.digestHint !== undefined) {
+      repo.setSourceSetting(
+        deps.db,
+        adapter.name,
+        SOURCE_DIGEST_HINT_KEY,
+        JSON.stringify(adapter.digestHint()),
+      );
+    } else {
+      // 没声明就删掉旧的——否则改代码去掉声明后，库里还留着上一版的话（新旧并存）
+      repo.deleteSourceSetting(deps.db, adapter.name, SOURCE_DIGEST_HINT_KEY);
+    }
     if (adapter.settings !== undefined) {
       // 声明在**产生处**校验：坏声明启动即响（走「最近出错」通道可见），
       // 不让它静默穿过到 GET 时才被逐条丢弃（altitude 根修；parseSchema 退化为手改库兜底）

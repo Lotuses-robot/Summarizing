@@ -47,9 +47,25 @@ ${body === "" ? "（用户未设置任何拒收规则）" : body}
 `;
 }
 
+/** 拼【信源说明】段：每个**已启用的信源**自己声明的那段话。
+ *
+ *  为什么由信源声明而不是写在这里：这是源自己的知识（它最清楚消息从哪来、谁在跟谁说话），
+ *  硬编码在提示词里意味着加一个源就要改这个文件（L27）。
+ *
+ *  @param hints 来源名 → 该源的说明（装配期由 registerSources 落库，这里原样读出）
+ */
+function sourceHintsBlock(hints: ReadonlyArray<{ name: string; hint: string }>): string {
+  if (hints.length === 0) return "（本次部署没有启用任何信源）";
+  return hints.map(({ name, hint }) => `- **${name}**：${hint}`).join("\n");
+}
+
 /** 造 agent0 的系统提示词。
- *  @param rejectionRules 用户设置的拒收规则原文（空 = 未设置）；注入在【准入】之前作硬闸。 */
-export function buildDigestPrompt(rejectionRules: string): string {
+ *  @param rejectionRules 用户设置的拒收规则原文（空 = 未设置）；注入在【准入】之前作硬闸。
+ *  @param sourceHints 已启用信源的来源说明（各自 `digestHint()` 声明；空 = 一个都没声明）。 */
+export function buildDigestPrompt(
+  rejectionRules: string,
+  sourceHints: ReadonlyArray<{ name: string; hint: string }> = [],
+): string {
   return `你是 agent0（裁决者），负责消化一条新录入的原始信息，产出变更清单。
 
 【身份与边界】
@@ -59,15 +75,7 @@ export function buildDigestPrompt(rejectionRules: string): string {
 ${rejectionRulesBlock(rejectionRules)}
 【信源说明——这条信息是从哪来的】
 同一套规则要处理多种来源，它们的**场景与说话对象不同**。按「来源类型」认：
-- **chat**：用户本人在对话里说的话。**说给他自己听的**，第一人称、省略多——缺的字段不要猜，缺日期就进「日期未知」。
-- **nc**：QQ 群消息。多人对话，identity 里有群号/群名/发信人；一条批次通常是一段群聊的合并。
-- **wecom**：**企业微信·微信客服**。这是**外部客户发给「你所属企业」的客服咨询**——
-  - 身份里 displayName 是「客户 <尾号>」、externalUserId 是客户 id、openKfid 是客服账号；
-  - **对话双方是「客户」与「企业（客服）」**，不是用户自己在自言自语；
-  - 客户说「我要退货」「发票怎么开」这类话时，**那是客户的需求，不是用户本人的待办**——
-    不要把这些当成用户要做的事建事项。除非原文明确是用户（企业方）需要跟进的动作，
-    否则按**通知**处理（"某客户咨询了 X，需要回复"是可留存的事实）。
-  - 客服的回复署名为「客服 <接待人 id>」，同一条流里客户与客服的话会交替出现——判类时看是谁在说。
+${sourceHintsBlock(sourceHints)}
 - 其它来源类型：按来源类型字面意思理解，拿不准就 record_note 写一句你的理解，别硬套上述某一类。
 
 【准入——先判「配不配当事项」，再判「值不值得当通知留下」】

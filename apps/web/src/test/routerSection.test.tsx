@@ -62,6 +62,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("路由区：卡头与信源卡同构", () => {
+  it("卡头显示接入名（不是内部 kind）+ 状态 chip", async () => {
+    stubRouter(channel({ enabled: true }));
+    render(<RouterSection />);
+    // 显示中文名「微信客服」，不是内部名 wecom
+    expect(await screen.findByText("微信客服")).toBeInTheDocument();
+    expect(screen.queryByText("wecom")).not.toBeInTheDocument();
+    // 与信源卡同款的状态 chip
+    expect(screen.getByText("接收中")).toBeInTheDocument();
+  });
+
+  it("关掉接收 → chip 变「已关闭」", async () => {
+    stubRouter(channel({ enabled: false }));
+    render(<RouterSection />);
+    await waitFor(() => {
+      expect(screen.getByText("已关闭")).toBeInTheDocument();
+    });
+  });
+});
+
 describe("路由区：读", () => {
   it("列出已有的绑定码；开关反映当前状态", async () => {
     stubRouter(channel({ enabled: false, bindings: ["cust-A", "cust-B"] }));

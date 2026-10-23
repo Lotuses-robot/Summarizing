@@ -45,13 +45,20 @@ export function registerRouterRoutes(
   app.get("/api/router", async (req) => {
     const uid = req.space.uid;
     return RouterAccountViewSchema.parse({
-      channels: deps.ingresses().map((ing) => ({
-        kind: ing.name,
-        label: ing.label,
-        description: ing.description,
-        enabled: ing.delivery.isEnabled(uid),
-        bindings: ing.bindings.listFor(uid),
-      })),
+      channels: deps.ingresses().map((ing) => {
+        const st = ing.state?.();
+        return {
+          kind: ing.name,
+          label: ing.label,
+          description: ing.description,
+          enabled: ing.delivery.isEnabled(uid),
+          bindings: ing.bindings.listFor(uid),
+          // L28：Router 的失败原先只进 stderr，界面上看不见
+          ...(st === undefined ? {} : { state: st.state }),
+          ...(st?.lastError === undefined ? {} : { lastError: st.lastError }),
+          ...(st?.lastErrorAt === undefined ? {} : { lastErrorAt: st.lastErrorAt }),
+        };
+      }),
     });
   });
 

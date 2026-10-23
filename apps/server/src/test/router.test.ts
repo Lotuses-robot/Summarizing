@@ -326,6 +326,60 @@ describe("Router · 拉取令牌来自回调事件（不是配置项）", () => 
   });
 });
 
+describe("Router · 运行状态对界面可见（L28）", () => {
+  it("拉取失败 → GET /api/router 带上 lastError，不必 SSH 翻日志", async () => {
+    const realm = await makeRelayRealm();
+    const a = await realm.addAccount({ username: "alpha" });
+    let syncCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/cgi-bin/gettoken")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 0, access_token: "AT", expires_in: 7200 })),
+          );
+        }
+        if (url.includes("/getcallbackip")) {
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0, ip_list: [] })));
+        }
+        // sync_msg 报错（如 open_kfid 填错时的 95000）
+        syncCalls += 1;
+        return Promise.resolve(
+          new Response(JSON.stringify({ errcode: 95000, errmsg: "invalid open_kfid" })),
+        );
+      }),
+    );
+
+    await postEvent(realm);
+
+    // 拉取是异步的：轮询到状态真的变成 error（固定 sleep 不可靠）
+    /** 读一次 wecom 那组。 */
+    const read = async (): Promise<{
+      state?: string;
+      lastError?: string;
+      lastErrorAt?: string;
+    }> => {
+      const r = await a.inject({ method: "GET", url: "/api/router" });
+      // 响应形状由 shared 契约给定（RouterAccountView）
+      const body = r.json<{
+        channels: Array<{ kind: string; state?: string; lastError?: string; lastErrorAt?: string }>;
+      }>();
+      return body.channels.find((c) => c.kind === "wecom") ?? {};
+    };
+    let snapshot = await read();
+    const deadline = Date.now() + 2000;
+    while (snapshot.state !== "error" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+      snapshot = await read();
+    }
+
+    expect(syncCalls).toBeGreaterThan(0); // 先确认拉取真的发生了（否则断言状态是空的因）
+    expect(snapshot.state).toBe("error");
+    expect(snapshot.lastError).toContain("95000");
+    expect(snapshot.lastErrorAt).toBeDefined();
+  });
+});
+
 describe("Router · 回调来源白名单（D-132）", () => {
   it("白名单就绪后：微信网段内的回调放行，网段外的 403", async () => {
     // 官方 getcallbackip 明确「IP 段会变，建议每天拉」——所以白名单必须从接口取，

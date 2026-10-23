@@ -355,6 +355,15 @@ describe("微信客服信源：四闸切段", () => {
     expect(ingested).toHaveLength(1);
   });
 
+  it("accept 成功即打点 receive（信源卡显示的是「收到」时间，不是封批时间）", () => {
+    const { adapter, activities } = mount();
+    void adapter.accept({
+      raw: textMessage({ msgid: "m1", content: "你好" }),
+      receivedAt: "2026-10-23T10:00:00",
+    });
+    expect(activities).toContain("receive");
+  });
+
   it("封批时打点 seal（声明过的活动信号）", () => {
     const { adapter, activities } = mount({ windowMinutes: 0 });
     adapter.accept({

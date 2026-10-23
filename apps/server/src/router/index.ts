@@ -61,6 +61,22 @@ export interface RelayIngress {
   stop?(): void | Promise<void>;
   /** 把本接入的路由挂到 app 上（路径**由接入自己定**——Router 不认识任何具体协议）。 */
   register(app: FastifyInstance): void;
+  /** 最近的运行状态（L28：让「Router 出错」在界面上看得见，不用 SSH 翻日志）。
+   *  缺席 = 本接入不维护状态（那张卡就不显示状态行）。 */
+  state?(): RelayState;
+}
+
+/** 一个接入的运行状态（与信源卡的 `SourceState` 同形态：ok / 最近一次错误）。
+ *
+ *  为什么要它：Router 里的失败（验签不过、拉取报错、回执发不出去、会话状态异常）
+ *  原先只写 stderr——排查必须 SSH + 对照微信文档。信源那边早有这条通道
+ *  （`ctx.reportError` → `GET /api/sources`），Router 缺了同一份。 */
+export interface RelayState {
+  state: "ok" | "error";
+  /** 最近一次错误的人话原因（`state=error` 时显示在卡上）。 */
+  lastError?: string;
+  /** 最近一次出错时刻（北京墙钟）——让「最近出错」能回答「多久以前」。 */
+  lastErrorAt?: string;
 }
 
 /** Router 句柄。 */

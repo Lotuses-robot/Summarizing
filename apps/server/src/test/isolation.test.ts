@@ -49,7 +49,10 @@ describe("双账户隔离（SC-001）", () => {
       payload: { "123": "英语课官方群" },
     });
     const bSettings = await b.inject({ method: "GET", url: "/api/sources/nc/settings" });
-    expect(bSettings.json()).toEqual({});
+    // 断言「A 配的 groups 不在 B 的库里」——不能直接比 `{}`：
+    // `__digest_hint__`（L27 的来源说明）是装配期落库的**系统声明**，每个账户各有一份，
+    // 属于「两边都有的东西」，不构成泄漏。
+    expect(bSettings.json<Record<string, unknown>>()).not.toHaveProperty("groups");
   });
 
   it("B 对 A 的事项 id 打全部写口 → 全 404（东西物理上不在 B 的库）", async () => {

@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { Plus, Route, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import type { RouterAccountView, RouterChannel } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
+import { cn } from "../../lib/cn";
+import { fmtAgo } from "../../lib/time";
 import { Card, Row, StatusSlot, useStatus } from "./primitives";
 
 // 路由（D-130）账户侧：**只有两件事**——收不收、我的绑定码是什么。
@@ -95,7 +97,31 @@ function ChannelCard({ channel }: { channel: RouterChannel }) {
   };
 
   return (
-    <Card icon={Route} title={channel.label} desc={channel.description}>
+    <Card
+      // 与信源卡同款：卡头「名字 + 状态 chip」，副标题出错时显示原因
+      title={
+        <span className="flex flex-wrap items-center gap-2">
+          {channel.label}
+          {channel.state === "error" ? (
+            <span className="chip shrink-0 border-danger/50 text-danger">最近出错</span>
+          ) : (
+            <span className={cn("chip shrink-0", !enabled && "text-ink-muted")}>
+              {enabled ? "接收中" : "已关闭"}
+            </span>
+          )}
+        </span>
+      }
+      desc={
+        // 出错时副标题让位给「什么错、多久以前」——与信源卡同一口径
+        channel.state === "error"
+          ? `${channel.lastError ?? "未知错误"}${
+              channel.lastErrorAt === undefined
+                ? ""
+                : `（${fmtAgo(channel.lastErrorAt) ?? channel.lastErrorAt}）`
+            }`
+          : channel.description
+      }
+    >
       <Row label="接收消息" description="关掉后这一种消息不进来，对方会收到「暂不可用」">
         <input
           type="checkbox"

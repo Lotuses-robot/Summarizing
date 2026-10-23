@@ -37,6 +37,11 @@ import * as s from "./schema";
  *  居家真相在 storage 层（simplify 下沉：core 装配不再反向 import 路由模块）。 */
 export const SOURCE_SCHEMA_KEY = "__schema__";
 
+/** 信源给 agent0 的来源说明（L27）在 source_settings 的键——core 落库，提示词按需读。
+ *  与 `__schema__` 同一个思路：把适配器声明的纯数据存下来，消费方（这里是 prompt.ts）
+ *  不必认识任何具体信源。 */
+export const SOURCE_DIGEST_HINT_KEY = "__digest_hint__";
+
 /** 存量 AI 设置在 app_settings 的键（设置路由写、空间装配读——同住 storage 单一出处）。 */
 export const AI_SETTINGS_KEY = "ai";
 
