@@ -299,13 +299,17 @@ export const api = {
   router: (): Promise<RouterAccountView> =>
     req("/api/router").then((r) => to<RouterAccountView>(r)),
 
-  /** 整段覆盖我的绑定码（增的绑过来、删的解绑）。 */
-  saveRouterBindings: (bindings: string[]): Promise<void> =>
-    req("/api/router/bindings", put({ bindings })).then((r) => ensureOk(r)),
+  /** 整段覆盖我在某接入下的绑定码（增的绑过来、删的解绑）。 */
+  saveRouterBindings: (kind: string, bindings: string[]): Promise<void> =>
+    req(`/api/router/${encodeURIComponent(kind)}/bindings`, put({ bindings })).then((r) =>
+      ensureOk(r),
+    ),
 
-  /** 开/关分发（关掉时消息不进来，客户收到「暂不可用」）。 */
-  setRouterEnabled: (enabled: boolean): Promise<void> =>
-    req("/api/router/enabled", put({ enabled })).then((r) => ensureOk(r)),
+  /** 开/关某个接入的分发（关掉时那种消息不进来，对方收到「暂不可用」）。 */
+  setRouterEnabled: (kind: string, enabled: boolean): Promise<void> =>
+    req(`/api/router/${encodeURIComponent(kind)}/enabled`, put({ enabled })).then((r) =>
+      ensureOk(r),
+    ),
 
   // ── 信源（D-89 信源区真界面 / 审核页）──
 

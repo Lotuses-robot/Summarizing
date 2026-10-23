@@ -185,7 +185,7 @@ describe("运维命令内核（contracts/cli.md）", () => {
     expect(out).toContain("wecom.corpId\tww1234");
     expect(out).toContain("wecom.secret\t****alue");
     expect(out).not.toContain("super-secret-value");
-    expect(out).toContain("wecom.pullToken\t（未配置）");
+    expect(out).toContain("wecom.openKfids\t（未配置）");
   });
 
   it("router:list 给出要填进企业微信的回调地址（地址属 Router，运维要查得到）", async () => {

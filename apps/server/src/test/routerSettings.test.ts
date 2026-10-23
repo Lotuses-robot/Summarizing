@@ -60,14 +60,13 @@ describe("Router 部署级设置", () => {
 
     expect(byKey.get("wecom.corpId")).toBe("ww1234"); // 非凭据原样
     expect(byKey.get("wecom.secret")).toBe("****9876"); // 凭据掩码
-    expect(byKey.get("wecom.pullToken")).toBe("（未配置）"); // 未配置如实说
+    expect(byKey.get("wecom.openKfids")).toBe("（未配置）"); // 未配置如实说
     // 顺序 = 清单顺序（运维要能一眼看出还差哪几项）
     expect(rows.map((r) => r.key)).toEqual([
       "wecom.corpId",
       "wecom.secret",
       "wecom.callbackToken",
       "wecom.encodingAesKey",
-      "wecom.pullToken",
       "wecom.openKfids",
       "wecom.replyThrottleMinutes",
     ]);

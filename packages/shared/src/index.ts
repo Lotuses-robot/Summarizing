@@ -917,34 +917,46 @@ export type SourceSummary = z.infer<typeof SourceSummarySchema>;
 
 // ──────────────── Router（部署级接入，D-130）────────────────
 
-/** 账户侧的 Router 视图：**只有两样**——收不收（开关）、我的绑定码（external_userid 原文）。
+/** 账户侧的某一**接入**分组（D-134：Router 不只服务微信客服）。
  *
- *  凭据（corpId / secret / Token / AESKey）一概不在这里：它们属于部署方，走运维命令行
- *  （FR-040）。账户主人不需要知道微信另一端长什么样，只需要「让消息进得来」。
- *
- *  `bindings` 是**可能多条**的：一个人可以有多个微信（同一 uid 绑多个 external_userid），
- *  全列出来他才知道都有谁在往自己这儿送消息。 */
-export const RouterAccountViewSchema = z.object({
-  /** 是否接收分发（缺省 true——新账户无需先点开关）。 */
+ *  `kind` = 接入名（`wecom` / `njunews` …），`label`/`description` 由**接入自己声明**——
+ *  前端不认识任何具体的接入，加一个新接入时这一页一行都不用改。 */
+export const RouterChannelSchema = z.object({
+  /** 接入名（也是写入时用的键）。 */
+  kind: z.string(),
+  /** 给人看的名字（「微信客服」「校内新闻」）。 */
+  label: z.string(),
+  /** 一句说明：往这儿送的是什么消息。 */
+  description: z.string(),
+  /** 是否接收这一种接入的消息（缺省 true）。 */
   enabled: z.boolean(),
-  /** 当前绑到本账户的绑定码（external_userid 原文；按字典序，便于对照）。 */
+  /** 当前绑到本账户的绑定码（按字典序，便于对照）。 */
   bindings: z.array(z.string()),
+});
+export type RouterChannel = z.infer<typeof RouterChannelSchema>;
+
+/** 账户侧的路由视图：**每个接入一组**。
+ *
+ *  凭据一概不在这里：它们属于部署方，走运维命令行（FR-040）。
+ *  账户主人不需要知道微信另一端长什么样，只需要「让消息进得来」。 */
+export const RouterAccountViewSchema = z.object({
+  channels: z.array(RouterChannelSchema),
 });
 export type RouterAccountView = z.infer<typeof RouterAccountViewSchema>;
 
-/** PUT /api/router/bindings 的请求体：**整段覆盖**本账户的绑定码列表。
+/** PUT /api/router/:kind/bindings 的请求体：**整段覆盖**本账户在该接入下的绑定码列表。
  *
  *  为什么是整段覆盖而不是逐条增删：一个人手上就那几条，整段提交省掉「加/删」两个端点与
  *  它们各自的幂等语义；前端把编辑后的数组原样交回，后端据此算增删。
  *
- *  码 = external_userid 原文（本轮不哈希——用户 2026-10-23 定），**不做格式校验**：
- *  它就是一项配置，填错了自然收不到消息（D-130）。所以这里只限形状（字符串、去空、去重）。 */
+ *  码的形式由**接入自己**决定（微信是 external_userid 原文，新闻源可能是站点+栏目），
+ *  所以要过接入自己的解析——这里只限「非空字符串」这个最外层形状。 */
 export const RouterBindingsInputSchema = z.object({
   bindings: z.array(z.string().trim().min(1)),
 });
 export type RouterBindingsInput = z.infer<typeof RouterBindingsInputSchema>;
 
-/** PUT /api/router/enabled 的请求体。 */
+/** PUT /api/router/:kind/enabled 的请求体。 */
 export const RouterEnabledInputSchema = z.object({ enabled: z.boolean() });
 export type RouterEnabledInput = z.infer<typeof RouterEnabledInputSchema>;
 

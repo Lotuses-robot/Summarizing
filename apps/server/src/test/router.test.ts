@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTestRealm, cleanupAllTestAccounts, type TestRealm } from "./helpers/app";
 import { makeWecomAdapter } from "../sources/wecom";
-import { setBinding } from "../router/bindings";
+import { makeBindingStore } from "../router/store";
 import { setAccountStatus } from "../storage/registry";
 import { writeRouterSetting } from "../router/settings";
 import type { SourceAdapter } from "../sources/types";
@@ -23,7 +23,6 @@ const CREDENTIALS: Record<string, string> = {
   "wecom.secret": "sec",
   "wecom.callbackToken": CALLBACK_TOKEN,
   "wecom.encodingAesKey": AES_KEY,
-  "wecom.pullToken": "pull-tok",
   "wecom.openKfids": "kf1",
 };
 
@@ -100,6 +99,11 @@ async function makeRelayRealm(factories?: Array<() => SourceAdapter>): Promise<R
     writeRouterSetting(realm.registry, key, value);
   }
   return { ...realm, delivered };
+}
+
+/** 在 realm 的 wecom 绑定表里建立一条绑定（D-134：按接入分区）。 */
+function bindWecom(realm: TestRealm, code: string, uid: string): void {
+  makeBindingStore(realm.registry, "wecom").set(code, uid);
 }
 
 /** 假 fetch：gettoken 恒成功；sync_msg 返回给定消息列表；send_msg 计数；
@@ -259,6 +263,62 @@ describe("Router · 微信回调（真实 HTTP 入口）", () => {
   });
 });
 
+describe("Router · 拉取令牌来自回调事件（不是配置项）", () => {
+  it("回调事件里的 <Token> 会被带进 sync_msg 请求体；没有回调时就留空", async () => {
+    // 官方：sync_msg 的 `token` 是「回调事件返回的 token 字段，10 分钟内有效」——
+    // 它不是运维配置项（v0.7.0 曾误做成 wecom.pullToken 配置，用户照着后台找不到）。
+    const realm = await makeRelayRealm();
+    const bodies: Array<{ token?: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.includes("/cgi-bin/gettoken")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 0, access_token: "AT", expires_in: 7200 })),
+          );
+        }
+        if (url.includes("/cgi-bin/kf/sync_msg")) {
+          bodies.push(
+            typeof init?.body === "string" ? (JSON.parse(init.body) as { token?: string }) : {},
+          );
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 0, has_more: 0, msg_list: [] })),
+          );
+        }
+        return Promise.resolve(new Response(JSON.stringify({ errcode: 0, ip_list: [] })));
+      }),
+    );
+
+    // 轮询定时器 30s 一跳，`start()` 后不会立刻拉；用一次无 <Token> 的回调触发首轮拉取
+    await realm.router?.start();
+    const plainXml = `<xml><Event><![CDATA[kf_msg_or_event]]></Event></xml>`;
+    const plainEnc = encryptForTest(plainXml, CORP_ID);
+    await realm.app.inject({
+      method: "POST",
+      url: `/relay/wecom/callback?${callbackQuery(plainEnc)}`,
+      payload: `<xml><Encrypt><![CDATA[${plainEnc}]]></Encrypt></xml>`,
+      headers: { "content-type": "text/xml" },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(bodies.length).toBeGreaterThan(0);
+    // ① 没经过带 <Token> 的回调 → 不带令牌（官方允许，只是频率限制更严）
+    expect(bodies[0]?.token === undefined || bodies[0]?.token === "").toBe(true);
+
+    // ② 推一个带 <Token> 的回调 → 下一次拉取带上它
+    bodies.length = 0;
+    const xml = `<xml><Event><![CDATA[kf_msg_or_event]]></Event><Token><![CDATA[PT-123]]></Token></xml>`;
+    const encrypt = encryptForTest(xml, CORP_ID);
+    await realm.app.inject({
+      method: "POST",
+      url: `/relay/wecom/callback?${callbackQuery(encrypt)}`,
+      payload: `<xml><Encrypt><![CDATA[${encrypt}]]></Encrypt></xml>`,
+      headers: { "content-type": "text/xml" },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(bodies.some((b) => b.token === "PT-123")).toBe(true);
+  });
+});
+
 describe("Router · 回调来源白名单（D-132）", () => {
   it("白名单就绪后：微信网段内的回调放行，网段外的 403", async () => {
     // 官方 getcallbackip 明确「IP 段会变，建议每天拉」——所以白名单必须从接口取，
@@ -321,8 +381,8 @@ describe("Router · 一对多投递", () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
     const b = await realm.addAccount({ username: "beta" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
-    setBinding(realm.registry, "cust-B", b.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-B", b.space.uid);
     stubWecomFetch([
       {
         msgid: "m1",
@@ -392,7 +452,7 @@ describe("Router · 一对多投递", () => {
   it("已绑定客户收到消息 → 回「信息已收到」", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
     const { sent } = stubWecomFetch([
       {
         msgid: "m1",
@@ -415,7 +475,7 @@ describe("Router · 一对多投递", () => {
   it("同一客户连发多条 → 只回一次（回执在 Router 按客户节流）", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
     const { sent } = stubWecomFetch([
       {
         msgid: "m1",
@@ -447,8 +507,8 @@ describe("Router · 一对多投递", () => {
   it("不同客户各回各的（节流按客户，不是全局）", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
-    setBinding(realm.registry, "cust-B", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-B", a.space.uid);
     const { sent } = stubWecomFetch([
       {
         msgid: "m1",
@@ -479,7 +539,7 @@ describe("Router · 一对多投递", () => {
   it("客服自己发的消息不回执（只对客户的消息回）", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
     const { sent } = stubWecomFetch([
       {
         msgid: "m1",
@@ -503,7 +563,7 @@ describe("Router · 一对多投递", () => {
   it("回执发失败（会话转人工/配额满）不抛、不影响消息入批", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
@@ -555,7 +615,7 @@ describe("Router · 一对多投递", () => {
     // 停用账户照样被装配、消息写进它的库、还用它的 key 消化（review 逮出的真洞）。
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-Off", a.space.uid);
+    bindWecom(realm, "cust-Off", a.space.uid);
     setAccountStatus(realm.registry, a.space.uid, "disabled");
     // 先把空间从 hub 里清掉，逼投递走「重新取空间」那条路（否则命中缓存看不出差异）
     await realm.hub.closeAll();
@@ -585,7 +645,7 @@ describe("Router · 一对多投递", () => {
 
   it("账户不存在（绑定指向已删号）→ 当作未绑定，回码", async () => {
     const realm = await makeRelayRealm();
-    setBinding(realm.registry, "cust-Ghost", "uid-ghost");
+    bindWecom(realm, "cust-Ghost", "uid-ghost");
     const { sent } = stubWecomFetch([
       {
         msgid: "m1",
@@ -612,7 +672,7 @@ describe("Router · 一对多投递", () => {
     // 用部署凭据去取**别人**的 media_id。修法：部署级那张表单独放，`/api/ingest` 只读信源自己声明的。
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
 
     // 先让 Router 投递一次（它会在目标账户上装好 relay 那份）
     stubWecomFetch([
@@ -668,7 +728,7 @@ describe("Router · 一对多投递", () => {
   it("目标账户没启用这个信源 → 回「暂不可用」，不抛", async () => {
     const realm = await makeRelayRealm([]); // 账户里没有任何信源
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
     const { sent } = stubWecomFetch([
       {
         msgid: "m1",
@@ -692,9 +752,9 @@ describe("Router · 一对多投递", () => {
   it("一个客户投递失败不影响同批其他客户", async () => {
     const realm = await makeRelayRealm();
     const a = await realm.addAccount({ username: "alpha" });
-    setBinding(realm.registry, "cust-A", a.space.uid);
+    bindWecom(realm, "cust-A", a.space.uid);
     // cust-B 绑到不存在的账户
-    setBinding(realm.registry, "cust-B", "uid-ghost");
+    bindWecom(realm, "cust-B", "uid-ghost");
     stubWecomFetch([
       {
         msgid: "m1",

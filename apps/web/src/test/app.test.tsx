@@ -37,8 +37,7 @@ function stubApp(opts: { uncertainFail?: boolean } = {}): {
         );
       }
       if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
-      if (url.includes("/api/router"))
-        return Promise.resolve(jsonResponse({ enabled: true, bindings: [] }));
+      if (url.includes("/api/router")) return Promise.resolve(jsonResponse({ channels: [] }));
       if (url.includes("/api/uncertain")) {
         if (opts.uncertainFail === true) return Promise.reject(new Error("接口挂了"));
         return Promise.resolve(jsonResponse([]));

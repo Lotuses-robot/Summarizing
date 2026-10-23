@@ -5,10 +5,9 @@ import { nowWallClock } from "../../shared/time";
 import { getRelaySetting, setRelaySetting } from "../../storage/relay-kv";
 import type { RegistryDb } from "../../storage/registry";
 import type { SpaceHub } from "../../spaces";
-import type { RouterLog } from "..";
+import type { RelayIngress, RouterLog } from "..";
 import { deliver } from "../deliver";
-import { resolveBinding } from "../bindings";
-import { isDeliveryEnabled } from "../switch";
+import { makeIngressStores } from "..";
 import { callbackSignature, decryptCallback, signatureMatches, xmlField } from "./crypto";
 import {
   getAccessToken,
@@ -94,6 +93,9 @@ const UNBOUND_REPLY = (code: string): string =>
 /** 账户停用 / 未启用时的回执。 */
 const UNAVAILABLE_REPLY = "信息已收到，但接收方暂不可用，请稍后再试或联系管理员。";
 
+/** 回调带的拉取令牌有效期：官方说 10 分钟，这里留 30 秒余量（宁可早点回落到不带令牌）。 */
+const PULL_TOKEN_TTL_MS = 10 * 60_000 - 30_000;
+
 /** 关停时等在途拉取的上限：超过就不再等（卡死的网络不该拖住 Ctrl-C）。 */
 const STOP_WAIT_MS = 5_000;
 
@@ -117,7 +119,6 @@ const KEY = {
   secret: "wecom.secret",
   callbackToken: "wecom.callbackToken",
   encodingAesKey: "wecom.encodingAesKey",
-  pullToken: "wecom.pullToken",
   openKfids: "wecom.openKfids",
 } as const;
 
@@ -129,14 +130,15 @@ function cred(db: RegistryDb, key: keyof typeof KEY): string {
 /** 游标的 KV 键（按客服账号分）。 */
 const cursorKey = (openKfid: string): string => `cursor:wecom:${openKfid}`;
 
-/** 微信客服接入的运行时：持有定时器、拉取中标记、回执节流。 */
-export interface WecomIngress {
+/** 微信客服接入的运行时：持有定时器、拉取中标记、回执节流。
+ *
+ *  除下面的协议特有方法外，还要满足 `RelayIngress` 的契约（name/label/description +
+ *  bindings/delivery + register）——那几样由 Router 统一驱动。 */
+export interface WecomIngress extends RelayIngress {
   /** 启动轮询兜底（可重复调用，幂等）。 */
   start(): void;
   /** 停止（撤销定时器 + 等在途拉取收手）。 */
   stop(): void | Promise<void>;
-  /** 把本接入的路由挂到 app（`/relay/wecom/*`）。 */
-  register(app: FastifyInstance): void;
   /** 回调处理器（`/relay/wecom/callback` 的 GET 与 POST）。 */
   handleCallback(input: {
     method: string;
@@ -158,6 +160,8 @@ export interface WecomIngress {
  * @param log 日志口（core 统一加前缀）
  */
 export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog): WecomIngress {
+  // 本接入自己的绑定表与分发开关（D-134）：键按 name 分区，与其它接入互不干扰
+  const { bindings, delivery } = makeIngressStores(db, SOURCE_NAME);
   /** 正在拉取（防回调与定时器并发拉同一账号 → 游标串号）。 */
   const syncing = new Set<string>();
   /** 本进程在跑的拉取（stop 要等它们收手——否则关停后还有消息往被拆掉的空间里投）。 */
@@ -167,6 +171,11 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
   /** 回执节流：客户 id → 下次允许回执的时刻（毫秒）。 */
   const repliedUntil = new Map<string, number>();
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** 最近一次回调带来的拉取令牌（官方：回调事件 `<Token>`，**10 分钟内有效**）。
+   *
+   *  它不是配置项——企业微信在 `kf_msg_or_event` 事件里现给，用完即弃。官方也允许不填，
+   *  但「不填接口有严格的频率限制」，所以能拿到就带上。过期后自然回落到不带令牌拉取。 */
+  let pullToken: { value: string; until: number } | null = null;
   /** 回调来源白名单（`null` = 还没拉过；空清单 = 拉过但一条都没解析出来，按放行处理并留痕）。 */
   let allowList: IpAllowList | null = null;
   let ipTimer: ReturnType<typeof setInterval> | null = null;
@@ -263,14 +272,14 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     if (kfid === "" || ext === "") return; // 无法分流
     if (m.origin === ORIGIN_SYSTEM_EVENT) return; // 系统事件不是对话内容
 
-    const uid = resolveBinding(db, ext); // 坏绑定表会抛——响亮失败，不静默发错码
+    const uid = bindings.resolve(ext); // 坏绑定表会抛——响亮失败，不静默发错码
     if (uid === null) {
       if (m.origin === ORIGIN_CUSTOMER) await replyOnce(kfid, ext, UNBOUND_REPLY(ext), Date.now());
       return;
     }
 
     // 用户关掉了分发：客户照常收到「暂不可用」，消息不进来（比清绑定温和——客户知道人还在）
-    if (!isDeliveryEnabled(db, uid)) {
+    if (!delivery.isEnabled(uid)) {
       log.info(`账户 ${uid} 已关闭分发，跳过一条来自 ${ext} 的消息`);
       if (m.origin === ORIGIN_CUSTOMER) await replyOnce(kfid, ext, UNAVAILABLE_REPLY, Date.now());
       return;
@@ -299,6 +308,18 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     if (m.origin === ORIGIN_CUSTOMER) await replyOnce(kfid, ext, UNAVAILABLE_REPLY, Date.now());
   }
 
+  /** 当前可用的拉取令牌（过期就当成没有——带一个过期令牌比不带更容易被拒）。
+   *
+   *  官方：回调事件里的 `token`「10分钟内有效」；不填也能拉，只是频率限制更严。 */
+  function currentPullToken(): string {
+    if (pullToken === null) return "";
+    if (pullToken.until <= Date.now()) {
+      pullToken = null;
+      return "";
+    }
+    return pullToken.value;
+  }
+
   /** 拉一个客服账号的消息（最多 MAX_PAGES_PER_SYNC 页），逐条投递。 */
   async function syncOne(openKfid: string): Promise<void> {
     if (syncing.has(openKfid)) return;
@@ -313,7 +334,7 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       const accessToken = await getAccessToken(corpId, secret);
       for (let page = 0; page < MAX_PAGES_PER_SYNC; page++) {
         const cursor = getRelaySetting(db, cursorKey(openKfid)) ?? "";
-        const res = await syncKfMessages(accessToken, cursor, cred(db, "pullToken"), openKfid);
+        const res = await syncKfMessages(accessToken, cursor, currentPullToken(), openKfid);
         if (!wecomOk(res)) {
           log.error(`sync_msg 失败：${wecomError(res)}`);
           return;
@@ -468,7 +489,13 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
 
     const event = xmlField(verified.xml, "Event");
     if (event === "kf_msg_or_event") {
-      void syncAll(); // 先 200 再拉（5 秒窗口）
+      // 事件体里带一个 10 分钟有效的拉取令牌——记下来，拉取时带上
+      // （官方：不填也能拉，但「不填接口有严格的频率限制」）
+      const pulled = xmlField(verified.xml, "Token");
+      if (pulled !== null && pulled !== "") {
+        pullToken = { value: pulled, until: Date.now() + PULL_TOKEN_TTL_MS };
+      }
+      kickSync(); // 先 200 再拉（5 秒窗口）
     } else {
       log.debug(`忽略事件类型：${event ?? "（无）"}`);
     }
@@ -504,6 +531,12 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
   }
 
   return {
+    name: SOURCE_NAME,
+    label: "微信客服",
+    description: "客户在微信里发给客服号的消息——按绑定码分流到各账户",
+    bindings,
+    delivery,
+
     start(): void {
       if (timer !== null) return; // 幂等
       timer = setInterval(kickSync, POLL_INTERVAL_MS);

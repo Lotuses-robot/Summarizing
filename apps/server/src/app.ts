@@ -278,8 +278,15 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub; router?: Ro
     registerTrashRoutes(scope);
     registerUsageRoutes(scope);
     registerMediaRoutes(scope);
-    // 账户侧的 Router 入口（D-130）：只有开关与绑定码——凭据是部署方的，不在这
-    registerRouterRoutes(scope, { registry: deps.registry });
+    // 账户侧的 Router 入口（D-130/D-134）：每个接入一组开关+绑定码——凭据是部署方的，不在这。
+    // 接入清单由 router 自己声明，这里不写死任何接入名。
+    registerRouterRoutes(scope, {
+      registry: deps.registry,
+      ingresses: () => deps.router?.ingresses() ?? [],
+      log: (msg) =>
+        process.stderr.write(`${msg}
+`),
+    });
   });
 
   return app;

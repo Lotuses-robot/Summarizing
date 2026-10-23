@@ -26,7 +26,6 @@ const ROUTER_SETTINGS: RouterSettingSpec[] = [
   { key: "wecom.secret", label: "应用 Secret", secret: true },
   { key: "wecom.callbackToken", label: "回调 Token", secret: true },
   { key: "wecom.encodingAesKey", label: "回调 EncodingAESKey", secret: true },
-  { key: "wecom.pullToken", label: "拉取消息 Token", secret: true },
   { key: "wecom.openKfids", label: "客服账号 id（逗号分隔）", secret: false },
   {
     key: "wecom.replyThrottleMinutes",

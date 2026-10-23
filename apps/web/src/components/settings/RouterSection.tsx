@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Plus, Route, Trash2 } from "lucide-react";
-import type { RouterAccountView } from "@summarizing/shared";
+import type { RouterAccountView, RouterChannel } from "@summarizing/shared";
 import { errText } from "@summarizing/shared";
 import { api } from "../../api";
 import { Card, Row, StatusSlot, useStatus } from "./primitives";
@@ -61,80 +61,97 @@ function BindingsEditor({
   );
 }
 
-/** 路由区（账户侧）。
+/** 一个接入的分组卡：开关 + 绑定码。
  *
- *  读 `GET /api/router`（开关 + 绑定码）；写走两个 PUT。
- *  未配置凭据时这一区照样显示——开关和码都不是凭据，账户主人随时可以填。
- *
- *  `id` = 锚点 id（左导航滚动定位用，由 SettingsModal 的 SECTION_DOM 单一出处传入）。 */
-export function RouterSection({ id }: { id: string }) {
-  const [view, setView] = useState<RouterAccountView | null>(null);
-  const [codes, setCodes] = useState<string[]>([]);
-  const [readFailed, setReadFailed] = useState(false);
+ *  标题与说明**来自接入自己的声明**（`label` / `description`）——前端不认识任何具体接入。
+ *  加一个「校内新闻」接入时，这一页会自动多出一张卡，本文件一行不用改。 */
+function ChannelCard({ channel }: { channel: RouterChannel }) {
+  const [codes, setCodes] = useState<string[]>(channel.bindings);
+  const [enabled, setEnabled] = useState(channel.enabled);
   const { statuses, flash, sticky } = useStatus();
-
-  useEffect(() => {
-    api
-      .router()
-      .then((v) => {
-        setView(v);
-        setCodes(v.bindings);
-      })
-      .catch(() => setReadFailed(true));
-  }, []);
 
   /** 提交整段码表：空行去掉再交（后端只认非空码）。 */
   const commitBindings = (next: string[]): void => {
     const cleaned = next.map((c) => c.trim()).filter((c) => c !== "");
     api
-      .saveRouterBindings(cleaned)
+      .saveRouterBindings(channel.kind, cleaned)
       .then(() => {
         flash("bindings", "已保存");
-        setView((cur) => (cur === null ? cur : { ...cur, bindings: cleaned }));
+        setCodes(cleaned);
       })
       .catch((err: unknown) => sticky("bindings", `保存失败：${errText(err)}`));
   };
 
-  /** 开/关分发：点了即存，失败把开关拨回去（不留一个说谎的控件）。 */
+  /** 开/关这一种接入：点了即存，失败把开关拨回去（不留一个说谎的控件）。 */
   const commitEnabled = (next: boolean): void => {
-    setView((cur) => (cur === null ? cur : { ...cur, enabled: next }));
+    setEnabled(next);
     api
-      .setRouterEnabled(next)
+      .setRouterEnabled(channel.kind, next)
       .then(() => flash("enabled", "已保存"))
       .catch((err: unknown) => {
-        setView((cur) => (cur === null ? cur : { ...cur, enabled: !next }));
+        setEnabled(!next);
         sticky("enabled", `保存失败：${errText(err)}`);
       });
   };
 
   return (
-    <Card
-      id={id}
-      icon={Route}
-      title="路由"
-      desc="一个微信客服对接多个账户——消息按绑定码分流"
-      footnote="绑定码由客户发消息后自动回给他；把它填在上面，他的消息就只进你的账户。凭据由运维在服务器上配置。"
-    >
-      {readFailed ? (
-        <Row label={<span className="text-danger">读取路由设置失败（后端是否在跑？）</span>} />
-      ) : view === null ? (
-        <Row label={<span className="text-ink-muted">读取中…</span>} />
-      ) : (
-        <>
-          <Row label="接收消息" description="关掉后消息不进来，客户会收到「暂不可用」">
-            <input
-              type="checkbox"
-              className="h-[1rem] w-[1rem] accent-accent"
-              checked={view.enabled}
-              onChange={(e) => commitEnabled(e.target.checked)}
-            />
-          </Row>
-          <Row label="绑定码" description="一行一个——你可以有多个微信" stacked>
-            <BindingsEditor codes={codes} onChange={setCodes} onCommit={commitBindings} />
-          </Row>
-          <StatusSlot statuses={statuses} />
-        </>
-      )}
+    <Card icon={Route} title={channel.label} desc={channel.description}>
+      <Row label="接收消息" description="关掉后这一种消息不进来，对方会收到「暂不可用」">
+        <input
+          type="checkbox"
+          className="h-[1rem] w-[1rem] accent-accent"
+          checked={enabled}
+          onChange={(e) => commitEnabled(e.target.checked)}
+        />
+      </Row>
+      <Row label="绑定码" description="一行一个——同一个来源可以有多个" stacked>
+        <BindingsEditor codes={codes} onChange={setCodes} onCommit={commitBindings} />
+      </Row>
+      <StatusSlot statuses={statuses} />
     </Card>
+  );
+}
+
+/** 路由区（账户侧）：**每个接入一张卡**。
+ *
+ *  读 `GET /api/router`（`channels[]`，每个接入自带 label/description/开关/绑定码）。
+ *  未配置凭据时这一区照样显示——开关和码都不是凭据，账户主人随时可以填。
+ *
+ *  `id` = 锚点 id（左导航滚动定位用，由 SettingsModal 的 SECTION_DOM 单一出处传入）。 */
+export function RouterSection({ id }: { id: string }) {
+  const [view, setView] = useState<RouterAccountView | null>(null);
+  const [readFailed, setReadFailed] = useState(false);
+
+  useEffect(() => {
+    api
+      .router()
+      .then(setView)
+      .catch(() => setReadFailed(true));
+  }, []);
+
+  return (
+    <section id={id} className="scroll-mt-4 space-y-5">
+      <header className="flex items-center gap-1.5 px-0.5">
+        <Route size={14} className="text-ink-muted" />
+        <span role="heading" aria-level={3} className="text-sm font-semibold">
+          路由
+        </span>
+        <span className="truncate text-xs text-ink-muted">
+          · 一个部署对接多个账户——消息按绑定码分流
+        </span>
+      </header>
+      {readFailed ? (
+        <p className="px-0.5 text-sm text-danger">读取路由设置失败（后端是否在跑？）</p>
+      ) : view === null ? (
+        <p className="px-0.5 text-sm text-ink-muted">读取中…</p>
+      ) : view.channels.length === 0 ? (
+        <p className="px-0.5 text-sm text-ink-muted">还没有可用的路由（运维尚未启用任何接入）</p>
+      ) : (
+        view.channels.map((ch) => <ChannelCard key={ch.kind} channel={ch} />)
+      )}
+      <p className="px-0.5 text-xs text-ink-muted">
+        绑定码由对方发消息后自动回给他；把它填在上面，他的消息就只进你的账户。凭据由运维在服务器上配置。
+      </p>
+    </section>
   );
 }

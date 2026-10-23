@@ -5,7 +5,7 @@ import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fas
 import { errText } from "@summarizing/shared";
 import { makeApp } from "../../app";
 import { makeSpaceHub, type Space, type SpaceHub } from "../../spaces";
-import { makeRouter, type Router } from "../../router";
+import { makeRouter, type IngressFactory, type Router } from "../../router";
 import {
   createAccount,
   getSessionSecret,
@@ -100,6 +100,8 @@ export async function makeTestRealm(
     makeLlm?: (db: Db) => TaggedLlm;
     /** 装 Router（D-130）：`/relay/*` 接入路由随之可达。 */
     withRouter?: boolean;
+    /** 注入替身接入（D-134：测「加一个新接入」这条路径时用；缺省取生产接入表）。 */
+    ingressFactories?: IngressFactory[];
   } = {},
 ): Promise<TestRealm> {
   // 空间装配缺 env 时走「未配置占位」客户端（buildLlm，不抛）——无需环境修补；
@@ -114,7 +116,14 @@ export async function makeTestRealm(
   });
   // Router 的日志吞掉（测试不断言 stderr；需要断言的用例自己注入 log）
   const router =
-    args.withRouter === true ? makeRouter({ db: registry, hub, log: silentLog() }) : undefined;
+    args.withRouter === true
+      ? makeRouter({
+          db: registry,
+          hub,
+          log: silentLog(),
+          ...(args.ingressFactories === undefined ? {} : { factories: args.ingressFactories }),
+        })
+      : undefined;
   const app = makeApp({ registry, hub, ...(router === undefined ? {} : { router }) });
   const secret = getSessionSecret(registry);
   const spaces: Space[] = [];

@@ -8,9 +8,18 @@ import "@testing-library/jest-dom/vitest";
 // 路由区（D-130 账户侧）：开关点了即存、绑定码整段提交。
 // 这里守用户**看到的那行字**与**发出的是什么请求**——不测后端逻辑（routerApi.test.ts 管那半）。
 
+/** 频道视图：单接入（wecom）的一组的形状。 */
+interface Channel {
+  kind: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  bindings: string[];
+}
+
 /** fetch 替身：GET /api/router 回给定视图；PUT 记录并按需失败。 */
 function stubRouter(
-  view: { enabled: boolean; bindings: string[] },
+  view: Channel,
   opts: { failPut?: boolean } = {},
 ): { calls: { method: string; url: string; body: unknown }[] } {
   const calls: { method: string; url: string; body: unknown }[] = [];
@@ -28,12 +37,24 @@ function stubRouter(
           }
           return Promise.resolve(jsonResponse({ ok: true }));
         }
-        return Promise.resolve(jsonResponse(view));
+        return Promise.resolve(jsonResponse({ channels: [view] }));
       }
       return Promise.resolve(jsonResponse({}));
     }),
   );
   return { calls };
+}
+
+/** 造一个接入分组（默认 wecom）。 */
+function channel(patch: Partial<Channel> = {}): Channel {
+  return {
+    kind: "wecom",
+    label: "微信客服",
+    description: "客户在微信里发给客服号的消息",
+    enabled: true,
+    bindings: [],
+    ...patch,
+  };
 }
 
 afterEach(() => {
@@ -43,7 +64,7 @@ afterEach(() => {
 
 describe("路由区：读", () => {
   it("列出已有的绑定码；开关反映当前状态", async () => {
-    stubRouter({ enabled: false, bindings: ["cust-A", "cust-B"] });
+    stubRouter(channel({ enabled: false, bindings: ["cust-A", "cust-B"] }));
     render(<RouterSection id="s" />);
 
     await waitFor(() => {
@@ -67,20 +88,20 @@ describe("路由区：读", () => {
 
 describe("路由区：写", () => {
   it("拨开关 → 立刻 PUT enabled", async () => {
-    const { calls } = stubRouter({ enabled: true, bindings: [] });
+    const { calls } = stubRouter(channel({ enabled: true, bindings: [] }));
     render(<RouterSection id="s" />);
     await waitFor(() => expect(screen.getByRole("checkbox")).toBeChecked());
 
     fireEvent.click(screen.getByRole("checkbox"));
     await waitFor(() => {
-      expect(calls.some((c) => c.url.includes("/api/router/enabled"))).toBe(true);
+      expect(calls.some((c) => c.url.includes("/api/router/wecom/enabled"))).toBe(true);
     });
-    const call = calls.find((c) => c.url.includes("/api/router/enabled"));
+    const call = calls.find((c) => c.url.includes("/api/router/wecom/enabled"));
     expect(call?.body).toEqual({ enabled: false });
   });
 
   it("加一条绑定码并失焦 → PUT 整段码表", async () => {
-    const { calls } = stubRouter({ enabled: true, bindings: [] });
+    const { calls } = stubRouter(channel({ enabled: true, bindings: [] }));
     render(<RouterSection id="s" />);
     await waitFor(() => expect(screen.getByText("添加绑定码")).toBeInTheDocument());
 
@@ -90,14 +111,14 @@ describe("路由区：写", () => {
     fireEvent.blur(input);
 
     await waitFor(() => {
-      expect(calls.some((c) => c.url.includes("/api/router/bindings"))).toBe(true);
+      expect(calls.some((c) => c.url.includes("/api/router/wecom/bindings"))).toBe(true);
     });
-    const call = calls.find((c) => c.url.includes("/api/router/bindings"));
+    const call = calls.find((c) => c.url.includes("/api/router/wecom/bindings"));
     expect(call?.body).toEqual({ bindings: ["cust-NEW"] });
   });
 
   it("删一条 → PUT 剩下那几条", async () => {
-    const { calls } = stubRouter({ enabled: true, bindings: ["cust-A", "cust-B"] });
+    const { calls } = stubRouter(channel({ enabled: true, bindings: ["cust-A", "cust-B"] }));
     render(<RouterSection id="s" />);
     await waitFor(() => expect(screen.getByDisplayValue("cust-B")).toBeInTheDocument());
 
@@ -106,14 +127,14 @@ describe("路由区：写", () => {
     fireEvent.click(dels[1] as HTMLElement);
 
     await waitFor(() => {
-      expect(calls.some((c) => c.url.includes("/api/router/bindings"))).toBe(true);
+      expect(calls.some((c) => c.url.includes("/api/router/wecom/bindings"))).toBe(true);
     });
-    const call = calls.find((c) => c.url.includes("/api/router/bindings"));
+    const call = calls.find((c) => c.url.includes("/api/router/wecom/bindings"));
     expect(call?.body).toEqual({ bindings: ["cust-A"] });
   });
 
   it("保存失败 → 常驻红字（不静默）", async () => {
-    stubRouter({ enabled: true, bindings: ["cust-A"] }, { failPut: true });
+    stubRouter(channel({ enabled: true, bindings: ["cust-A"] }), { failPut: true });
     render(<RouterSection id="s" />);
     await waitFor(() => expect(screen.getByDisplayValue("cust-A")).toBeInTheDocument());
 

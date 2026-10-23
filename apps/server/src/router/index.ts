@@ -2,12 +2,20 @@ import type { FastifyInstance } from "fastify";
 import type { RegistryDb } from "../storage/registry";
 import type { SpaceHub } from "../spaces";
 import { makeWecomIngress } from "./wecom/ingress";
+import {
+  makeBindingStore,
+  makeDeliverySwitch,
+  type BindingStore,
+  type DeliverySwitch,
+} from "./store";
+import { migrateLegacyRelayKeys } from "./migrate";
 
 // Router（D-130）：部署级单例，**只做接入与投递**。
 //
 // ```
 // 外部 HTTP
 //   ├── /relay/wecom/* ──→ Router（验签/解密/拉取/查绑定/回执）→ Source.accept({ raw, receivedAt })
+//   ├── /relay/<其他>/* ──→ 同理（校内新闻、公开网站……）
 //   └── /hook/<令牌>/nc/event ──→ nc 信源（自己管，不经 Router）
 // ```
 //
@@ -18,6 +26,12 @@ import { makeWecomIngress } from "./wecom/ingress";
 // （`makeSourceContext`）。让一个实例服务多个账户，它就得认识 uid——击穿「信源不碰数据库、
 // 不认识账户」的红线。Router 站在那条线外面：它认识 uid，但**不碰任何账户库**
 // （只调 `Space.source(name).accept`，落库仍由该账户自己的 ctx 做）。
+//
+// **加一个新接入要动哪里**（D-134 的判据——只该动这些）：
+//   ① 新建 `router/<接入>/`（ingress + 它自己的协议实现）；
+//   ② 在下面的 `INGRESS_FACTORIES` 加一行；
+//   ③ 在 `sources/registry.ts` 加一个只做消化的信源。
+// `app.ts` / 账户侧路由 / 前端一行都不用改——它们都按**接入自己声明的元数据**渲染。
 
 /** Router 的日志口（与信源的 `[source:<name>]` 对称——排障时一眼看出谁说的）。 */
 export interface RouterLog {
@@ -29,8 +43,18 @@ export interface RouterLog {
 
 /** 一个接入实现的形状（目录约定，不是新类型——`router/<协议>/ingress.ts` 导出的就是这个）。
  *
- *  将来加爬虫：隔壁加个目录、导出一个同形状对象、在 `makeRouter` 里多挂一条。 */
-interface RelayIngress {
+ *  将来加爬虫：隔壁加个目录、导出一个同形状对象、在 `INGRESS_FACTORIES` 里多挂一条。 */
+export interface RelayIngress {
+  /** 接入名（= 它投递时用的信源名；也是绑定表/开关的分区键）。 */
+  readonly name: string;
+  /** 给人看的名字（账户侧「路由」区按它分卡：「微信客服」「校内新闻」…）。 */
+  readonly label: string;
+  /** 一句说明（那张卡的副标题：往这儿送的是什么消息）。 */
+  readonly description: string;
+  /** 本接入的账户侧绑定表（各持一份，见 store.ts）。 */
+  readonly bindings: BindingStore;
+  /** 本接入的账户侧分发开关（各持一份，见 store.ts）。 */
+  readonly delivery: DeliverySwitch;
   /** 启动（可异步，可选）：起轮询兜底等。 */
   start?(): void | Promise<void>;
   /** 停止：撤销定时器/连接（可重复调用）。 */
@@ -47,17 +71,39 @@ export interface Router {
   stop(): Promise<void>;
   /** 把接入路由挂到 app（`makeApp` 调用；Router 是部署级，挂在受保护作用域之外）。 */
   registerRoutes(app: FastifyInstance): void;
+  /** 已上岗的接入（账户侧路由按它渲染分组——**前端不认识具体的接入名**）。 */
+  ingresses(): RelayIngress[];
 }
+
+/** 造一个接入（`makeRouter` 用；测试注入替身接入时不改生产路径）。 */
+export type IngressFactory = (args: {
+  db: RegistryDb;
+  hub: SpaceHub;
+  log: RouterLog;
+}) => RelayIngress;
+
+/** 生产接入表：**加一个接入 = 这里加一行**。每行自带它的名字与账户侧文案。 */
+const INGRESS_FACTORIES: IngressFactory[] = [({ db, hub, log }) => makeWecomIngress(db, hub, log)];
 
 /** 造 Router。
  *
  *  入参 `db` = 系统库（凭据、绑定表、游标都在这——Router 不碰任何账户库）；
- *  `hub` = 空间集线器（投递用：`hub.ensure(uid)` → `space.source(name)`）；
- *  `log` 缺省写 stderr（core 的统一出口；测试可注入收集器）。
+ *  `hub` = 空间集线器（投递用：`hub.forDelivery(uid)` → `space.source(name)`）；
+ *  `log` 缺省写 stderr（core 的统一出口；测试可注入收集器）；
+ *  `factories` 缺省取生产接入表（测试注入替身接入）。
  */
-export function makeRouter(args: { db: RegistryDb; hub: SpaceHub; log?: RouterLog }): Router {
+export function makeRouter(args: {
+  db: RegistryDb;
+  hub: SpaceHub;
+  log?: RouterLog;
+  factories?: IngressFactory[];
+}): Router {
   const log = args.log ?? stderrLog();
-  const ingresses: RelayIngress[] = [makeWecomIngress(args.db, args.hub, log)];
+  // v0.7.0 → v0.7.1 的键迁移：把旧的全局绑定表/开关归到 wecom 名下（幂等，无事可做就 0）
+  migrateLegacyRelayKeys(args.db);
+  const ingresses = (args.factories ?? INGRESS_FACTORIES).map((make) =>
+    make({ db: args.db, hub: args.hub, log }),
+  );
 
   return {
     async start(): Promise<void> {
@@ -66,7 +112,9 @@ export function makeRouter(args: { db: RegistryDb; hub: SpaceHub; log?: RouterLo
           await ing.start?.();
         } catch (err) {
           // 一个接入起不来不影响别的（与信源 start 同款隔离语义）——但必须留痕
-          log.error(`接入启动失败：${err instanceof Error ? err.message : String(err)}`);
+          log.error(
+            `接入 ${ing.name} 启动失败：${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     },
@@ -76,7 +124,9 @@ export function makeRouter(args: { db: RegistryDb; hub: SpaceHub; log?: RouterLo
         try {
           await ing.stop?.();
         } catch (err) {
-          log.warn(`接入停止失败（继续）：${err instanceof Error ? err.message : String(err)}`);
+          log.warn(
+            `接入 ${ing.name} 停止失败（继续）：${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     },
@@ -84,7 +134,19 @@ export function makeRouter(args: { db: RegistryDb; hub: SpaceHub; log?: RouterLo
     registerRoutes(app: FastifyInstance): void {
       for (const ing of ingresses) ing.register(app);
     },
+
+    ingresses(): RelayIngress[] {
+      return ingresses;
+    },
   };
+}
+
+/** 造一个接入的绑定表与开关（各 ingress 在自己的构造里呼它——键按自己的 name 分区）。 */
+export function makeIngressStores(
+  db: RegistryDb,
+  name: string,
+): { bindings: BindingStore; delivery: DeliverySwitch } {
+  return { bindings: makeBindingStore(db, name), delivery: makeDeliverySwitch(db, name) };
 }
 
 /** 缺省日志口：写 stderr，统一 `[router]` 前缀（与 `[source:<name>]` 同一片日志流）。 */

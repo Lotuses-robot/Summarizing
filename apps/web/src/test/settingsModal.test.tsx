@@ -50,8 +50,7 @@ function stubAi(opts: { failGet?: boolean; deferFirstPut?: boolean } = {}): {
         return Promise.resolve(jsonResponse(view()));
       }
       if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
-      if (url.includes("/api/router"))
-        return Promise.resolve(jsonResponse({ enabled: true, bindings: [] }));
+      if (url.includes("/api/router")) return Promise.resolve(jsonResponse({ channels: [] }));
       return Promise.resolve(jsonResponse({}));
     }),
   );
@@ -201,8 +200,7 @@ function stubRules(): { puts: { rules: string }[] } {
         return Promise.resolve(jsonResponse({ rules: "" }));
       }
       if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
-      if (url.includes("/api/router"))
-        return Promise.resolve(jsonResponse({ enabled: true, bindings: [] }));
+      if (url.includes("/api/router")) return Promise.resolve(jsonResponse({ channels: [] }));
       return Promise.resolve(jsonResponse({}));
     }),
   );
@@ -305,8 +303,7 @@ describe("设置弹层：收取规则的保存管道（D-107 评审修复）", (
           return Promise.resolve(jsonResponse({ rules: "" }));
         }
         if (url.includes("/api/sources")) return Promise.resolve(jsonResponse([]));
-        if (url.includes("/api/router"))
-          return Promise.resolve(jsonResponse({ enabled: true, bindings: [] }));
+        if (url.includes("/api/router")) return Promise.resolve(jsonResponse({ channels: [] }));
         return Promise.resolve(jsonResponse({}));
       }),
     );
