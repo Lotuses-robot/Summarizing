@@ -127,6 +127,13 @@ function stubWecomFetch(msgList: unknown[], callbackIps?: string[]): { sent: str
         sent.push(typeof init?.body === "string" ? init.body : "");
         return Promise.resolve(new Response(JSON.stringify({ errcode: 0, msgid: "x" })));
       }
+      // 接管会话：默认会话在「未处理」（0），转「智能助手接待」（1）成功
+      if (url.includes("/cgi-bin/kf/service_state/get")) {
+        return Promise.resolve(new Response(JSON.stringify({ errcode: 0, service_state: 0 })));
+      }
+      if (url.includes("/cgi-bin/kf/service_state/trans")) {
+        return Promise.resolve(new Response(JSON.stringify({ errcode: 0 })));
+      }
       return Promise.resolve(
         new Response(JSON.stringify({ errcode: 0, has_more: 0, msg_list: msgList })),
       );
@@ -568,6 +575,77 @@ describe("Router · 一对多投递", () => {
     await until(() => attempts.length >= 2, "失败后仍会再次尝试回执");
 
     expect(attempts.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("回执前先接管会话：未处理(0) → 转智能助手接待(1)，再发消息", async () => {
+    // 「通过 API 管理客服账号」意味着微信不再帮我们分配会话（官方：接待规则不生效），
+    // 新消息会停在「待接入池排队中」——那个状态禁止发消息。所以必须自己接管。
+    const realm = await makeRelayRealm();
+    const a = await realm.addAccount({ username: "alpha" });
+    bindWecom(realm, "cust-A", a.space.uid);
+
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes("/cgi-bin/gettoken")) {
+          calls.push("gettoken");
+          return Promise.resolve(
+            new Response(JSON.stringify({ errcode: 0, access_token: "AT", expires_in: 7200 })),
+          );
+        }
+        if (u.includes("/cgi-bin/getcallbackip")) {
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0, ip_list: [] })));
+        }
+        if (u.includes("/service_state/get")) {
+          calls.push("state/get");
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0, service_state: 0 })));
+        }
+        if (u.includes("/service_state/trans")) {
+          const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+          const state =
+            typeof body === "object" && body !== null && "service_state" in body
+              ? body.service_state
+              : "?";
+          calls.push(`state/trans:${String(state)}`);
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0 })));
+        }
+        if (u.includes("/kf/send_msg")) {
+          calls.push("send_msg");
+          return Promise.resolve(new Response(JSON.stringify({ errcode: 0 })));
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              errcode: 0,
+              has_more: 0,
+              msg_list: [
+                {
+                  msgid: "m1",
+                  open_kfid: "kf1",
+                  external_userid: "cust-A",
+                  origin: 3,
+                  msgtype: "text",
+                  text: { content: "你好" },
+                  send_time: "1790000000",
+                },
+              ],
+            }),
+          ),
+        );
+      }),
+    );
+
+    await postEvent(realm);
+    await until(() => calls.includes("send_msg"), "回执发出");
+
+    // 顺序：先查状态 → 再转 1 → 最后发消息
+    const transAt = calls.indexOf("state/trans:1");
+    const sendAt = calls.indexOf("send_msg");
+    expect(calls).toContain("state/get");
+    expect(transAt).toBeGreaterThan(-1);
+    expect(transAt).toBeLessThan(sendAt);
   });
 
   it("不同客户各回各的（节流按客户，不是全局）", async () => {

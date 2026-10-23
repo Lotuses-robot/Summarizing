@@ -15,6 +15,7 @@ import {
   outboundFailure,
   downloadKfMedia,
   getServiceState,
+  transServiceState,
   sendKfText,
   serviceStateText,
   syncKfMessages,
@@ -259,6 +260,10 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
     repliedUntil.set(externalUserId, nowMs + throttleMs); // 占位（防并发重复回）
     try {
       const token = await getAccessToken(cred(db, "corpId"), cred(db, "secret"));
+      // **先接管会话，再回消息**：账号既已「通过 API 管理」，微信就不再帮我们分配会话
+      // （官方：接待规则「将暂时不对该账号生效」），新消息会停在「待接入池排队中」——
+      // 那个状态禁止发消息（实测 95018）。转成「由智能助手接待」才谈得上回执。
+      await takeOverSession(token, openKfid, externalUserId);
       const res = await sendKfText(token, { touser: externalUserId, openKfid, content: text });
       if (!wecomOk(res)) {
         // 会话转人工/排队/已结束、或配额耗尽——留痕，不重试；**退掉占位**让后续消息还能再试
@@ -277,6 +282,36 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       repliedUntil.delete(externalUserId); // 同上：网络/鉴权抖动不该连累后续 10 分钟
       log.warn(`回执发送失败（${externalUserId}）：${errText(err)}`);
     }
+  }
+
+  /** 把会话转到「由智能助手接待」，让 API 有资格发消息。
+   *
+   *  按当前状态走官方允许的流转（状态表）：0→1 直接转；2→3（人工）**不等于能回**，
+   *  但 2 不能直接回 1——所以从 2 进来时先结束会话（→4），客户下一条消息会重新回到 0。
+   *  3（人工已在接待）与 4（已结束）都不动：前者不该抢、后者客户再发就有了。
+   *
+   *  失败只留痕不抛：接管失败时后面 send_msg 会再报一次真实原因（含状态）。
+   */
+  async function takeOverSession(
+    token: string,
+    openKfid: string,
+    externalUserId: string,
+  ): Promise<void> {
+    const state = await getServiceState(token, openKfid, externalUserId);
+    if (state === null) return; // 查不到状态就不盲动
+    if (state === 0) {
+      const r = await transServiceState(token, openKfid, externalUserId, 1);
+      if (r.ok) log.info(`会话已接管（${externalUserId}）：未处理 → 智能助手接待`);
+      else log.warn(`接管会话失败（${externalUserId}）：${r.reason}`);
+      return;
+    }
+    if (state === 2) {
+      // 排队中：官方不允许 2→1。结束会话让客户下一条消息重置为「未处理」。
+      const r = await transServiceState(token, openKfid, externalUserId, 4);
+      if (r.ok) log.info(`会话原在排队中（${externalUserId}），已结束——客户下条消息会重新接入`);
+      else log.warn(`结束排队会话失败（${externalUserId}）：${r.reason}`);
+    }
+    // 1（已在智能助手）/ 3（人工接待，不该抢）/ 4（已结束）→ 不动
   }
 
   /** 投递一条消息给它的归属账户，并按结果决定回什么话。

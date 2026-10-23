@@ -326,6 +326,48 @@ export async function getServiceState(
   }
 }
 
+/** 把会话转成「由智能助手接待」（状态 1）。
+ *
+ *  **这是「通过 API 管理客服账号」必须自己做的一步**。官方说明原文：
+ *  「用户咨询客服时，将由开发者通过 API 来做**会话分配**和消息收发。原先在帐号详情处设置的
+ *  接待规则……将暂时不对该账号生效。」
+ *  也就是说，一旦把账号交给 API 管理，微信**不再**帮你决定会话归谁——新消息就停在
+ *  「待接入池排队中」（状态 2），而那个状态下**不允许发消息**（实测 95018）。
+ *  所以收到新消息后必须先把它转成「智能助手接待」，才谈得上回执。
+ *
+ *  官方允许的流转（概述状态表）：0 → 1、2→3、3→转接/结束。**2 不能直接回 1**，
+ *  所以从 2 进来时先结束会话（→4），客户下一条消息会重新回到 0，那时就能转 1。
+ *
+ * @param token access_token
+ * @param openKfid 客服账号 id
+ * @param externalUserId 客户 id
+ * @param target 目标状态（本项目只用 1=智能助手接待 / 4=结束会话）
+ * @param servicerUserId 指定接待人员（转 3 时必填；转 1/4 不需要）
+ * @returns 成功与否（失败只留痕，由调用方决定要不要继续尝试回执）
+ */
+export async function transServiceState(
+  token: string,
+  openKfid: string,
+  externalUserId: string,
+  target: KfServiceState,
+  servicerUserId?: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const res = await wecomPost<WecomEnvelope>(
+      `/cgi-bin/kf/service_state/trans?access_token=${encodeURIComponent(token)}`,
+      {
+        open_kfid: openKfid,
+        external_userid: externalUserId,
+        service_state: target,
+        ...(servicerUserId === undefined ? {} : { servicer_userid: servicerUserId }),
+      },
+    );
+    return wecomOk(res) ? { ok: true } : { ok: false, reason: wecomError(res) };
+  } catch (err) {
+    return { ok: false, reason: errText(err) };
+  }
+}
+
 /** 会话状态 → 人话（日志用；说明「为什么不能回」）。 */
 export function serviceStateText(state: KfServiceState): string {
   switch (state) {
