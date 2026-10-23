@@ -1,7 +1,10 @@
 // 升级 runbook 脚本化（批次 2 / docs/13 三）：**查最新版 → 核对 ACR 已同步 → 备份 → 改 .env tag → 拉镜像 → 重启迁移 → 健康检查**。
-// 用法（在服务器仓库根、装有 docker compose 的机器上）：node scripts/upgrade.mjs
+// 用法（在服务器仓库根、装有 docker compose 的机器上）：node scripts/upgrade.mjs [--force]
 // 依赖宿主机 docker / docker compose；查版本优先 gh，无 gh 回退 curl 公开 API（公开仓库免认证）；
 // 两样都不可用/限流时可设 UPGRADE_TARGET=vX.Y.Z 手动指定目标（离线逃生口）。
+// `--force`：即使已经在目标版本，也重新 pull 并重建容器。
+//   **什么时候需要它**：某个已发布的镜像有问题、修好后用同一个 tag 重推（tag 内容变了）。
+//   正常情况 tag 内容不会变，所以默认行为是「同 tag 即最新、不动」——那是刻意的不折腾线上。
 // 回滚是人工决策（见 docs/13 三·5）——本脚本不自动回滚，只在任一步失败时停下并打印回滚指引。
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -9,6 +12,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readDotEnv, writeAppImage } from "./lib/dotenv.mjs";
 import { liveAppImageRef } from "./lib/docker.mjs";
+
+const force = process.argv.includes("--force");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dataDir = path.join(root, "data");
@@ -151,9 +156,14 @@ if (useImage) {
     }
   }
   console.log(`[0/5] 版本核对：当前 ${currentTag}（${liveFrom}）→ 目标 ${latestTag}`);
-  if (latestTag === currentTag) {
+  if (latestTag === currentTag && !force) {
     console.log("  已是最新，无需升级。");
+    console.log("  （若该 tag 的镜像被重推过、需要重新拉取，加 --force 重跑）");
     process.exit(0);
+  }
+  if (latestTag === currentTag) {
+    // --force：同 tag 重新拉。跳过降级检查（版本没变），但要照常备份 + pull + 重建。
+    console.log("  --force：版本没变，仍重新拉取该 tag 的镜像并重建容器。");
   }
   if (isDowngrade(currentTag, latestTag)) {
     console.error(`\n✗ 目标 ${latestTag} 比当前 ${currentTag} 旧——拒绝降级（防止误把线上打回旧版）。`);
@@ -217,6 +227,17 @@ try {
   if (useImage) {
     console.log(`[2/5] .env：APP_IMAGE → ${targetRef}；拉新镜像…`);
     writeAppImage(env, targetRef);
+    if (force) {
+      // 同 tag 重推时，本地可能已有同名镜像、`compose pull` 未必真的重新下载（取决于 registry
+      // 是否支持按 digest 比对）。--force 的语义就是「不信本地这一份」，所以先删掉它再拉。
+      // 删不掉不算错（可能本来就没有，或容器还占着——那说明确实在用，pull 会补）。
+      try {
+        capture("docker", ["rmi", targetRef]);
+        console.log(`  已删除本地 ${targetRef}，强制重新拉取。`);
+      } catch {
+        console.log("  本地没有可删的同名镜像（或正被占用），继续 pull。");
+      }
+    }
     run("docker", ["compose", "pull", "app"], { stdio: "inherit" });
   } else {
     // 本地 build 形态：git pull 失败**不吞**（审查 2026-10-14：曾连网络失败也打印「跳过」，
