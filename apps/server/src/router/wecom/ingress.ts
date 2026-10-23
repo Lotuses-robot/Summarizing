@@ -14,7 +14,9 @@ import {
   getCallbackIps,
   outboundFailure,
   downloadKfMedia,
+  getServiceState,
   sendKfText,
+  serviceStateText,
   syncKfMessages,
   wecomError,
   wecomOk,
@@ -261,7 +263,15 @@ export function makeWecomIngress(db: RegistryDb, hub: SpaceHub, log: RouterLog):
       if (!wecomOk(res)) {
         // 会话转人工/排队/已结束、或配额耗尽——留痕，不重试；**退掉占位**让后续消息还能再试
         repliedUntil.delete(externalUserId);
-        log.warn(`回执未送达（${externalUserId}）：${wecomError(res)}`);
+        // 95018 只说「状态无效」，说不出是哪种。把真实状态查出来，运维才知道该做什么：
+        // 3=人工接待（不该回）、2=排队（等）、4=已结束（等客户再发）。
+        // 只有这个错误码值得多查一次——其余失败（配额、网络）与状态无关。
+        const state =
+          res.errcode === 95018 ? await getServiceState(token, openKfid, externalUserId) : null;
+        log.warn(
+          `回执未送达（${externalUserId}）：${wecomError(res)}` +
+            (state === null ? "" : `｜会话状态 ${state}：${serviceStateText(state)}`),
+        );
       }
     } catch (err) {
       repliedUntil.delete(externalUserId); // 同上：网络/鉴权抖动不该连累后续 10 分钟

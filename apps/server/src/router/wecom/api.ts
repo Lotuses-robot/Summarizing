@@ -283,3 +283,61 @@ export async function sendKfText(
     text: { content: body.content },
   });
 }
+
+/** 会话状态（官方「概述」的状态表）：只有 0/1/2 允许调 `send_msg` 回消息。
+ *
+ *  - 0 未处理（客户发消息后进入，**可回**）
+ *  - 1 由智能助手接待（**可回**）
+ *  - 2 待接入池排队中（可转接待，但**不能直接回**）
+ *  - 3 由人工接待（**不可回**——95018 就是这个）
+ *  - 4 已结束/未开始（**不可回**；客户再发消息会转 0）
+ */
+export type KfServiceState = 0 | 1 | 2 | 3 | 4;
+
+/** 查一个客户在某客服账号下的会话状态。
+ *
+ *  查它的理由：`send_msg` 失败只给 `95018 session status invalid`，说不出**为什么**——
+ *  是人工接手了（3）、排队中（2），还是会话已结束（4）？三者的处置完全不同
+ *  （前者不该回，后者等客户再发就有了）。把状态打出来，「回执发不出去」才可判读。
+ *
+ * @param token access_token
+ * @param openKfid 客服账号 id
+ * @param externalUserId 客户 id
+ * @returns 会话状态；接口失败返回 null（查状态是排障用的，不该反过来影响主流程）
+ */
+export async function getServiceState(
+  token: string,
+  openKfid: string,
+  externalUserId: string,
+): Promise<KfServiceState | null> {
+  try {
+    const res = await wecomPost<WecomEnvelope & { service_state?: unknown }>(
+      `/cgi-bin/kf/service_state/get?access_token=${encodeURIComponent(token)}`,
+      { open_kfid: openKfid, external_userid: externalUserId },
+    );
+    if (!wecomOk(res)) return null;
+    const state = res.service_state;
+    // 0–4 是官方定义的全部取值；其余（字符串/越界）当作查不到——不让脏值冒充实类型
+    if (typeof state !== "number" || !Number.isInteger(state)) return null;
+    if (state < 0 || state > 4) return null;
+    return state === 0 || state === 1 || state === 2 || state === 3 || state === 4 ? state : null;
+  } catch {
+    return null; // 查不到就只是少一条诊断信息，不能因此中断回执流程
+  }
+}
+
+/** 会话状态 → 人话（日志用；说明「为什么不能回」）。 */
+export function serviceStateText(state: KfServiceState): string {
+  switch (state) {
+    case 0:
+      return "未处理（可回）";
+    case 1:
+      return "由智能助手接待（可回）";
+    case 2:
+      return "待接入池排队中（不能直接回）";
+    case 3:
+      return "由人工接待（不能回）";
+    case 4:
+      return "已结束/未开始（不能回——客户再发消息会转「未处理」）";
+  }
+}
