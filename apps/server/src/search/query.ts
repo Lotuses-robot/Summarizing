@@ -32,6 +32,8 @@ export const IDENTITY_KEY_WHITELIST = [
   // 企业微信客服（D-128）：客服账号 + 外部联系人——这两个是它分流与精确定位的主键
   "openKfid",
   "externalUserId",
+  // 微信消息（docs/14）：会话 id（群 `<数字>@chatroom` / 私聊对方 wxid）
+  "conversationId",
 ] as const;
 
 /** 单次检索的字面量上限（防止把整库拖进内存）。 */
