@@ -118,7 +118,8 @@ export interface SourceAdapter {
   start?(): void | Promise<void>;
   /** 停止（运行期，可选）：清自己的运行态（core 也会跑 ctx 的清理注册表）。 */
   stop?(): Promise<void>;
-  /** 声明设置项（纯数据）。缺席 = 本信源无设置。core 落库 `__schema__` 并随 `GET /api/sources` 吐给前端。 */
+  /** 声明设置项（纯数据）。缺席 = 本信源无设置。core 把**在岗信源的声明整体**记成一份清单，
+   *  随 `GET /api/sources` 吐给前端——注销本源时清单里自然没有它，无需清理。 */
   settings?(): SettingField[];
   /** 取回一个**媒体占位**背后的字节（可选，D-128）。
    *

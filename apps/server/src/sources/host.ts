@@ -6,7 +6,6 @@ import { nowWallClock } from "../shared/time";
 import { ingestBatch } from "../application/ingest";
 import { makeAgentTools, type AgentTools } from "../agent0/tools";
 import type { TaggedLlm } from "../shared/llm";
-import { SOURCE_DIGEST_HINT_KEY, SOURCE_SCHEMA_KEY } from "../storage/repo";
 import type {
   SourceAdapter,
   SourceBatch,
@@ -194,13 +193,41 @@ export interface SourceAssembly {
   source(name: string): SourceAdapter | undefined;
 }
 
+/** 清掉**已注销**的信源留下的用户设置值（`source_settings` 里那些真的数据）。
+ *
+ *  声明（设置表 / 来源说明）不住这里了——它们是**整体重写的清单**，注销即自然消失。
+ *  这一步只管用户填的值：源都没了，它们再没有读取方。
+ *
+ *  为什么「不在册就删」不会误伤用户主动停用：停用发生在**账户**层（`status=disabled`，
+ *  整个空间不装配），根本走不到这里；走到这里说明账户在岗、而注册表里确实没有这个源。
+ *
+ *  @param db 账户库
+ *  @param liveNames 本次**实际登记**的信源名（唯一知道完整清单的地方）
+ */
+function pruneUnregisteredSources(db: Db, liveNames: string[]): void {
+  const live = new Set(liveNames);
+  for (const name of repo.listSourceNames(db)) {
+    if (live.has(name)) continue;
+    const removed = repo.deleteSourceSettingsOf(db, name);
+    if (removed > 0) {
+      process.stderr.write(
+        `[source:${name}] 该信源已不在注册表中，清掉它留下的 ${removed} 行设置\n`,
+      );
+    }
+  }
+}
+
 /** 信源上岗（三时机之②，**同步、按空间**）：为每个信源造 ctx（登记其清理表 + 状态）、经 `WebhookRegistrar`
- *  登记 webhook、把声明的 schema 落库 `__schema__`；返回 start/stop 句柄。
+ *  登记 webhook、把声明的设置表与来源说明整体写进**在岗清单**；返回 start/stop 句柄。
  *  重复名跳过（防注册表列重导致定时器/监听器叠加）。状态写进 `deps.sourceStates`（唯一通道）。 */
 export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): SourceAssembly {
   const tools = makeAgentTools(deps.db, deps.mediaDir);
   const states = deps.sourceStates;
   const stops: Array<() => Promise<void>> = [];
+  /** 本次在岗信源声明的来源说明（装配末尾整体重写进库——见下面的 writeSourceDigestHints）。 */
+  const digestHints: repo.SourceDigestHint[] = [];
+  /** 本次在岗信源声明的设置表（同样整体重写）。 */
+  const schemas: repo.SourceSchemaEntry[] = [];
   /** 实际上岗的（适配器, 状态）对——start 只遍历它（simplify：取代「重查 states + 不可达 undefined 分支」，
    *  也顺带不再遍历被去重跳过的适配器）。 */
   const kept: Array<{ adapter: SourceAdapter; state: SourceState }> = [];
@@ -227,32 +254,20 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
         ctx.reportError(new Error(message)),
       ),
     );
-    // 来源说明（L27）：纯文本声明，落库供 agent0 提示词按实际启用的源拼接
+    // 来源说明（L27）：收集起来，**装配末尾整体重写**——逐源写的话，注销一个源就得靠清扫补救，
+    // 而清扫只能在「恰好跑到」时生效（残留正是这么来的）。整体重写天然没有残留。
     if (adapter.digestHint !== undefined) {
-      repo.setSourceSetting(
-        deps.db,
-        adapter.name,
-        SOURCE_DIGEST_HINT_KEY,
-        JSON.stringify(adapter.digestHint()),
-      );
-    } else {
-      // 没声明就删掉旧的——否则改代码去掉声明后，库里还留着上一版的话（新旧并存）
-      repo.deleteSourceSetting(deps.db, adapter.name, SOURCE_DIGEST_HINT_KEY);
+      const hint = adapter.digestHint();
+      if (hint.trim() !== "") digestHints.push({ name: adapter.name, hint });
     }
     if (adapter.settings !== undefined) {
       // 声明在**产生处**校验：坏声明启动即响（走「最近出错」通道可见），
-      // 不让它静默穿过到 GET 时才被逐条丢弃（altitude 根修；parseSchema 退化为手改库兜底）
+      // 不让它静默穿过到 GET 时才被逐条丢弃（altitude 根修）。
       const parsed = SettingFieldSchema.array().safeParse(adapter.settings());
       if (parsed.success) {
-        repo.setSourceSetting(
-          deps.db,
-          adapter.name,
-          SOURCE_SCHEMA_KEY,
-          JSON.stringify(parsed.data),
-        );
+        schemas.push({ name: adapter.name, fields: parsed.data });
       } else {
-        // 坏声明：删陈旧 __schema__（不让上一次的旧表单继续对外供货——评审 M1），并走「最近出错」
-        repo.deleteSourceSetting(deps.db, adapter.name, SOURCE_SCHEMA_KEY);
+        // 坏声明：本源的设置卡不出现（清单里没它），并走「最近出错」通道说明原因
         const first = parsed.error.issues[0];
         ctx.reportError(
           new Error(
@@ -285,6 +300,13 @@ export function registerSources(deps: SpaceDeps, adapters: SourceAdapter[]): Sou
     }
     kept.push({ adapter, state });
   }
+  // 两份声明清单都**整体重写**（不是逐源增删）：注销的源自然消失，不需要清扫兜底。
+  repo.writeSourceDigestHints(deps.db, digestHints);
+  repo.writeSourceSchemas(deps.db, schemas);
+  pruneUnregisteredSources(
+    deps.db,
+    kept.map((k) => k.adapter.name),
+  );
   return {
     source(name: string): SourceAdapter | undefined {
       return kept.find((k) => k.adapter.name === name)?.adapter;

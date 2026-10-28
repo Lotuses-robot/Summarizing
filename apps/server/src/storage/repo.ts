@@ -1,3 +1,4 @@
+import { z } from "zod";
 import crypto from "node:crypto";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -11,6 +12,7 @@ import {
   ItemVersionSchema,
   ProvenanceSchema,
   RawInputSchema,
+  SettingFieldSchema,
   UncertainInputSchema,
   normalizeIdentity,
   displayNameOf,
@@ -25,6 +27,7 @@ import {
   type PipelineRun,
   type Provenance,
   type RawInput,
+  type SettingField,
   type Identity,
   type UncertainInput,
 } from "@summarizing/shared";
@@ -33,14 +36,95 @@ import { tokenizeContent, tokenizeIdentity } from "../search/tokenize";
 import type { DbOrTx } from "./db";
 import * as s from "./schema";
 
-/** 信源声明的设置 schema 在设置 KV 里的保留键（D-88 T3）：host 写、routes 读并过滤——
- *  居家真相在 storage 层（simplify 下沉：core 装配不再反向 import 路由模块）。 */
-export const SOURCE_SCHEMA_KEY = "__schema__";
+/** **当前在岗信源的设置声明清单**（D-88 T3）在 app_settings 的键。
+ *
+ *  一份整体清单、不是每源一行：装配期**整体重写**，注销的信源自然消失——
+ *  与来源说明同一套理由（见 `SOURCE_DIGEST_HINTS_KEY`）。
+ *
+ *  用户填的值仍在 `source_settings`（那是真的数据，注销时才清）。 */
+export const SOURCE_SCHEMAS_KEY = "source_schemas";
 
-/** 信源给 agent0 的来源说明（L27）在 source_settings 的键——core 落库，提示词按需读。
- *  与 `__schema__` 同一个思路：把适配器声明的纯数据存下来，消费方（这里是 prompt.ts）
- *  不必认识任何具体信源。 */
-export const SOURCE_DIGEST_HINT_KEY = "__digest_hint__";
+/** 一个在岗信源的设置声明（源名 + 它声明的字段表）。 */
+export interface SourceSchemaEntry {
+  name: string;
+  fields: SettingField[];
+}
+
+/** 读在岗信源的设置声明清单（装配期由 `registerSources` 整体重写）。
+ *  逐条过 schema（不信库里存的东西——手改/旧版可能坏形）；坏条目丢弃但**留痕**
+ *  （不静默，否则一个字段会无声从设置界面消失）。 */
+export function readSourceSchemas(db: DbOrTx): SourceSchemaEntry[] {
+  const raw = getAppSetting(db, SOURCE_SCHEMAS_KEY);
+  if (raw === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    process.stderr.write("[source] 设置声明清单不是合法 JSON，按空处理\n");
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: SourceSchemaEntry[] = [];
+  for (const item of parsed) {
+    // 条目逐个过 zod（运行时数据一律 zod 解析，不用类型断言）：源名 + 字段表都要合法
+    const entry = z
+      .object({ name: z.string().min(1), fields: SettingFieldSchema.array() })
+      .safeParse(item);
+    if (!entry.success) {
+      process.stderr.write(`[source] 丢弃坏形设置声明条目\n`);
+      continue;
+    }
+    out.push({ name: entry.data.name, fields: entry.data.fields });
+  }
+  return out;
+}
+
+/** 整体重写在岗信源的设置声明清单（装配期调；传空数组 = 一个源都没声明，清单清零）。 */
+export function writeSourceSchemas(db: DbOrTx, entries: SourceSchemaEntry[]): void {
+  setAppSetting(db, SOURCE_SCHEMAS_KEY, JSON.stringify(entries));
+}
+
+/** **当前在岗信源的来源说明清单**（L27）在 app_settings 的键。
+ *
+ *  一份整体清单、不是每源一行：装配期**整体重写**，注销的信源自然消失。
+ *  逐源单独存的话，源一撤就得靠「清扫」补救——那是残留的来源（v0.7.8 注销 wecom 后
+ *  设置页那张永不工作的卡正是这么来的）。
+ *
+ *  消费方（`prompt.ts`）因此不必认识任何具体信源。 */
+const SOURCE_DIGEST_HINTS_KEY = "source_digest_hints";
+
+/** 一条来源说明：源名 + 该源自己写的场景说明。 */
+export interface SourceDigestHint {
+  name: string;
+  hint: string;
+}
+
+/** 读在岗信源的来源说明清单（装配期由 `registerSources` 整体重写）。
+ *  缺失/坏形状 → 空数组（没声明过任何说明的账户不该因此崩掉消化）。 */
+export function readSourceDigestHints(db: DbOrTx): SourceDigestHint[] {
+  const raw = getAppSetting(db, SOURCE_DIGEST_HINTS_KEY);
+  if (raw === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    process.stderr.write("[source] 来源说明清单不是合法 JSON，按空处理\n");
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: SourceDigestHint[] = [];
+  for (const item of parsed) {
+    // 条目逐个过 zod（运行时数据一律 zod 解析，不用类型断言）；空说明不算一条
+    const entry = z.object({ name: z.string().min(1), hint: z.string().min(1) }).safeParse(item);
+    if (entry.success) out.push({ name: entry.data.name, hint: entry.data.hint });
+  }
+  return out;
+}
+
+/** 整体重写在岗信源的来源说明清单（装配期调；传空数组 = 一个源都没声明，清单清零）。 */
+export function writeSourceDigestHints(db: DbOrTx, hints: SourceDigestHint[]): void {
+  setAppSetting(db, SOURCE_DIGEST_HINTS_KEY, JSON.stringify(hints));
+}
 
 /** 存量 AI 设置在 app_settings 的键（设置路由写、空间装配读——同住 storage 单一出处）。 */
 export const AI_SETTINGS_KEY = "ai";
@@ -656,6 +740,24 @@ export function deleteSourceSetting(db: DbOrTx, source: string, key: string): vo
   db.delete(s.sourceSettings)
     .where(and(eq(s.sourceSettings.source, source), eq(s.sourceSettings.key, key)))
     .run();
+}
+
+/** 删掉一个信源在 `source_settings` 里的**全部**行（用户填的值，以及旧版本留下的声明行）。
+ *
+ *  用途：信源被注销后清扫用户填的值——源都没了，它们再没有读取方。
+ *  设置表与来源说明不在这张表（它们是**整体重写的在岗清单**，注销即自然消失），
+ *  所以这里删不到它们，也不需要删。
+ *
+ *  @returns 删掉的行数（0 = 本来就没有遗留） */
+export function deleteSourceSettingsOf(db: DbOrTx, source: string): number {
+  const before = db
+    .select({ key: s.sourceSettings.key })
+    .from(s.sourceSettings)
+    .where(eq(s.sourceSettings.source, source))
+    .all().length;
+  if (before === 0) return 0;
+  db.delete(s.sourceSettings).where(eq(s.sourceSettings.source, source)).run();
+  return before;
 }
 
 /** 列信源全部设置（GET /api/sources/:name/settings 的数据源）。 */

@@ -1,11 +1,16 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { SettingFieldSchema, SourceSummarySchema, type SettingField } from "@summarizing/shared";
+import { SourceSummarySchema, type SettingField } from "@summarizing/shared";
 import * as repo from "../storage/repo";
 
 // 信源设置路由（D-84/D-88；006 起依赖来自请求上下文）：core 只知道「有什么设置」，不解释内容——
 // 通用 KV 读写口。值是任意 JSON；库与状态表都从 req.space 取（每个账户一套自己的信源）。
-// `__schema__` 保留键住 storage/repo（host 写、此处读并过滤——单一出处）。
+// 设置声明住在 app_settings 的**在岗清单**里（host 装配期整体重写、此处只读——单一出处）。
+
+/** 在岗信源的设置声明（源名 → 字段表）。装配期整体重写，读侧只查一次。 */
+function schemasOf(db: Parameters<typeof repo.readSourceSchemas>[0]): Map<string, SettingField[]> {
+  return new Map(repo.readSourceSchemas(db).map((e) => [e.name, e.fields]));
+}
 
 const NameParamsSchema = z.object({ name: z.string().min(1) });
 const KeyParamsSchema = z.object({ name: z.string().min(1), key: z.string().min(1) });
@@ -20,39 +25,18 @@ function parseStored(text: string): unknown {
   }
 }
 
-/** 解析 `__schema__` 里存的设置声明；缺失/坏 → 空数组（无设置的源）。
- *  逐条过 schema（不信库里存的东西——手改/旧版可能坏形）；坏条目丢弃但**留痕**（不静默，
- *  否则一个字段会无声从设置界面消失——评审发现）。落库前已在 registerSources 过一遍校验，
- *  这里只剩「手改库/旧库」的兜底。 */
-function parseSchema(source: string, text: string | null): SettingField[] {
-  if (text === null) return [];
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    process.stderr.write(`[source:${source}] __schema__ 不是合法 JSON，按无设置处理\n`);
-    return [];
-  }
-  if (!Array.isArray(raw)) return [];
-  const out: SettingField[] = [];
-  for (const item of raw) {
-    const parsed = SettingFieldSchema.safeParse(item);
-    if (parsed.success) out.push(parsed.data);
-    else process.stderr.write(`[source:${source}] 丢弃坏形设置声明：${JSON.stringify(item)}\n`);
-  }
-  return out;
-}
-
 /** 注册信源路由：GET 列表+schema+接入路径（前端不知道信源名，按 schema 渲染）/ GET 全键值 / PUT 单键 / DELETE 单键。 */
 export function registerSourceRoutes(app: FastifyInstance): void {
   // 列表：每个信源的名字、运行状态（含最近错误）、设置 schema、**完整接入地址**（hookPath，已含
   // 账户令牌——URL 形状是源自己的知识，由后端算好，前端零拼接；006 用户走查定）。
+  //
+  // 源名集合 = **只有本次在岗的**（`sourceStates`）。库里出现过的名字不并进来：那些是已注销信源的
+  // 残留，列出来就是设置页一张永不工作的卡（v0.7.8 注销 wecom 后的真实表现）。装配期会清扫它们
+  // （`pruneUnregisteredSources`），但这一步不依赖清扫跑过——装配失败时也不会漏出旧卡。
   app.get("/api/sources", async (req) => {
     const states = req.space.sourceStates;
-    const names = new Set<string>(states.keys());
-    for (const row of repo.listSourceNames(req.space.db)) names.add(row);
     const token = req.space.sourceToken;
-    return [...names].map((name) => {
+    return [...states.keys()].map((name) => {
       // 取该源首个登记的 webhook 路径（本批 nc 仅 /event；多入口源各自成行属下一批）
       const route = req.space.webhookRoutes.find((r) => r.source === name);
       return SourceSummarySchema.parse({
@@ -66,10 +50,7 @@ export function registerSourceRoutes(app: FastifyInstance): void {
           at: states.get(name)?.activity[s.key],
         })),
         guide: states.get(name)?.guide,
-        settings: parseSchema(
-          name,
-          repo.getSourceSetting(req.space.db, name, repo.SOURCE_SCHEMA_KEY),
-        ),
+        settings: schemasOf(req.space.db).get(name) ?? [],
         hookPath: route ? `/hook/${token}/${name}${route.path}` : null,
       });
     });
@@ -79,7 +60,7 @@ export function registerSourceRoutes(app: FastifyInstance): void {
     const { name } = NameParamsSchema.parse(req.params);
     const out: Record<string, unknown> = {};
     for (const row of repo.listSourceSettings(req.space.db, name)) {
-      if (row.key === repo.SOURCE_SCHEMA_KEY) continue; // schema 不属于设置值，不回吐
+      if (row.key === "__schema__") continue; // 旧版遗留的声明行，不属于设置值，不回吐
       out[row.key] = parseStored(row.value);
     }
     return out;

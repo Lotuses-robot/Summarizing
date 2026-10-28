@@ -357,7 +357,7 @@ export function makeNcAdapter(): SourceAdapter {
       for (const buf of [...buffers.values()]) sealGroup(runtime.ctx, buf);
     },
 
-    /** 声明设置项（纯数据，core 落库 __schema__ 供前端渲染）——群/私聊白名单 + 打包窗长。 */
+    /** 声明设置项（纯数据，core 记入在岗清单供前端渲染）——群/私聊白名单 + 打包窗长。 */
     settings(): SettingField[] {
       return [
         {

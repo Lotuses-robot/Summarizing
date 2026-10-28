@@ -6,7 +6,7 @@ import path from "node:path";
 import { SHUTDOWN_TIMEOUT_MS } from "../app";
 import { registerSources, START_TIMEOUT_MS, type SpaceDeps } from "../sources/host";
 import { closeSpacesWithTimeout, type Space, type SpaceHub } from "../spaces";
-import { makeDb } from "../storage/db";
+import { makeDb, type Db } from "../storage/db";
 import * as repo from "../storage/repo";
 import type { SourceAdapter, SourceBatch, SourceContext, WebhookRegistrar } from "../sources/types";
 import { cleanupAllTestAccounts, makeTestAccount } from "./helpers/app";
@@ -237,12 +237,11 @@ describe("SourceContext（信源视角，webhook 经网关）", () => {
 });
 
 describe("信源设置 schema（D-88 T3：声明 → 落库 → GET /api/sources）", () => {
-  it("registerSources 落库 __schema__；GET /api/sources 吐 { name, state, settings }", async () => {
+  it("registerSources 落库设置声明清单；GET /api/sources 吐 { name, state, settings }", async () => {
     const t = await makeTestAccount({ llm: new FakeLlm(), adapters: [makeTestAdapter] });
 
-    // schema 已落库（重启不失）
-    const stored = repo.getSourceSetting(t.db, "testsrc", "__schema__");
-    expect(stored).not.toBeNull();
+    // 声明清单已落库（重启不失）——整体一份，不是每源一行
+    expect(repo.readSourceSchemas(t.db).map((e) => e.name)).toEqual(["testsrc"]);
 
     const res = await t.inject({ method: "GET", url: "/api/sources" });
     expect(res.statusCode).toBe(200);
@@ -260,22 +259,22 @@ describe("信源设置 schema（D-88 T3：声明 → 落库 → GET /api/sources
     ]);
   });
 
-  it("设置的读口不吐 __schema__（schema 不是设置值）", async () => {
+  it("设置的读口不吐声明键（声明不是设置值）", async () => {
     const t = await makeTestAccount({ llm: new FakeLlm(), adapters: [makeTestAdapter] });
     const res = await t.inject({ method: "GET", url: "/api/sources/testsrc/settings" });
-    expect(res.json()).toEqual({}); // 只有 __schema__ 时，设置值为空
+    expect(res.json()).toEqual({}); // 没填过任何值 → 空
   });
 
-  it("__schema__ 坏形（手改/旧版）→ GET /api/sources 里 settings 为空数组，不炸", async () => {
+  it("声明清单坏形（手改/旧版）→ GET /api/sources 里 settings 为空数组，不炸", async () => {
     const t = await makeTestAccount({ llm: new FakeLlm(), adapters: [makeTestAdapter] });
-    repo.setSourceSetting(t.db, "testsrc", "__schema__", "{坏JSON");
+    repo.setAppSetting(t.db, repo.SOURCE_SCHEMAS_KEY, "{坏JSON");
 
     const res = await t.inject({ method: "GET", url: "/api/sources" });
     expect(res.statusCode).toBe(200);
     const list = z
       .array(z.object({ name: z.string(), settings: z.array(z.unknown()) }))
       .parse(res.json());
-    expect(list.find((s) => s.name === "testsrc")?.settings).toEqual([]);
+    expect(list.find((x) => x.name === "testsrc")?.settings).toEqual([]);
   });
 });
 
@@ -452,15 +451,12 @@ describe("生命周期隔离（D-88：单源故障不得扩散；006 起按空�
 });
 
 describe("设置声明落库前校验（simplify 轮根修 + 终轮验证 M1）", () => {
-  it("坏声明 → 不落库、删陈旧 __schema__、走 reportError（错误不被启动清理抹掉）", async () => {
+  it("坏声明 → 不进清单、走 reportError（错误不被启动清理抹掉）", async () => {
     const deps = makeSpaceDeps();
-    // 先有「上一次的旧声明」落库（模拟改坏之前的正常状态）
-    repo.setSourceSetting(
-      deps.db,
-      "badschema",
-      "__schema__",
-      JSON.stringify([{ key: "old", type: "record", label: "旧字段" }]),
-    );
+    // 先有「上一次的旧声明」在清单里（模拟改坏之前的正常状态）
+    repo.writeSourceSchemas(deps.db, [
+      { name: "badschema", fields: [{ key: "old", type: "record", label: "旧字段" }] },
+    ]);
     const bad: SourceAdapter = {
       name: "badschema",
       accept: () => ({ ok: true }),
@@ -470,8 +466,8 @@ describe("设置声明落库前校验（simplify 轮根修 + 终轮验证 M1）"
     };
     const asm = registerSources(deps, [bad]);
 
-    // 陈旧声明被删（不让旧表单继续供货），新声明不落库
-    expect(repo.getSourceSetting(deps.db, "badschema", "__schema__")).toBeNull();
+    // 坏声明不进清单（旧表单不再供货）
+    expect(repo.readSourceSchemas(deps.db).map((e) => e.name)).not.toContain("badschema");
     expect(deps.sourceStates.get("badschema")?.state).toBe("error");
     expect(deps.sourceStates.get("badschema")?.lastError).toContain("设置声明不合法");
 
@@ -479,5 +475,57 @@ describe("设置声明落库前校验（simplify 轮根修 + 终轮验证 M1）"
     await asm.start();
     expect(deps.sourceStates.get("badschema")?.state).toBe("error");
     expect(deps.sourceStates.get("badschema")?.lastError).toContain("设置声明不合法");
+  });
+});
+
+describe("注销的信源不留残留（v0.7.8 注销 wecom 时漏掉的清扫）", () => {
+  /** 一个只声明设置与来源说明的假源——用来「先上岗、后注销」。 */
+  function makeGhost(): SourceAdapter {
+    return {
+      name: "ghost",
+      accept: () => ({ ok: true }),
+      register: () => undefined,
+      settings: () => [{ key: "mode", type: "text", label: "模式" }],
+      digestHint: () => "幽灵源的说明",
+    };
+  }
+
+  /** 在同一个库上跑一次装配（不经 HTTP——这一层就是清扫发生的地方）。 */
+  function assemble(db: Db, adapters: SourceAdapter[]): void {
+    registerSources(
+      {
+        db,
+        llmRef: { current: new FakeLlm() },
+        sourceStates: new Map(),
+        webhookRoutes: [],
+        mediaDir: "",
+        mediaFetchers: new Map(),
+        relayMediaFetchers: new Map(),
+      },
+      adapters,
+    );
+  }
+
+  it("上一次装配写下的声明行，在它从注册表消失后会被清掉", () => {
+    const db = makeDb(":memory:");
+    // ① 带着 ghost 装配：两份声明清单里都有它
+    assemble(db, [makeGhost()]);
+    expect(repo.readSourceDigestHints(db).map((h) => h.name)).toContain("ghost");
+    expect(repo.readSourceSchemas(db).map((e) => e.name)).toContain("ghost");
+
+    // ② 再装配一次，注册表里没有 ghost（= 代码里注销了）
+    assemble(db, []);
+    // 两份清单都是整体重写 → 自然没有它（不需要清扫兜底）
+    expect(repo.readSourceDigestHints(db).map((h) => h.name)).not.toContain("ghost");
+    expect(repo.readSourceSchemas(db).map((e) => e.name)).not.toContain("ghost");
+  });
+
+  it("仍在岗的信源，它的设置不会被连带清掉", () => {
+    const db = makeDb(":memory:");
+    assemble(db, [makeGhost()]);
+    repo.setSourceSetting(db, "ghost", "mode", JSON.stringify("b"));
+    assemble(db, [makeGhost()]);
+    // 用户填的值是真数据，只有注销时才清
+    expect(repo.getSourceSetting(db, "ghost", "mode")).toBe(JSON.stringify("b"));
   });
 });
