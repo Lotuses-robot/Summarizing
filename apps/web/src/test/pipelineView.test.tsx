@@ -45,7 +45,8 @@ const DETAIL_EVENTS = [
     id: "e2",
     action: "digest_done",
     detail: "应用 1 项变更：新建事项「作业」",
-    payload: null,
+    // 模型提交的变更清单原文（2026-10-28 起随 digest_done 落库）
+    payload: { applied: ["新建事项「作业」"], raw: '{"changes":[{"action":"create_item"}]}' },
     at: "2026-09-28T10:00:10",
     by: { actor: "agent0", model: "test" },
   },
@@ -216,6 +217,23 @@ describe("PipelineView（流水视图，specs/005）", () => {
       .getAllByText(/第 1 轮：search_items|应用 1 项变更：新建事项「作业」/)
       .map((el) => el.textContent);
     expect(order).toEqual(["应用 1 项变更：新建事项「作业」", "第 1 轮：search_items"]);
+  });
+
+  it("展开详情能看到模型提交的变更清单原文（默认折叠，点开才显）", async () => {
+    stubApi();
+    render(<PipelineView />);
+    fireEvent.click(await screen.findByText("英语课官方群"));
+    await waitFor(() => expect(screen.getByText("群里说的作业通知")).toBeInTheDocument());
+
+    // 默认折叠：原文不在 DOM 里，只有一颗入口按钮
+    const entry = screen.getByText(/查看模型提交的变更清单（1 行）/);
+    expect(screen.queryByText(/create_item/)).not.toBeInTheDocument();
+
+    fireEvent.click(entry);
+    expect(screen.getByText(/\{"changes":\[\{"action":"create_item"\}\]\}/)).toBeInTheDocument();
+    // 再点收起
+    fireEvent.click(screen.getByText("收起模型提交的变更清单"));
+    expect(screen.queryByText(/create_item/)).not.toBeInTheDocument();
   });
 
   it(

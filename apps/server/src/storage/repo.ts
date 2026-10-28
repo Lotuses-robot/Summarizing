@@ -186,6 +186,26 @@ export function deriveItems(db: DbOrTx): Item[] {
  *  进入 = 该版本快照为 done 且前一版本非 done（从回收站恢复回 done 时以恢复时刻重计）。 */
 export function completedAtOf(db: DbOrTx, itemId: string): string | null {
   const history = deriveHistory(db, itemId);
+  return completedAtFromHistory(history);
+}
+
+/** 一批事项的「最近一次进入已完成」时刻（**一次查询**，不是 N 次）。
+ *
+ *  为什么需要批量版：看板每次都要按 completionAt 排序，排序就得知道**所有** done 行的完成时刻
+ *  ——分页切不了这一步。但逐条 `completedAtOf` 是 N 次 `SELECT * FROM item_versions` 加 N 条链的
+ *  zod 解析，1000 条已完成就是 1000 次查询/10 秒（D-135 要治的「越用越慢」正是这个）。
+ *  一次把版本行全取回来、内存里按 item 分组算，查询数从 N 降到 1。
+ *
+ *  @param db 账户库
+ *  @param itemIds 要算的事项 id（**调用方负责只传需要的**——传全表就还是全表成本）
+ *  @returns itemId → 完成时刻；从未完成的不在表里（调用方按 `?? null` 取） */
+export function completedAtMany(db: DbOrTx, itemIds: string[]): Map<string, string> {
+  return atMany(db, itemIds, completedAtFromHistory);
+}
+
+/** 由一段版本史（时间升序）算「最近一次进入已完成」的时刻——`completedAtOf` 与批量版共用，
+ *  两处口径必须一致（改一处即改两处）。 */
+function completedAtFromHistory(history: ItemVersion[]): string | null {
   for (let i = history.length - 1; i >= 1; i--) {
     const cur = history[i];
     const prev = history[i - 1];
@@ -202,6 +222,16 @@ export function completedAtOf(db: DbOrTx, itemId: string): string | null {
  *  时间戳乱序（时钟回拨/回填历史）时 trashed 版本可能排在首位，漏查会让该条静默丢出回收站。 */
 export function trashedAtOf(db: DbOrTx, itemId: string): string | null {
   const history = deriveHistory(db, itemId);
+  return trashedAtFromHistory(history);
+}
+
+/** 一批事项的「进入回收站」时刻（一次查询）——理由见 `completedAtMany`。 */
+export function trashedAtMany(db: DbOrTx, itemIds: string[]): Map<string, string> {
+  return atMany(db, itemIds, trashedAtFromHistory);
+}
+
+/** 由一段版本史算「进入回收站」的时刻（`trashedAtOf` 与批量版共用）。 */
+function trashedAtFromHistory(history: ItemVersion[]): string | null {
   for (let i = history.length - 1; i >= 0; i--) {
     const v = history[i];
     if (v && v.snapshot.status === "trashed") {
@@ -209,6 +239,45 @@ export function trashedAtOf(db: DbOrTx, itemId: string): string | null {
     }
   }
   return null;
+}
+
+/** 批量取「每条链的某个时刻」的公共骨架：一次 `inArray` 取回全部版本行，
+ *  按 itemId 分组（保持 VERSION_ORDER 的升序）、逐组套 `derive`。
+ *
+ *  @param db 账户库
+ *  @param itemIds 目标事项（空数组直接返回空表——不发查询）
+ *  @param derive 单个链的取值函数（与单条版共用，口径不会漂）
+ */
+function atMany(
+  db: DbOrTx,
+  itemIds: string[],
+  derive: (history: ItemVersion[]) => string | null,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (itemIds.length === 0) return out;
+  const rows = db
+    .select()
+    .from(s.itemVersions)
+    .where(inArray(s.itemVersions.itemId, itemIds))
+    // 与 VERSION_ORDER 同一口径：(at, rowid) 升序——同秒多版本靠 rowid 破平
+    .orderBy(...VERSION_ORDER)
+    .all();
+  const byItem = new Map<string, ItemVersion[]>();
+  for (const r of rows) {
+    const parsed = ItemVersionSchema.parse({
+      ...r,
+      snapshot: parseJsonUnknown(r.snapshot),
+      by: parseProvenance(r.by),
+    });
+    const list = byItem.get(parsed.itemId);
+    if (list === undefined) byItem.set(parsed.itemId, [parsed]);
+    else list.push(parsed);
+  }
+  for (const [id, history] of byItem) {
+    const at = derive(history);
+    if (at !== null) out.set(id, at);
+  }
+  return out;
 }
 
 /** 删前的处置状态（回收站「恢复」回删前的值用）：自版本链最新向旧找第一个「非 trashed」的版本。
@@ -994,11 +1063,17 @@ export function purgeTrashed(tx: DbOrTx): {
   items: { itemId: string; trashedAt: string; title: string; preStatus: string }[];
 } {
   const cutoff = wallClockDaysAgo(PURGE_DAYS);
+  const trashed = deriveItemsWithVersion(tx).filter((r) => r.item.status === "trashed");
+  // 批量取「进入回收站」的时刻（一次查询）——逐条 trashedAtOf 是 N 次查链，
+  // 回收站攒久了一口清理会卡住整个事务。
+  const atById = trashedAtMany(
+    tx,
+    trashed.map((r) => r.item.id),
+  );
   const stale: { itemId: string; trashedAt: string; title: string; preStatus: string }[] = [];
-  for (const r of deriveItemsWithVersion(tx)) {
-    if (r.item.status !== "trashed") continue;
-    const at = trashedAtOf(tx, r.item.id);
-    if (at === null || at >= cutoff) continue;
+  for (const r of trashed) {
+    const at = atById.get(r.item.id);
+    if (at === undefined || at >= cutoff) continue;
     // 留痕要能回答「删了什么、原来是完成还是待办」（FR-009）——在删除前把它取出来
     stale.push({
       itemId: r.item.id,

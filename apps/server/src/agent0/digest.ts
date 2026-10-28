@@ -39,6 +39,20 @@ function bestEffortLog(msg: string): void {
   }
 }
 
+/** 变更清单原文的留存上限（字符）。
+ *
+ *  为什么不无限存：一条清单可能带几十项、每项几段引文，逐字全存会让 `pipeline_events.payload`
+ *  单行涨到几十 KB，而流水页是「列表 + 展开」的高频读取面。4,000 字足够看清模型请求的一切，
+ *  超出部分**明确标注被截断**（不静默裁掉）。
+ */
+const RAW_CHANGE_LIST_MAX_CHARS = 4000;
+
+/** 截断变更清单原文；超长时在末尾标注原长度（读者能判断自己少看了多少）。 */
+function truncateRaw(text: string): string {
+  if (text.length <= RAW_CHANGE_LIST_MAX_CHARS) return text;
+  return `${text.slice(0, RAW_CHANGE_LIST_MAX_CHARS)}\n…（原文共 ${text.length} 字，此处截断）`;
+}
+
 /** 尽力而为流水留痕：appendPipelineEvent 失败只记 stderr（含批次 id 与 action），绝不拖垮
  *  消化主流程。label 参数已收敛——日志前缀直接取 event.action（九轮评审：防两处字符串漂移）。 */
 function appendPipelineEventBestEffort(
@@ -70,7 +84,7 @@ export async function digestRawInput(
 ): Promise<DigestResult> {
   const by: Provenance = { actor: "agent0", model: modelTag };
   try {
-    const { list, readMedia } = await elicitChangeList(db, llm, tools, modelTag, raw);
+    const { list, readMedia, rawText } = await elicitChangeList(db, llm, tools, modelTag, raw);
 
     const { accepted, rejected } = runFence(db, raw, list);
     // 拒收项留痕先于修复轮（十轮评审定案：先拒、后修，时序即因果）；写失败抛进外层 catch
@@ -197,7 +211,9 @@ export async function digestRawInput(
       {
         action: "digest_done",
         detail: note + (rejected.length > 0 ? `（围栏拒收 ${rejected.length} 项）` : ""),
-        payload: { applied: details },
+        // `raw` = 模型提交的变更清单原文（逐字；超长截断并标注）——用户要看的就是这段。
+        // `applied` = 执行器实际落库的项（与 raw 的差别来自围栏拒收与执行器的空项跳过）。
+        payload: { applied: details, raw: truncateRaw(rawText) },
       },
       by,
     );
@@ -403,7 +419,7 @@ async function elicitChangeList(
   tools: AgentTools,
   modelTag: string,
   raw: RawInput,
-): Promise<{ list: ChangeList; readMedia: Map<string, string> }> {
+): Promise<{ list: ChangeList; readMedia: Map<string, string>; rawText: string }> {
   // 消化开始时刻（本轮对话全程不变）：给模型一个明确的「现在」——补年份、判是否已过期都要它
   const digestAt = nowWallClock();
   const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw, digestAt) }];
@@ -518,7 +534,9 @@ async function elicitChangeList(
       continue;
     }
     const parsed = parseChangeListDetailed(turn.content ?? "");
-    if (parsed.ok) return { list: parsed.value, readMedia };
+    // rawText = 模型**提交的那段原文**（不含 JSON 围栏的正文，逐字）——流水详情要能看见
+    // 「它到底请求改什么」，而不是只看我们解析后的结果（用户 2026-10-28 要求）。
+    if (parsed.ok) return { list: parsed.value, readMedia, rawText: (turn.content ?? "").trim() };
     // 没拿到合法清单 = 这一轮空转了——留痕（含空回复 / 非法 JSON），流水里能看见它
     traceRound();
     /** 把这一轮的原样回复放回对话：**模型必须看见自己写了什么**才能改。旧实现只在

@@ -207,7 +207,12 @@ export const api = {
 
   // ── 数据 ──
 
-  board: (): Promise<BoardView> => req("/api/board").then((r) => to<BoardView>(r)),
+  /** 看板：已完成段分页（2026-10-27）。`folded=true` = 该段折叠 → 服务端**一个 done 行都不查**，
+   *  只回条数；`page` 只在展开时有意义。 */
+  board: (opts: { page: number; folded: boolean }): Promise<BoardView> =>
+    req(`/api/board?page=${opts.page}&folded=${opts.folded ? "1" : "0"}`).then((r) =>
+      to<BoardView>(r),
+    ),
 
   /** Token 用量（010）：活动栏「用量」仪表盘（三个总数互不重叠；cachedTokens 为 null = 服务商未提供）。 */
   usage: (range: UsageRange): Promise<UsageSummary> =>
@@ -222,8 +227,10 @@ export const api = {
       body: file,
     }).then((r) => to<MediaUploadResponse>(r)),
 
-  /** 通知页（007）：kind=notice 的独立查看入口。 */
-  notices: (): Promise<NoticeView> => req("/api/notices").then((r) => to<NoticeView>(r)),
+  /** 通知页（007）：kind=notice 的独立查看入口——**列表分页**（D-136），一页 PAGE_SIZE 条。
+   *  `unreadTotal` 是全量未读数（活动栏徽标用；分页后不能拿本页数）。 */
+  notices: (page: number): Promise<NoticeView> =>
+    req(`/api/notices?page=${page}`).then((r) => to<NoticeView>(r)),
 
   item: (id: string): Promise<GetItemResult> =>
     req(`/api/items/${id}`).then((r) => to<GetItemResult>(r)),
@@ -243,8 +250,9 @@ export const api = {
   restore: (id: string): Promise<Item> =>
     req(`/api/items/${id}/restore`, post({})).then((r) => to<Item>(r)),
 
-  /** 回收站列表（007）：trashed 信息（两类混合，按删时倒序）。 */
-  trashList: (): Promise<TrashView> => req("/api/trash").then((r) => to<TrashView>(r)),
+  /** 回收站列表（007）：trashed 信息（两类混合，按删时倒序）——分页，一页 PAGE_SIZE 条。 */
+  trashList: (page: number): Promise<TrashView> =>
+    req(`/api/trash?page=${page}`).then((r) => to<TrashView>(r)),
 
   /** 一键清理回收站（007）：物理清除 trashed 超过 15 天的信息；原文档案不动。 */
   purgeTrash: (): Promise<{ purged: number }> =>

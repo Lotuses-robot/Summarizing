@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Lock, LockOpen } from "lucide-react";
-import { itemName, type NoticeRow } from "@summarizing/shared";
+import { itemName, type NoticeRow, type PageMeta } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { pushEscLayer } from "../lib/escLayer";
 import { UNDO_SECONDS, useSwipeActions } from "../lib/swipe";
 import { loadSwipeHintSeen, markSwipeHintSeen } from "../lib/appearance";
 import { GestureHint } from "./GestureHint";
+import { Pagination } from "./Pagination";
 import { UndoButton } from "./UndoButton";
 import { ItemBody } from "./board/ItemBody";
 import { fmtFullTime, fmtShortTime } from "../lib/time";
@@ -47,17 +48,30 @@ function CountdownRing({ remaining, total }: { remaining: number; total: number 
   );
 }
 
-/** 通知页：主卡阅读器 + 下方列表（D-108）。 */
+/** 通知页：主卡阅读器 + 下方列表（D-108）。
+ *
+ *  **列表分页**（D-136，用户 2026-10-27：「通知落在列表上，通知读完一圈就不读了，可以在下方翻页」）：
+ *  分页落在**下方列表**，主卡跟随当前页——翻页是用户的主动动作，卡片换成新页第一条才可预期；
+ *  若让卡片留着上一页那条，屏幕上会出现「卡片里的东西不在下面的列表里」，用户不知道它在哪。
+ *  （「轮询不抢焦点」是另一回事：那是后台刷新，不该改变正在读的东西。） */
 export function NoticePanel({
   notices,
   filter,
   onRefresh,
+  meta,
+  onPage,
   focus = null,
 }: {
+  /** 当前页的列表行。 */
   notices: NoticeRow[];
   /** 与看板同款筛选谓词（tag + 文本——FilterBar 复用，不另造机制）。 */
   filter: (r: NoticeRow) => boolean;
+  /** 重拉当前页（清除/撤回之后）。 */
   onRefresh: () => void;
+  /** 分页信息；null = 还没拉到（首屏）。 */
+  meta: PageMeta | null;
+  /** 翻页。 */
+  onPage: (page: number) => void;
   /** 对话 chips 深链（05§三）：选中该条；token 防轮询重放。 */
   focus?: { id: string; token: number } | null;
 }) {
@@ -276,12 +290,18 @@ export function NoticePanel({
     },
   });
 
+  // 空态文案要说真话：分页之后「本页没有行」不等于「没有通知」。
+  // meta === null = 还没拉到；meta.total === 0 = 真的没有；有行但被筛掉 = 无匹配。
   const emptyCardText =
-    notices.length === 0
-      ? "还没有通知——群里发来的、不用你去做但值得知道的事会落到这"
-      : visible.length === 0
-        ? "没有匹配的通知"
-        : "这一轮没有待看的通知";
+    meta === null
+      ? "正在载入通知…"
+      : meta.total === 0
+        ? "还没有通知——群里发来的、不用你去做但值得知道的事会落到这"
+        : notices.length === 0
+          ? "这一页没有通知了——请翻到上一页"
+          : visible.length === 0
+            ? "没有匹配的通知"
+            : "这一轮没有待看的通知";
 
   /** 该条是否未读（本地标记也算已读）。 */
   const isUnread = (r: NoticeRow): boolean =>
@@ -290,15 +310,18 @@ export function NoticePanel({
   return (
     <div className="page-x py-3">
       {hintVisible && (
-        <div className="mb-3">
-          <GestureHint
-            text="右滑清除（进回收站，可撤回）· 左滑稍后（本次跳过）"
-            onDismiss={() => {
-              markSwipeHintSeen("notice");
-              setHintVisible(false);
-            }}
-          />
-        </div>
+        <GestureHint
+          title="这一页可以左右滑"
+          lines={[
+            "在卡片上向右滑：清除（进回收站，2 秒内可撤回）",
+            "在卡片上向左滑：稍后（这一轮先跳过，不算已读、不写库）",
+            "卡片右上角的小锁：锁上后可正常选字、点图、开引文",
+          ]}
+          onDismiss={() => {
+            markSwipeHintSeen("notice");
+            setHintVisible(false);
+          }}
+        />
       )}
       {actionError !== null && (
         <p className="mb-3 rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
@@ -471,6 +494,7 @@ export function NoticePanel({
           })}
         </ul>
       )}
+      {meta !== null && <Pagination meta={meta} onPage={onPage} />}
     </div>
   );
 }

@@ -1,16 +1,34 @@
 import { useState } from "react";
 import { RotateCcw } from "lucide-react";
-import { itemName, type TrashRow } from "@summarizing/shared";
+import { itemName, type PageMeta, type TrashRow } from "@summarizing/shared";
 import { api } from "../api";
 import { cn } from "../lib/cn";
 import { ItemBody } from "./board/ItemBody";
+import { Pagination } from "./Pagination";
 import { fmtFullTime, fmtShortTime } from "../lib/time";
 
 /** 回收站页（007）：删掉的信息在这，可恢复；唯一批量操作 = 「一键清理 >15d」。
  *  两类信息混合、行标 kind（事项/通知）；按进入回收站的时刻倒序。
  *  **没有单条彻底删、没有「清空全部」**——彻底删只发生在清理环节，且只清 >15d 的（FR-008/FR-017）。
- *  「一键清理」不可逆 → 二次确认；文案说明原文档案不受影响。 */
-export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: () => void }) {
+ *  「一键清理」不可逆 → 二次确认；文案说明原文档案不受影响。
+ *
+ *  **分页**（2026-10-27）：回收站只增不减，一次拉全部会越用越慢。一页 PAGE_SIZE 条，
+ *  段尾给「上一页 / 下一页」。恢复/清理后由 App 重拉当前页（页码越界由服务端夹回来）。 */
+export function TrashPanel({
+  rows,
+  meta,
+  onRefresh,
+  onPage,
+}: {
+  /** 当前页的行。 */
+  rows: TrashRow[];
+  /** 分页信息；null = 还没拉到（首屏）。 */
+  meta: PageMeta | null;
+  /** 重拉当前页（恢复/清理后）。 */
+  onRefresh: () => void;
+  /** 翻页。 */
+  onPage: (page: number) => void;
+}) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [purging, setPurging] = useState(false);
@@ -42,7 +60,19 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
       });
   };
 
-  if (rows.length === 0) {
+  // 三种「列表空」必须分开，否则会说假话：
+  //  · meta === null → **还没拉到**（首屏）；App 拉取失败时也是这个形态，错误横幅另有其处显示
+  //  · meta.total === 0 → 回收站真的是空的
+  //  · rows 空但 total > 0 → 本页被清空了（页码越界，App 会自行夹回）——不在这渲染
+  if (meta === null) {
+    return (
+      <div className="page-x py-8">
+        <p className="text-sm text-ink-muted">正在载入回收站…</p>
+      </div>
+    );
+  }
+
+  if (rows.length === 0 && meta.total === 0) {
     return (
       <div className="page-x py-8">
         {/* 清理结果可能在列表清空的同时产生（全清光/全失败）——先于空态渲染，不能被吞 */}
@@ -67,7 +97,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
     <div className="page-x py-3">
       <div className="mb-3 flex items-center gap-3">
         <span className="text-sm text-ink-muted">
-          共 {rows.length} 条——删除超过 15 天的会被「一键清理」彻底清掉，原文档案不受影响
+          共 {meta.total} 条——删除超过 15 天的会被「一键清理」彻底清掉，原文档案不受影响
         </span>
         <button
           className={cn(
@@ -193,6 +223,7 @@ export function TrashPanel({ rows, onRefresh }: { rows: TrashRow[]; onRefresh: (
           );
         })}
       </ul>
+      {meta !== null && <Pagination meta={meta} onPage={onPage} busy={busy} />}{" "}
     </div>
   );
 }

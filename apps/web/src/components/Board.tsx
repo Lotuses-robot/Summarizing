@@ -19,6 +19,7 @@ import {
 } from "../lib/appearance";
 import { pushEscLayer } from "../lib/escLayer";
 import { GestureHint } from "./GestureHint";
+import { Pagination } from "./Pagination";
 import { UndoButton } from "./UndoButton";
 import { doneFadeStrength, TINT_CAP_PERCENT, urgencyStrength } from "../lib/urgency";
 import { fmtShortTime } from "../lib/time";
@@ -29,7 +30,7 @@ import { ItemBody } from "./board/ItemBody";
 type RowAction = "complete" | "reopen" | "trash";
 
 // 三段元数据唯一出处（D-80；D-89 存疑段退场；007 取消归档后三段）——段名/提示/空态只改这里，派生物（allRows/段定位/计数）全部由此推导
-type SectionKey = Exclude<keyof BoardView, "failedRawInputs">;
+type SectionKey = "undated" | "scheduled" | "done";
 const SECTION_META: {
   key: SectionKey;
   title: string;
@@ -358,7 +359,8 @@ function Row({
 }
 
 /** 看板段：计数头（**显示条数——随筛选变**）+ 折叠 + 空态一句话（禁愧疚/鸡血措辞）。
- *  total = 段内总条数（不随筛选变），仅用于区分「这段本就空」与「筛选后无匹配」。 */
+ *  total = 段内总条数（不随筛选变），仅用于区分「这段本就空」与「筛选后无匹配」。
+ *  `footer` = 段尾的附加内容（分页控件；已完成段用）。 */
 function Section({
   title,
   rows,
@@ -376,6 +378,10 @@ function Section({
   onQuickAction,
   pendingTrashId,
   onCancelTrash,
+  footer,
+  count,
+  note,
+  loading,
 }: {
   title: string;
   rows: ItemRow[];
@@ -395,6 +401,15 @@ function Section({
   pendingTrashId: string | null;
   /** 撤销该行的删除。 */
   onCancelTrash: () => void;
+  /** 段尾附加内容（已完成段的分页控件）。缺席 = 没有。 */
+  footer?: ReactNode;
+  /** 段头计数（默认 = 当前展示的行数）。分页段传「本页 / 全部」式文案。 */
+  count?: string;
+  /** 段头下方的一句补充（分页段的「筛选只作用于本页」说明）。 */
+  note?: string;
+  /** 本段「有数据但这次没取行」——刚从折叠展开、还没拿到行的那一帧（或取行失败）。
+   *  这时说「无匹配当前筛选」是假话（筛选框可能是空的）。 */
+  loading?: boolean;
 }) {
   return (
     <section className="rounded-2xl border border-line bg-surface p-3">
@@ -409,15 +424,19 @@ function Section({
         )}
         {title}
         <span className="rounded-full bg-canvas px-1.5 text-xs font-normal text-ink-muted">
-          {rows.length}
+          {count ?? rows.length}
         </span>
       </button>
       {!folded && (
         <>
           {hint !== undefined && <p className="mt-1 text-xs text-ink-muted">{hint}</p>}
+          {note !== undefined && <p className="mt-1 text-xs text-ink-muted">{note}</p>}
           {rows.length === 0 ? (
             <p className="mt-2 text-xs text-ink-muted">
-              {total === 0 ? emptyText : "无匹配当前筛选"}
+              {/* 三种「没有行」必须分开说，否则会说错话：
+                  ①总数为 0 = 这段本来就空；②有行但被筛掉 = 无匹配；
+                  ③**有数据但本次没取行**（分页段折叠→展开的这一帧，或取行失败）——既不是空也不是无匹配。 */}
+              {total === 0 ? emptyText : loading ? "正在载入…" : "无匹配当前筛选"}
             </p>
           ) : (
             <ul className="mt-2 space-y-1">
@@ -440,6 +459,7 @@ function Section({
               ))}
             </ul>
           )}
+          {footer}
         </>
       )}
     </section>
@@ -447,16 +467,31 @@ function Section({
 }
 
 /** 看板三段（01§4.3；D-89 四段 → 007 三段）+ 行内展开（单开互斥）+ 深链定位；筛选状态在 App 顶栏（FilterBar），
- *  这里只按 filter prop 过滤。 */
+ *  这里只按 filter prop 过滤。
+ *
+ *  **「已完成」段的折叠与页码归 App**（2026-10-27）：折叠要发到服务端（`folded=1` = 一个 done 行都不查），
+ *  页码要随请求走。Board 只负责渲染与把点击转出去——自己不记 done 的折叠，
+ *  否则「看着折叠、其实每次都在拉」这类两套真相就出来了。
+ *  日期未知 / 已排期的折叠仍是本机偏好，留在这里。 */
 export function Board({
   board,
   onRefresh,
+  onDonePage,
+  onDoneFold,
+  doneFolded,
   focus,
   filter,
   onTagClick,
 }: {
   board: BoardView;
+  /** 重拉看板（不传参 = 沿用当前页与折叠态）。 */
   onRefresh: () => void;
+  /** 已完成段翻页。 */
+  onDonePage: (page: number) => void;
+  /** 切已完成段折叠（App 落偏好 + 重拉）。 */
+  onDoneFold: (folded: boolean) => void;
+  /** 已完成段当前是否折叠（App 持）——**与下发给服务端的 `folded` 是同一个值**。 */
+  doneFolded: boolean;
   focus: { id: string; token: number } | null;
   filter: BoardFilter;
   onTagClick: (tag: string) => void;
@@ -477,12 +512,19 @@ export function Board({
   }, [pendingTrash]);
   /** 首次手势提示：滑过一次 / 点过「知道了」即永久收起（本机记忆）。 */
   const [hintVisible, setHintVisible] = useState(() => !loadSwipeHintSeen("board"));
-  const [folded, setFolded] = useState<Record<SectionKey, boolean>>(() => ({
+  /** 日期未知 / 已排期的折叠（本机偏好）。**已完成段不在这里**——它归 App（见组件注释）。 */
+  const [folded, setFolded] = useState<{ undated: boolean; scheduled: boolean }>(() => ({
     undated: loadSectionFold("undated"),
     scheduled: loadSectionFold("scheduled"),
-    done: loadSectionFold("done"),
   }));
+  /** 任一折叠态（含 App 持的 done）——键盘导航与「展开行是否可见」判定共用。 */
+  const foldedOf = useCallback(
+    (key: SectionKey): boolean => (key === "done" ? doneFolded : folded[key]),
+    [folded, doneFolded],
+  );
   const handledToken = useRef(0);
+  /** 深链待命：目标行还没到手（已完成折叠/不在本页）时记下 id，行到了再展开（见深链 effect）。 */
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
 
   /** 筛选谓词：选中的标签 token 全部必须携带（AND 收窄）；查询串对标题与 tags 做包含匹配（D-80）。 */
   /** 筛选谓词：语义单一出处 = FilterBar.matchesFilter（与通知页共用，防两套真相）。 */
@@ -491,7 +533,10 @@ export function Board({
   const allRows = useMemo(() => SECTION_META.flatMap((m) => board[m.key]), [board]);
 
   /** 事项 id → 所在段 key（键盘导航与「展开行是否可见」判定共用）——段名集合从 SECTION_META
-   *  派生（唯一出处），拼错段名无处可写。 */
+   *  派生（唯一出处），拼错段名无处可写。
+   *
+   *  ⚠️ 只覆盖**手上真有行**的那些段：已完成折叠时 `board.done` 是空的，这里就查不到 id。
+   *  深链因此不能只靠这张表判断「目标在不在已完成」——见下面 `mentionableSection`。 */
   const sectionKeyById = useMemo(() => {
     const m = new Map<string, SectionKey>();
     for (const meta of SECTION_META) {
@@ -499,6 +544,14 @@ export function Board({
     }
     return m;
   }, [board]);
+
+  /** 目标 id 落在哪一段（深链用，**不受分页/折叠影响**）。
+   *
+   *  为什么不能用 `sectionKeyById`：已完成折叠时里面根本没有 done 行（服务端没查），
+   *  拿它判「key === "done"」永远不成立 → 展开分支不可达 → 点 chip 完全没反应（review 逮出）。
+   *  服务端的 `mentionables` 是全量清单（非回收站），命中即说明「这条存在、但手上没有它的行」；
+   *  这时展开已完成段让服务端补查。 */
+  const mentionableIds = useMemo(() => new Set(board.mentionables.map((m) => m.id)), [board]);
 
   /** 当前筛选下的可见行（段折叠在键盘导航处另行排除）。 */
   const visibleRows = useMemo(() => allRows.filter(visible), [allRows, visible]);
@@ -522,9 +575,22 @@ export function Board({
     if (expandedId === null) return;
     const key = sectionKeyById.get(expandedId);
     const hidden =
-      key === undefined || folded[key] || !visibleRows.some((r) => r.item.id === expandedId);
+      key === undefined || foldedOf(key) || !visibleRows.some((r) => r.item.id === expandedId);
     if (hidden) setExpandedId(null);
-  }, [expandedId, sectionKeyById, folded, visibleRows]);
+    // foldedOf 是纯函数（读 props 与 state）；依赖列全它的两个来源
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedId, sectionKeyById, folded, doneFolded, visibleRows]);
+
+  /** 滚到某一行（深链与待命深链共用；两帧后坐标才对——展开体与段展开都会改变布局）。 */
+  const scrollToRow = useCallback((id: string): void => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`row-${id}`)
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }),
+    );
+  }, []);
 
   // 键盘流（05§六）：↑↓ 行间移动、Enter 展开/收起；输入态/按钮聚焦让路（Enter 要留给按钮原生激活）。
   // 不带依赖数组注册——闭包每渲染都新鲜，省得追依赖
@@ -542,7 +608,7 @@ export function Board({
       }
       const flat = visibleRows.filter((r) => {
         const key = sectionKeyById.get(r.item.id);
-        return key === undefined ? true : !folded[key];
+        return key === undefined ? true : !foldedOf(key);
       });
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -572,8 +638,12 @@ export function Board({
 
   const sections = SECTION_META.map((m) => ({ ...m, rows: board[m.key] }));
 
-  /** 切换折叠：状态与记忆同写（偏好，丢了不影响功能）。 */
+  /** 切换折叠：日期未知/已排期是本机偏好（这里写）；已完成归 App（要连带重拉），转出去。 */
   const toggleFold = (key: SectionKey) => {
+    if (key === "done") {
+      onDoneFold(!doneFolded);
+      return;
+    }
     const next = !folded[key];
     setFolded({ ...folded, [key]: next });
     saveSectionFold(key, next);
@@ -668,26 +738,44 @@ export function Board({
   };
 
   /** 深链（05§三）：展开所在段 → 展开行 → 布局稳定后滚到行并短促高亮（清筛选由 App 统一做）。
-   *  token 防同一条深链被看板轮询重放。 */
+   *  token 防同一条深链被看板轮询重放。
+   *
+   *  ⚠️ 已完成段**分页且默认折叠**：目标行多半不在手上（折叠时服务端一个 done 行都不查）。
+   *  这时不能直接 `setExpandedId`——「展开行不可见就收起」的判定会立刻把它清掉，
+   *  点 chip 就成了完全没反应（review 逮出）。改为**记一条待命**（`pendingFocus`）：
+   *  先去要行（展开已完成段 → App 重拉），行到手后由下面那段 effect 接着展开并滚动。
+   *
+   *  ⚠️ 即使用户展开着，目标也可能在别的页——那属于「翻页才看得到」，这里不替用户翻页猜位置
+   *  （猜错同样是「点了没反应」，而且会把用户从正在读的那页拽走）。 */
   useEffect(() => {
     if (focus === null || focus.token === handledToken.current) return;
     handledToken.current = focus.token;
-    setExpandedId(focus.id);
     const key = sectionKeyById.get(focus.id) ?? null;
+    if (key === null && mentionableIds.has(focus.id)) {
+      // 这条存在，但手上没有它的行（已完成折叠 / 不在本页 / 未取行）→ 先去要行
+      setPendingFocus(focus.id);
+      if (doneFolded) onDoneFold(false);
+      return;
+    }
+    setPendingFocus(null);
+    setExpandedId(focus.id);
     if (key !== null) {
       setFolded((f) => ({ ...f, [key]: false }));
       saveSectionFold(key, false);
     }
     setFlashId(focus.id);
-    // 对话面板收起 / 段展开都改变布局——两帧后坐标才对
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        document
-          .getElementById(`row-${focus.id}`)
-          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      }),
-    );
-  }, [focus, board, sectionKeyById]);
+    scrollToRow(focus.id);
+  }, [focus, board, sectionKeyById, mentionableIds, doneFolded, onDoneFold, scrollToRow]);
+
+  /** 待命深链：目标行到手就展开、高亮、滚过去（上面那段 effect 把 id 交过来）。 */
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    if (!sectionKeyById.has(pendingFocus)) return; // 还没到（重拉在路上）
+    setExpandedId(pendingFocus);
+    setFlashId(pendingFocus);
+    setPendingFocus(null);
+    scrollToRow(pendingFocus);
+  }, [pendingFocus, sectionKeyById, scrollToRow]);
 
   // 「新」/flash 微标的消退计时独立成 effect：不随深链 effect 因轮询重跑而被 cleanup 误清
   useEffect(() => {
@@ -696,7 +784,7 @@ export function Board({
     return () => window.clearTimeout(t);
   }, [flashId]);
 
-  if (allRows.length === 0) {
+  if (allRows.length === 0 && board.doneMeta.total === 0) {
     return (
       <main className="page-x py-4">
         <div className="card text-sm text-ink-muted">
@@ -710,7 +798,12 @@ export function Board({
     <main className="page-x space-y-4 py-4">
       {hintVisible && (
         <GestureHint
-          text="右滑移入回收站 · 左滑完成（已完成的行左滑是撤销完成）"
+          title="这一页可以左右滑"
+          lines={[
+            "向右滑：移入回收站（2 秒内可撤销）",
+            "向左滑：标完成；已完成的行向左滑是撤销完成",
+            "点一行：展开详情",
+          ]}
           onDismiss={() => {
             markSwipeHintSeen("board");
             setHintVisible(false);
@@ -722,27 +815,56 @@ export function Board({
           {actionError}
         </p>
       )}
-      {sections.map((s) => (
-        <Section
-          key={s.key}
-          title={s.title}
-          rows={s.rows.filter(visible)}
-          total={s.rows.length}
-          hint={s.hint}
-          emptyText={s.emptyText}
-          folded={folded[s.key]}
-          expandedId={expandedId}
-          flashId={flashId}
-          activeId={activeId}
-          viewedLocally={viewedLocally}
-          onToggleFold={() => toggleFold(s.key)}
-          onToggleExpand={toggleExpand}
-          onTag={onTagClick}
-          onQuickAction={quickAction}
-          pendingTrashId={pendingTrash}
-          onCancelTrash={cancelTrash}
-        />
-      ))}
+      {sections.map((s) => {
+        const rows = s.rows.filter(visible);
+        // 已完成段：条数取 `doneMeta.total`（全量），不是本页行数——段头要回答「一共完成过多少」。
+        // 折叠时本页行是空的（服务端没查），段头照样要点得出数。
+        const meta = s.key === "done" ? board.doneMeta : null;
+        return (
+          <Section
+            key={s.key}
+            title={s.title}
+            rows={rows}
+            // 本页筛选后的行数 vs 本页全部行数（`total` 另作「这段一共多少」用于空态判定）
+            total={meta?.total ?? s.rows.length}
+            // 段头计数：非分页段 = 筛选后行数（随筛选变）；分页段 = **全量总数**（跨页可比，
+            // 且折叠时也点得出数）。两种口径都写在这儿，避免同屏两套数字说不清。
+            count={meta !== null ? String(meta.total) : undefined}
+            hint={s.hint}
+            // 分页段：筛选只作用于当前这一页。**有多页就说明**（不只在筛出空结果时）——
+            // 否则「你看到的不是全部」这件事实在正常阅读时完全不可见。
+            note={
+              meta !== null && meta.pageCount > 1
+                ? "已完成每页 20 条；筛选只作用于本页，更早的请翻页"
+                : undefined
+            }
+            emptyText={s.emptyText}
+            folded={foldedOf(s.key)}
+            // 「有数据但这次没取行」：刚展开还没拿到 payload（此时 payload 仍是折叠态那份），
+            // 或取行失败。这一帧说「无匹配」是假话——列单为 0 只是因为没查。
+            // 「有数据但这次没取行」：段已展开、总数 > 0、但手上的行是空的。
+            // 两个来源都能造成这一帧：刚点开段头（载荷还是折叠那份），或取行失败。
+            // ⚠️ 判据看**界面的折叠态**（`foldedOf`），不是载荷里的 `meta.folded`——
+            // 后者滞后一帧，正是要靠它区分的那一帧。
+            loading={!foldedOf(s.key) && meta !== null && meta.total > 0 && s.rows.length === 0}
+            expandedId={expandedId}
+            flashId={flashId}
+            activeId={activeId}
+            viewedLocally={viewedLocally}
+            onToggleFold={() => toggleFold(s.key)}
+            onToggleExpand={toggleExpand}
+            onTag={onTagClick}
+            onQuickAction={quickAction}
+            pendingTrashId={pendingTrash}
+            onCancelTrash={cancelTrash}
+            footer={
+              meta !== null && !meta.folded ? (
+                <Pagination meta={meta} onPage={onDonePage} />
+              ) : undefined
+            }
+          />
+        );
+      })}
     </main>
   );
 }

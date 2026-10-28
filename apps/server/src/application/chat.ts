@@ -31,7 +31,13 @@ const MAX_ROUNDS = 4;
 
 // ── 前台工具定义（schema 住边界：前台专属、无第二调用者，不进 shared）──
 
-const BoardArgsSchema = z.object({});
+/** get_board 的参数：`donePage` = 已完成段取第几页（默认 1）。
+ *
+ *  为什么给模型翻页而不是「用 search_items 找更早的」：search_items 的 query **必填**，
+ *  「我这个月都完成了什么」这种问题没有关键词可用——旧描述许诺的退路并不存在（code-review 逮出）。 */
+const BoardArgsSchema = z.object({
+  donePage: z.number().int().min(1).optional(),
+});
 const IngestArgsSchema = z.object({ content: z.string().min(1) });
 const ChitchatArgsSchema = z.object({ content: z.string().min(1) });
 const SweepArgsSchema = z.object({});
@@ -44,7 +50,9 @@ const FRONT_TOOL_DEFS: ToolDef[] = [
   {
     name: "get_board",
     description:
-      "读取看板全部事项（日期未知/已排期/已完成三段）+ 全部通知（notices）——回答「最近有什么要交的」「有什么通知」这类问题用它",
+      "读取看板事项（日期未知/已排期两段全量）+ 通知列表（notices）——回答「最近有什么要交的」「有什么通知」这类问题用它。" +
+      "已完成段每页 20 条，默认第 1 页（`doneMeta` 给总条数与总页数）；" +
+      "要更早的已完成事项，传 `donePage` 翻页（问「上个月完成了什么」就翻到对应页）",
     parametersJsonSchema: z.toJSONSchema(BoardArgsSchema),
   },
   {
@@ -273,10 +281,21 @@ async function runTool(
     const args: unknown = JSON.parse(call.argsJson);
     switch (call.name) {
       case "get_board": {
-        BoardArgsSchema.parse(args);
-        state.actions.push({ tool: "get_board", note: "查了看板" });
-        // 看板三段 + 通知（OQ-9：前台可只读查通知）——挂成额外键，看板形状不动
-        return JSON.stringify({ ...buildBoard(db), notices: deriveNotices(db).notices });
+        const { donePage } = BoardArgsSchema.parse(args);
+        const page = donePage ?? 1;
+        state.actions.push({
+          tool: "get_board",
+          note: page === 1 ? "查了看板" : `查了看板（已完成第 ${page} 页）`,
+        });
+        // 看板三段 + 通知（OQ-9：前台可只读查通知）——挂成额外键，看板形状不动。
+        // 已完成段按模型给的页码取（不折叠）：问「上个月完成了什么」时可翻页读历史。
+        // notices 连它自己的分页信息一起给（通知列表同样分页），模型据此知道还有没有更多。
+        const noticeView = deriveNotices(db);
+        return JSON.stringify({
+          ...buildBoard(db, { page, folded: false }),
+          notices: noticeView.notices,
+          noticesMeta: noticeView.meta,
+        });
       }
       case "search_items": {
         const { query } = SearchItemsArgsSchema.parse(args);

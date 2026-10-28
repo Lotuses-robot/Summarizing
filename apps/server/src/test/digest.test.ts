@@ -131,6 +131,69 @@ describe("agent0 消化管线", () => {
     expect(audit.some((n) => n.detail.includes("零变更"))).toBe(true);
   });
 
+  it("流水里能看到模型提交的变更清单原文（2026-10-28 用户要求）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    const submitted = JSON.stringify({
+      changes: [
+        {
+          action: "create_item",
+          elements: [{ label: "name", text: "交实验报告", quotes: ["周五前交实验报告"] }],
+          tags: [],
+        },
+      ],
+    });
+    llm.push({ content: submitted });
+
+    const raw = seedRaw(db);
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
+
+    const done = repo.listPipelineEvents(db, raw.id).find((e) => e.action === "digest_done");
+    expect(done).toBeDefined();
+    // 原文字面保留（含空白）——用户要的是「它到底请求改什么」，不是我们解析后的摘要
+    const payload = done?.payload;
+    if (typeof payload !== "object" || payload === null || !("raw" in payload)) {
+      throw new Error("digest_done 的 payload 里没有 raw");
+    }
+    expect(payload.raw).toBe(submitted.trim());
+    // applied 仍是执行器实写项（与 raw 各司其职）
+    expect(payload).toHaveProperty("applied");
+  });
+
+  it("变更清单原文超长 → 截断并标注原长度（不静默裁掉）", async () => {
+    const db = makeDb(":memory:");
+    const llm = new FakeLlm();
+    // 造一条远超 4,000 字的清单（只用一个超长的 note 撑大，不建几十个空项）
+    const longNote = "很长的说明".repeat(1000); // 5,000 字
+    const submitted = JSON.stringify({
+      changes: [
+        {
+          action: "create_item",
+          elements: [
+            { label: "name", text: "长条目", note: longNote, quotes: ["周五前交实验报告"] },
+          ],
+          tags: [],
+        },
+      ],
+    });
+    expect(submitted.length).toBeGreaterThan(4000);
+    llm.push({ content: submitted });
+
+    const raw = seedRaw(db);
+    await digestRawInput(db, llm, makeAgentTools(db, ""), MODEL, raw);
+
+    const done = repo.listPipelineEvents(db, raw.id).find((e) => e.action === "digest_done");
+    const payload = done?.payload;
+    if (typeof payload !== "object" || payload === null || !("raw" in payload)) {
+      throw new Error("digest_done 的 payload 里没有 raw");
+    }
+    const stored = payload.raw;
+    if (typeof stored !== "string") throw new Error("raw 不是字符串");
+    expect(stored.length).toBeLessThan(submitted.length);
+    expect(stored).toContain("此处截断");
+    expect(stored).toContain(`原文共 ${submitted.trim().length} 字`);
+  });
+
   it("③ 引用不存在 ID → 围栏拒收 → 回喂一次修复成功", async () => {
     const db = makeDb(":memory:");
     const llm = new FakeLlm();

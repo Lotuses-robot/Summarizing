@@ -61,6 +61,37 @@ function thoughtOf(payload: unknown): string | null {
   return typeof t === "string" && t.trim() !== "" ? t : null;
 }
 
+/** 从 `digest_done` 的 payload 取**模型提交的变更清单原文**（2026-10-28 用户要求）。
+ *  这是「AI 到底请求改什么」的字面答案：`detail` 里那句「应用 N 项变更」是执行器的归类，
+ *  想知道它原样提交了什么（包括被围栏拒收的那些），要看这段。坏形状一律当没有。 */
+function rawChangeListOf(payload: unknown): string | null {
+  if (!isRecord(payload)) return null;
+  const raw = payload.raw;
+  return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+}
+
+/** 模型提交的变更清单原文：默认折叠（清单常常十几行，摊开会挤掉时间线的可读性）。
+ *  展开后原样呈现（等宽、保留换行、可选中复制）——用户要的是「它到底请求了什么」的字面答案。 */
+function RawChangeList({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const lineCount = text.split("\n").length;
+  return (
+    <div className="mt-1">
+      <button
+        className="cursor-pointer text-[11px] text-accent hover:underline"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? "收起模型提交的变更清单" : `查看模型提交的变更清单（${lineCount} 行）`}
+      </button>
+      {open && (
+        <pre className="fit-text mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-canvas px-2 py-1 text-[11px] leading-relaxed text-ink-muted">
+          {text}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 /** 单批详情：原文 + 纯时间线（最新在上——与状态卡轨迹同向；节点色区分类型）。
  *  随父级轮询刷新：eventCount 变化（有新事件）即重拉——消化中展开的时间线不再冻结。 */
 function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
@@ -103,6 +134,7 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
       <div className="mt-3 space-y-0">
         {events.map((e, i) => {
           const thought = thoughtOf(e.payload);
+          const rawList = rawChangeListOf(e.payload);
           return (
             <div key={e.id} className="flex gap-3">
               <div className="flex flex-col items-center pt-1">
@@ -120,6 +152,9 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
                     {thought}
                   </p>
                 )}
+                {/* 模型提交的变更清单原文（digest_done 才有）——「它到底请求改什么」的字面答案。
+                    折叠展开：清单常常十几行，默认收起不挤占时间线。 */}
+                {rawList !== null && <RawChangeList text={rawList} />}
                 <p className="mt-0.5 text-[10px] text-ink-muted/60">{fmtTimeSec(e.at)}</p>
               </div>
             </div>

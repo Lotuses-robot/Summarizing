@@ -23,12 +23,16 @@ describe("api 错误文案", () => {
       error: "Payload Too Large",
       message: "图片超过大小上限（20 MiB）",
     });
-    await expect(api.board()).rejects.toThrow("图片超过大小上限（20 MiB）");
+    await expect(api.board({ page: 1, folded: false })).rejects.toThrow(
+      "图片超过大小上限（20 MiB）",
+    );
   });
 
   it("4xx：自定义 {error} 照实显示", async () => {
     stub(400, { error: "不是支持的图片格式（image/png）" });
-    await expect(api.board()).rejects.toThrow("不是支持的图片格式（image/png）");
+    await expect(api.board({ page: 1, folded: false })).rejects.toThrow(
+      "不是支持的图片格式（image/png）",
+    );
   });
 
   it('401 带状态码（判「未登录」靠它，不靠文案里有没有 "401"）', async () => {
@@ -56,6 +60,6 @@ describe("api 错误文案", () => {
       error: "Internal Server Error",
       message: "SQLITE_ERROR: no such table: items",
     });
-    await expect(api.board()).rejects.toThrow("请求失败 500");
+    await expect(api.board({ page: 1, folded: false })).rejects.toThrow("请求失败 500");
   });
 });

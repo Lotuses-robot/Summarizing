@@ -3,6 +3,7 @@ node_modules/
 dist/
 release/
 summarizing-portable-*.zip
+*.tsbuildinfo
 
 # ── 本地数据与密钥（固定不进仓库）──
 data/

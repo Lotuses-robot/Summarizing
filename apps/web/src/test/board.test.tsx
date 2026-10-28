@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { wallClockToEpoch } from "@summarizing/shared";
 import { Board } from "../components/Board";
@@ -50,28 +51,39 @@ describe("Board（三段看板，007）", () => {
     cleanup();
   });
 
-  it("三段渲染：行进对应段；已完成默认折叠、点段头展开", () => {
-    render(
-      <Board
-        board={view({
-          undated: [makeRow({ id: "u1", name: "日期未定事项" })],
-          scheduled: [
-            makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
-          ],
-          done: [makeRow({ id: "x1", name: "已交表", status: "done" })],
-        })}
-        onRefresh={() => {}}
-        focus={null}
-        filter={{ query: "", tags: [] }}
-        onTagClick={() => {}}
-      />,
-    );
+  it("三段渲染：行进对应段；已完成折叠时只显示计数、点段头请父级展开", () => {
+    /** 已完成段的折叠归 App（2026-10-27：折叠 = 服务端不查行）——这里用受控小壳模拟。
+     *  折叠时 `board.done` 是空的（服务端没查），计数只能来自 `doneMeta.total`。 */
+    function Harness() {
+      const [folded, setFolded] = useState(true);
+      return (
+        <Board
+          board={view({
+            undated: [makeRow({ id: "u1", name: "日期未定事项" })],
+            scheduled: [
+              makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
+            ],
+            done: folded ? [] : [makeRow({ id: "x1", name: "已交表", status: "done" })],
+            doneMeta: { folded, page: 1, pageCount: 1, total: 1 },
+          })}
+          onRefresh={() => {}}
+          onDonePage={() => {}}
+          onDoneFold={setFolded}
+          doneFolded={folded}
+          focus={null}
+          filter={{ query: "", tags: [] }}
+          onTagClick={() => {}}
+        />
+      );
+    }
+    render(<Harness />);
     expect(screen.getByText("日期未知")).toBeInTheDocument();
     expect(screen.getByText("已排期")).toBeInTheDocument();
     expect(screen.getByText("日期未定事项")).toBeInTheDocument();
     expect(screen.getByText("英语作业")).toBeInTheDocument();
-    // 已完成默认折叠（D-80）：行不可见，点段头展开后可见
+    // 折叠：行不在，但段头计数照样点得出（1）——「没查」不等于「没有」
     expect(screen.queryByText("已交表")).not.toBeInTheDocument();
+    expect(screen.getByText("已完成").parentElement).toHaveTextContent("1");
     fireEvent.click(screen.getByText("已完成"));
     expect(screen.getByText("已交表")).toBeInTheDocument();
   });
@@ -85,6 +97,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -123,6 +138,9 @@ describe("Board（三段看板，007）", () => {
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -156,6 +174,9 @@ describe("Board（三段看板，007）", () => {
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -188,6 +209,9 @@ describe("Board（三段看板，007）", () => {
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -218,6 +242,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -240,6 +267,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -280,6 +310,9 @@ describe("Board（三段看板，007）", () => {
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -323,6 +356,9 @@ describe("Board（三段看板，007）", () => {
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -342,6 +378,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -361,6 +400,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: ["数学课"] }}
         onTagClick={() => {}}
@@ -371,23 +413,32 @@ describe("Board（三段看板，007）", () => {
     expect(screen.getByText("数学作业")).toBeInTheDocument();
   });
 
-  it("三段渲染：已完成段默认折叠、点段头展开；带 doubtNote 的行按日期正常渲染（007 取消归档后三段）", () => {
-    render(
-      <Board
-        board={view({
-          undated: [makeRow({ id: "u1", name: "带存疑字段的行", doubtNote: "来源用词『听说』" })],
-          done: [makeRow({ id: "a1", name: "已了结的事", status: "done" })],
-        })}
-        onRefresh={() => {}}
-        focus={null}
-        filter={{ query: "", tags: [] }}
-        onTagClick={() => {}}
-      />,
-    );
+  it("已完成段折叠归父级、带 doubtNote 的行按日期正常渲染（007 取消归档后三段）", () => {
+    /** 折叠＝服务端不查行（2026-10-27），故折叠态下 `board.done` 为空、计数看 `doneMeta`。 */
+    function Harness() {
+      const [folded, setFolded] = useState(true);
+      return (
+        <Board
+          board={view({
+            undated: [makeRow({ id: "u1", name: "带存疑字段的行", doubtNote: "来源用词『听说』" })],
+            done: folded ? [] : [makeRow({ id: "a1", name: "已了结的事", status: "done" })],
+            doneMeta: { folded, page: 1, pageCount: 1, total: 1 },
+          })}
+          onRefresh={() => {}}
+          onDonePage={() => {}}
+          onDoneFold={setFolded}
+          doneFolded={folded}
+          focus={null}
+          filter={{ query: "", tags: [] }}
+          onTagClick={() => {}}
+        />
+      );
+    }
+    render(<Harness />);
     // 存疑字段不再影响渲染：行照常出现；「存疑」段头不存在（只有存疑库审核页有它）
     expect(screen.getByText("带存疑字段的行")).toBeInTheDocument();
     expect(screen.queryByText("存疑")).not.toBeInTheDocument();
-    // 已完成默认折叠 → 点开可见
+    // 折叠时行不在 → 点开可见
     expect(screen.queryByText("已了结的事")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("已完成"));
     expect(screen.getByText("已了结的事")).toBeInTheDocument();
@@ -419,6 +470,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: ["英语课"] }}
         onTagClick={onTagClick}
@@ -441,6 +495,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -461,6 +518,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "英语", tags: [] }}
         onTagClick={() => {}}
@@ -490,6 +550,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -515,6 +578,9 @@ describe("Board（三段看板，007）", () => {
           done: [makeRow({ id: "x", name: "完成的旧事项", status: "done", viewed: false })],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -545,6 +611,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -563,6 +632,9 @@ describe("Board（三段看板，007）", () => {
           ],
         })}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}
@@ -576,11 +648,183 @@ describe("Board（三段看板，007）", () => {
     expect(screen.getAllByText("加载中…")).toHaveLength(1); // 仍只有一个展开体
   });
 
+  it("已完成段分页：翻页控件只在多页时出现，点下一页把页码转给父级", () => {
+    /** 已完成段的分页归 App（页码随请求走）——受控小壳记下翻页请求。 */
+    const pages: number[] = [];
+    const meta = { folded: false, page: 1, pageCount: 3, total: 45 };
+    const { rerender } = render(
+      <Board
+        board={view({
+          done: [makeRow({ id: "x1", name: "已完成的事", status: "done" })],
+          doneMeta: meta,
+        })}
+        onRefresh={() => {}}
+        onDonePage={(p) => pages.push(p)}
+        onDoneFold={() => {}}
+        doneFolded={false}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 段头计数用 doneMeta.total（全量 45），不是本页行数
+    expect(screen.getByText("已完成").parentElement).toHaveTextContent("45");
+    expect(screen.getByText(/第 1 \/ 3 页 · 共 45 条/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("下一页"));
+    expect(pages).toEqual([2]);
+
+    // 只有一页 → 整块不渲染（「第 1/1 页」是噪音）
+    rerender(
+      <Board
+        board={view({
+          done: [makeRow({ id: "x1", name: "已完成的事", status: "done" })],
+          doneMeta: { folded: false, page: 1, pageCount: 1, total: 1 },
+        })}
+        onRefresh={() => {}}
+        onDonePage={(p) => pages.push(p)}
+        onDoneFold={() => {}}
+        doneFolded={false}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    expect(screen.queryByTitle("下一页")).not.toBeInTheDocument();
+  });
+
+  it("折叠时深链到已完成 → 会去要行（展开段），行到手后展开并高亮", () => {
+    // review 逮出的核心 bug：sectionKeyById 里没有 done 行 → 旧代码的 `key === "done"` 分支不可达
+    // → 点 chip 完全没反应。这里断言「折叠 + 目标是已完成 → 触发了展开请求」。
+    const foldedCalls: boolean[] = [];
+    const { rerender } = render(
+      <Board
+        board={view({
+          done: [],
+          doneMeta: { folded: true, page: 1, pageCount: 1, total: 1 },
+          mentionables: [{ id: "d1", title: "已完成的事" }],
+        })}
+        onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={(f) => foldedCalls.push(f)}
+        doneFolded={true}
+        focus={{ id: "d1", token: 1 }}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 折叠时不硬展开一个「手上没有的行」——先要把行要来
+    expect(foldedCalls).toEqual([false]);
+
+    // 行到手（模拟 App 重拉后的 payload）→ 自动展开那一行
+    rerender(
+      <Board
+        board={view({
+          done: [makeRow({ id: "d1", name: "已完成的事", status: "done" })],
+          doneMeta: { folded: false, page: 1, pageCount: 1, total: 1 },
+          mentionables: [{ id: "d1", title: "已完成的事" }],
+        })}
+        onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={(f) => foldedCalls.push(f)}
+        doneFolded={false}
+        focus={{ id: "d1", token: 1 }}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 行到手后待命深链自动展开它（展开体会去拉详情 → 停在「加载中…」占位）
+    // 同步断言：本文件用 fake timers，findBy* 的轮询会卡住
+    expect(screen.getAllByText("加载中…")).toHaveLength(1);
+  });
+
+  it("多页的已完成段：段头说明「筛选只作用于本页」，无筛选时也在", () => {
+    render(
+      <Board
+        board={view({
+          done: [makeRow({ id: "d1", name: "已完成的事", status: "done" })],
+          doneMeta: { folded: false, page: 1, pageCount: 3, total: 45 },
+        })}
+        onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    // 没有任何筛选时也要说明——「你看到的不是全部」在正常阅读时同样成立
+    expect(screen.getByText(/筛选只作用于本页/)).toBeInTheDocument();
+  });
+
+  it("折叠→展开的中间帧：不写「无匹配当前筛选」（那是假话）", () => {
+    // 刚点开段头：App 已把 folded 置 false，但手上的载荷还是折叠那份（done 为空、total > 0）
+    render(
+      <Board
+        board={view({
+          done: [],
+          doneMeta: { folded: true, page: 1, pageCount: 1, total: 45 },
+        })}
+        onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    expect(screen.getByText("正在载入…")).toBeInTheDocument();
+    expect(screen.queryByText("无匹配当前筛选")).not.toBeInTheDocument();
+  });
+
+  it("首次进看板弹黑幕教程：写明左右滑各自做什么；点「知道了」后永久收起", () => {
+    window.localStorage.clear();
+    const { unmount } = render(
+      <Board
+        board={view({ undated: [makeRow({ id: "u1", name: "某事项" })] })}
+        onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("这一页可以左右滑")).toBeInTheDocument();
+    expect(within(dialog).getByText(/向右滑：移入回收站/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/向左滑：标完成/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByText("知道了"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    unmount();
+
+    // 再次进入（本机已记住）→ 不再弹
+    render(
+      <Board
+        board={view({ undated: [makeRow({ id: "u1", name: "某事项" })] })}
+        onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
+        focus={null}
+        filter={{ query: "", tags: [] }}
+        onTagClick={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("空板：一句话空态，不出现筛选栏", () => {
     render(
       <Board
         board={view()}
         onRefresh={() => {}}
+        onDonePage={() => {}}
+        onDoneFold={() => {}}
+        doneFolded={false}
         focus={null}
         filter={{ query: "", tags: [] }}
         onTagClick={() => {}}

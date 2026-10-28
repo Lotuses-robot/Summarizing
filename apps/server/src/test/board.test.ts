@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { itemName, type RawInput } from "@summarizing/shared";
+import { itemName, PAGE_SIZE, type PageMeta, type RawInput } from "@summarizing/shared";
 import { executeChanges } from "../executor/executor";
 import { makeAgentTools } from "../agent0/tools";
 import { buildBoard } from "../application/board";
@@ -57,6 +57,244 @@ function createItem(
   if (!found) throw new Error("事项未创建");
   return found;
 }
+
+describe("分页（2026-10-27：只增不减的段才分页）", () => {
+  /** 造 n 条已完成事项（完成时刻递增——第 i 条比第 i-1 条晚，排序后最新在上）。 */
+  function seedDone(db: ReturnType<typeof makeDb>, raw: RawInput, n: number): void {
+    for (let i = 0; i < n; i++) {
+      const item = createItem(db, raw, { name: `已完成 ${i}` });
+      repo.appendItemVersion(db, {
+        itemId: item.id,
+        action: "complete_item",
+        detail: `标完成「已完成 ${i}」`,
+        snapshot: { ...item, status: "done" },
+        by: { actor: "用户", model: null },
+      });
+    }
+  }
+
+  it("已完成段一页 PAGE_SIZE 条；pageMeta 如实回报总条数与页数", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    seedDone(t.db, raw, PAGE_SIZE + 5);
+
+    const first = await t.inject({ method: "GET", url: "/api/board" });
+    const b1 = first.json<{ done: unknown[]; doneMeta: PageMeta }>();
+    expect(b1.done).toHaveLength(PAGE_SIZE);
+    expect(b1.doneMeta).toMatchObject({
+      folded: false,
+      page: 1,
+      pageCount: 2,
+      total: PAGE_SIZE + 5,
+    });
+
+    const second = await t.inject({ method: "GET", url: "/api/board?page=2" });
+    const b2 = second.json<{ done: unknown[]; doneMeta: PageMeta }>();
+    expect(b2.done).toHaveLength(5);
+    expect(b2.doneMeta.page).toBe(2);
+  });
+
+  it("folded=1 → 一个 done 行都不查，但条数照给（「没查」≠「没有」）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    seedDone(t.db, raw, 3);
+
+    const res = await t.inject({ method: "GET", url: "/api/board?folded=1" });
+    const body = res.json<{ done: unknown[]; doneMeta: PageMeta }>();
+    expect(body.done).toEqual([]); // 没查
+    expect(body.doneMeta).toMatchObject({ folded: true, total: 3 }); // 但数得出来
+  });
+
+  it("页码越界 → 夹到有效页并如实回报（不给空白页）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    seedDone(t.db, raw, PAGE_SIZE + 1); // 2 页
+
+    const res = await t.inject({ method: "GET", url: "/api/board?page=99" });
+    const body = res.json<{ done: unknown[]; doneMeta: PageMeta }>();
+    expect(body.doneMeta.page).toBe(2);
+    expect(body.done).toHaveLength(1);
+  });
+
+  it("page/folded 非法 → 400（不猜一个默认值糊过去）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    for (const url of ["/api/board?page=0", "/api/board?page=abc", "/api/board?folded=false"]) {
+      const res = await t.inject({ method: "GET", url });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+
+  it("标签全集由服务端算：已完成只下发一页，标签也不缺", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    // 完成时刻逐条 +1 分钟：排序确定（最新在上），带标签那条最早完成 → 必然落到最后一页。
+    // 时钟钉住是必须的——同一秒内完成的行 completedAt 相同，排序结果只是插入序的巧合。
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < PAGE_SIZE + 1; i++) {
+        vi.setSystemTime(parseWallClock(`2026-09-26T12:${String(i).padStart(2, "0")}:00`));
+        const item = createItem(t.db, raw, {
+          name: `带标签 ${i}`,
+          tags: i === 0 ? ["只在旧页出现的标签"] : [],
+        });
+        repo.appendItemVersion(t.db, {
+          itemId: item.id,
+          action: "complete_item",
+          detail: "标完成",
+          snapshot: { ...item, status: "done" },
+          by: { actor: "用户", model: null },
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // 第 1 页 = 最新的一页，那条旧标签的行**不在**这一页里
+    const res = await t.inject({ method: "GET", url: "/api/board" });
+    const body = res.json<{ done: { item: { tags: string[] } }[]; tags: string[] }>();
+    expect(body.done.some((r) => r.item.tags.includes("只在旧页出现的标签"))).toBe(false);
+    expect(body.tags).toContain("只在旧页出现的标签"); // 标签栏照样有它
+  });
+
+  it("回收站分页：一页 PAGE_SIZE 条 + 总数", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    for (let i = 0; i < PAGE_SIZE + 3; i++) {
+      const item = createItem(t.db, raw, { name: `要删 ${i}` });
+      repo.appendItemVersion(t.db, {
+        itemId: item.id,
+        action: "trash_item",
+        detail: "删除",
+        snapshot: { ...item, status: "trashed" },
+        by: { actor: "用户", model: null },
+      });
+    }
+
+    const p1 = await t.inject({ method: "GET", url: "/api/trash" });
+    const t1 = p1.json<{ rows: unknown[]; meta: PageMeta }>();
+    expect(t1.rows).toHaveLength(PAGE_SIZE);
+    expect(t1.meta).toMatchObject({ page: 1, pageCount: 2, total: PAGE_SIZE + 3 });
+
+    const p2 = await t.inject({ method: "GET", url: "/api/trash?page=2" });
+    expect(p2.json<{ rows: unknown[] }>().rows).toHaveLength(3);
+  });
+});
+
+describe("code-review 修复（2026-10-27 分页批次）", () => {
+  it("只活在已删除条目上的标签，不该留在看板标签栏", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "要删的", tags: ["删除后才该消失"] });
+    const item = repo.deriveItems(t.db)[0];
+    if (!item) throw new Error("播种失败");
+    repo.appendItemVersion(t.db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除",
+      snapshot: { ...item, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+
+    const board = buildBoard(t.db);
+    expect(board.tags).not.toContain("删除后才该消失");
+    expect(board.mentionables.map((m) => m.id)).not.toContain(item.id);
+  });
+
+  it("@ 提及候选不受分页影响：折叠时已完成的也在候选里", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    const item = createItem(t.db, raw, { name: "已完成的旧事" });
+    repo.appendItemVersion(t.db, {
+      itemId: item.id,
+      action: "complete_item",
+      detail: "标完成",
+      snapshot: { ...item, status: "done" },
+      by: { actor: "用户", model: null },
+    });
+
+    // 折叠 → done 行是空的，但 mentionables 是全量口径
+    const folded = buildBoard(t.db, { page: 1, folded: true });
+    expect(folded.done).toHaveLength(0);
+    expect(folded.mentionables).toEqual([{ id: item.id, title: "已完成的旧事" }]);
+  });
+
+  it("completedAtMany / trashedAtMany 与单条版口径一致", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    const item = createItem(t.db, raw, { name: "走完整条链的事" });
+    repo.appendItemVersion(t.db, {
+      itemId: item.id,
+      action: "complete_item",
+      detail: "标完成",
+      snapshot: { ...item, status: "done" },
+      by: { actor: "用户", model: null },
+    });
+    const done = repo.deriveItem(t.db, item.id);
+    if (!done) throw new Error("取不到");
+    repo.appendItemVersion(t.db, {
+      itemId: item.id,
+      action: "trash_item",
+      detail: "删除",
+      snapshot: { ...done, status: "trashed" },
+      by: { actor: "用户", model: null },
+    });
+
+    const ids = [item.id];
+    expect(repo.completedAtMany(t.db, ids).get(item.id)).toBe(repo.completedAtOf(t.db, item.id));
+    expect(repo.trashedAtMany(t.db, ids).get(item.id)).toBe(repo.trashedAtOf(t.db, item.id));
+    // 空入参不发查询也不报错
+    expect(repo.completedAtMany(t.db, []).size).toBe(0);
+  });
+
+  it("通知列表分页 + unreadTotal 是全量（不是本页）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    for (let i = 0; i < PAGE_SIZE + 4; i++) {
+      createItem(t.db, raw, { name: `通知 ${i}`, kind: "notice" });
+    }
+
+    const p1 = await t.inject({ method: "GET", url: "/api/notices" });
+    const n1 = p1.json<{ notices: unknown[]; meta: PageMeta; unreadTotal: number }>();
+    expect(n1.notices).toHaveLength(PAGE_SIZE);
+    expect(n1.meta).toMatchObject({ page: 1, pageCount: 2, total: PAGE_SIZE + 4 });
+    expect(n1.unreadTotal).toBe(PAGE_SIZE + 4); // 全量，不是本页
+
+    const p2 = await t.inject({ method: "GET", url: `/api/notices?page=2` });
+    expect(p2.json<{ notices: unknown[] }>().notices).toHaveLength(4);
+    // 未读数翻页不变（拿本页数就会缩水）
+    expect(p2.json<{ unreadTotal: number }>().unreadTotal).toBe(PAGE_SIZE + 4);
+  });
+
+  it("通知标签全集跨页：只出现在第 2 页的标签也在 tags 里", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    vi.useFakeTimers();
+    try {
+      for (let i = 0; i < PAGE_SIZE + 1; i++) {
+        vi.setSystemTime(parseWallClock(`2026-09-26T12:${String(i).padStart(2, "0")}:00`));
+        createItem(t.db, raw, {
+          name: `通知 ${i}`,
+          kind: "notice",
+          tags: i === 0 ? ["只在旧页"] : [],
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    const p1 = await t.inject({ method: "GET", url: "/api/notices" });
+    const body = p1.json<{ notices: { item: { tags: string[] } }[]; tags: string[] }>();
+    expect(body.notices.some((r) => r.item.tags.includes("只在旧页"))).toBe(false);
+    expect(body.tags).toContain("只在旧页");
+  });
+
+  it("通知 page 非法 → 400", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    for (const url of ["/api/notices?page=0", "/api/notices?page=x"]) {
+      const res = await t.inject({ method: "GET", url });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+});
 
 describe("buildBoard（状态制三段；D-80 五段 → 007 三段）", () => {
   it("三段互斥：日期未知、已排期按 ddl 升序（时间钉死防墙钟漂移）；doubtNote 不再影响分段（D-89）", () => {

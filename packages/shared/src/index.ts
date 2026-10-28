@@ -597,12 +597,51 @@ export const ItemRowSchema = z.object({
 });
 export type ItemRow = z.infer<typeof ItemRowSchema>;
 
+/** 分页大小（看板「已完成」段与回收站共用）：**只有只增不减的段才分页**。
+ *
+ *  日期未知 / 已排期两段会随事项完成而收缩，本来就短；已完成与回收站只增不减，
+ *  全量下发会随使用时间线性增长（2026-10-27 用户：「一拉就拉全部，积攒多了就流量崩溃」）。 */
+export const PAGE_SIZE = 20;
+
+/** 已分页的一段：当前页的行 + 这段一共有多少。 */
+export const PageMetaSchema = z.object({
+  /** 折叠 = 本次**没有取行**（只给了计数）——不是「这段是空的」。 */
+  folded: z.boolean(),
+  /** 本段行的页码（1 起）。折叠时无意义，恒 1。 */
+  page: z.number().int().min(1),
+  pageCount: z.number().int().min(0), // 总页数（0 = 本段无内容）
+  total: z.number().int().min(0), // 本段总条数（全量，不是本页）
+});
+export type PageMeta = z.infer<typeof PageMetaSchema>;
+
+/** @ 提及候选的条数上限（对话输入框 `@` 的自动补全数据源）。
+ *
+ *  为什么单独给一份而不是让前端从看板行里收集：看板的已完成段与通知都分页了，
+ *  从行里收集会只剩当前页（折叠时一条都没有）——@ 不到旧条目，是静默的能力缩水。
+ *  这份是「非回收站的条目，id + 标题」，按最近更新倒序取前 N 条。
+ *
+ *  上限 500 是**有意的**：@ 是给「这条 / 它」消歧用的，不是检索入口；
+ *  真要找很久以前的东西请用对话里的检索工具。超出部分不进候选，不影响已有条目的读写。 */
+export const MENTIONABLE_LIMIT = 500;
+
+/** 一条 @ 提及候选（只够做自动补全：id 真实、标题给人看）。 */
+export const MentionableSchema = z.object({ id: z.string(), title: z.string() });
+export type Mentionable = z.infer<typeof MentionableSchema>;
+
 // 看板三段（01§4.3；D-80 五段 → D-89 四段 → 007 取消归档后三段）：日期未知 → 已排期 → 已完成
 // （存疑段已随 D-89 退场：拿不准的信息进存疑信息库，独立审核页——不再占看板）
 export const BoardViewSchema = z.object({
   undated: z.array(ItemRowSchema), // 日期未知段
   scheduled: z.array(ItemRowSchema), // 已排期（按 ddl 升序）
-  done: z.array(ItemRowSchema), // 已完成（默认折叠；status="done" 全量归此段）
+  /** 已完成：**只有当前页的行**（折叠时为空数组，条数看 `doneMeta`）。 */
+  done: z.array(ItemRowSchema),
+  /** 已完成段的分页信息（折叠态也带，段头计数才不依赖「取没取行」）。 */
+  doneMeta: PageMetaSchema,
+  /** 全部标签（三段合起来去重排序）——**服务端算**，与分页无关。
+   *  客户端自己从行里收集的话，折叠时标签栏会凭空少掉一大批。 */
+  tags: z.array(z.string()),
+  /** @ 提及候选（见 `MENTIONABLE_LIMIT`）——与分页无关，折叠时也全都有。 */
+  mentionables: z.array(MentionableSchema),
   failedRawInputs: z.array(RawInputSchema), // 「未处理」横幅
 });
 export type BoardView = z.infer<typeof BoardViewSchema>;
@@ -619,9 +658,16 @@ export const NoticeRowSchema = z.object({
 });
 export type NoticeRow = z.infer<typeof NoticeRowSchema>;
 
-// 通知页（独立入口，不进看板三段）：通知按最近更新倒序平铺。
+// 通知页（独立入口，不进看板三段）：通知按最近更新倒序平铺——**列表分页**（D-136：只增不减 + 每 10s 轮询）。
+// 主卡不在分页范围内：它只展示「当前选中的那条」，选中项可以不在本页（翻页不夺走正在读的卡）。
 export const NoticeViewSchema = z.object({
+  /** 只有当前页的列表行。 */
   notices: z.array(NoticeRowSchema),
+  meta: PageMetaSchema,
+  /** 未读总数（**全量**，不是本页）——活动栏徽标用。分页之后不能再拿本页数未读了。 */
+  unreadTotal: z.number().int().min(0),
+  /** 全部通知标签（去重排序）——服务端算，理由同 `BoardView.tags`：本页收集会漏掉别页的标签。 */
+  tags: z.array(z.string()),
 });
 export type NoticeView = z.infer<typeof NoticeViewSchema>;
 
@@ -634,9 +680,11 @@ export const TrashRowSchema = z.object({
 });
 export type TrashRow = z.infer<typeof TrashRowSchema>;
 
-// 回收站列表按进入 trashed 的时刻倒序（最新删的在上）。
+// 回收站列表按进入 trashed 的时刻倒序（最新删的在上）——只增不减，**分页**（PAGE_SIZE）。
 export const TrashViewSchema = z.object({
+  /** 只有当前页的行。 */
   rows: z.array(TrashRowSchema),
+  meta: PageMetaSchema,
 });
 export type TrashView = z.infer<typeof TrashViewSchema>;
 

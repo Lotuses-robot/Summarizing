@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { runInTransaction } from "../storage/db";
 import * as repo from "../storage/repo";
 import { deriveTrashed } from "../application/trash";
@@ -7,9 +8,16 @@ import { deriveTrashed } from "../application/trash";
 // 与 items 路由同一保证——不存在「未鉴权可到」的形态）。
 // 彻底删只发生在清理环节且 >15d 才清理；raw_inputs/fragments/uncertain_inputs 不受影响。
 
+/** 列表查询参数：page 缺席 = 第 1 页，非法 = 400（不猜一个默认页糊过去）。 */
+const TrashQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) });
+
 /** 注册回收站资源路由（GET 列表 / POST purge）。 */
 export function registerTrashRoutes(app: FastifyInstance): void {
-  app.get("/api/trash", async (req) => deriveTrashed(req.space.db));
+  app.get("/api/trash", async (req, reply) => {
+    const parsed = TrashQuerySchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: "page 必须是 ≥1 的整数" });
+    return deriveTrashed(req.space.db, parsed.data.page);
+  });
 
   // 一键清理（用户显式触发，无定时任务）：物理清除 trashed 超过 15 天的信息。
   // 留痕在事务**提交成功后**写（回滚时不能留下"已彻底清除"的假痕——红线：留痕必须属实）。

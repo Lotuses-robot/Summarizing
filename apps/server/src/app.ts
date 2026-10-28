@@ -46,6 +46,14 @@ const ChatHistoryQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
+/** 看板查询参数：page = 已完成段页码（默认第 1 页）；folded=1 = 该段折叠、不查行。
+ *  `folded` 收 `"0"|"1"` 而不是 boolean：查询串里 `folded=false` 会被 z.coerce.boolean 当 **true**
+ *  （非空串恒真），那种形状只该在界面上消失。 */
+const BoardQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  folded: z.enum(["0", "1"]).default("0"),
+});
+
 /** webhook 网关参数：token 定空间、source + 通配定处理器。 */
 const HookParamsSchema = z.object({ token: z.string(), source: z.string(), "*": z.string() });
 
@@ -217,10 +225,25 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub; router?: Ro
       return reply.code(202).send({ id: raw.id, digestState });
     });
 
-    scope.get("/api/board", async (req) => buildBoard(req.space.db));
+    // 看板：已完成段分页（只增不减的段才分页，见 application/paging.ts）。
+    // `folded=1` = 段折叠 → **一个 done 行都不查**（排序要逐条查版本链，省掉它才是分页的主要收益）。
+    scope.get("/api/board", async (req, reply) => {
+      const parsed = BoardQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: "page 必须是 ≥1 的整数；folded 只能是 0 或 1" });
+      }
+      return buildBoard(req.space.db, {
+        page: parsed.data.page,
+        folded: parsed.data.folded === "1",
+      });
+    });
 
-    // 通知页（007）：kind=notice 的独立查看入口——不进看板三段
-    scope.get("/api/notices", async (req) => deriveNotices(req.space.db));
+    // 通知页（007）：kind=notice 的独立查看入口——不进看板三段。**列表分页**（D-136）
+    scope.get("/api/notices", async (req, reply) => {
+      const parsed = BoardQuerySchema.pick({ page: true }).safeParse(req.query);
+      if (!parsed.success) return reply.code(400).send({ error: "page 必须是 ≥1 的整数" });
+      return deriveNotices(req.space.db, parsed.data.page);
+    });
 
     // 对话历史回填（L16）：持久化的轮次，前端启动时拉回——解「刷新/换设备对话即失」。
     scope.get("/api/chat/history", async (req) => {

@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
-  itemName,
   type BoardView,
   type MeView,
   type NoticeView,
@@ -31,7 +30,7 @@ import {
 } from "./components/AboutModal";
 import { cn } from "./lib/cn";
 import { handleEsc, pushEscLayer } from "./lib/escLayer";
-import { loadChatOpen, saveChatOpen } from "./lib/appearance";
+import { loadChatOpen, loadSectionFold, saveChatOpen, saveSectionFold } from "./lib/appearance";
 
 /** 全视图错误横幅（连接告警 / 存疑库过期——两条语义各有独立 state，仅标记共用）。 */
 function Banner({ text }: { text: string }) {
@@ -140,7 +139,39 @@ export default function App() {
   const uncertainSeq = useRef(0);
   const trashSeq = useRef(0);
 
-  /** 统一「回到未登录」（单点拦截回调 + 登出共用）：清会话与数据态——并发 401 幂等。 */
+  // ── 分页光标（D-135 / D-136；三处都是「只增不减 + 高频轮询」的列表）──
+  //
+  // 为什么 state 与 ref 成对：state 是「界面」，ref 是「下次请求要带的值」。定时器与回调不能读
+  // state 的最新值（闭包会旧），所以每次写都**两处一起写**——见下面各 setter。
+  // 为什么放在这里（而不是各 loader 旁边）：`handleUnauthenticated` 要在登出时把它们归零，
+  // 声明必须早于它（TDZ）。
+  const [donePage, setDonePageState] = useState(1);
+  const donePageRef = useRef(donePage);
+  /** 写已完成段页码：state 与 ref 同步落。 */
+  const setDonePage = useCallback((page: number) => {
+    donePageRef.current = page;
+    setDonePageState(page);
+  }, []);
+  const [noticePage, setNoticePageState] = useState(1);
+  const noticePageRef = useRef(noticePage);
+  /** 写通知页码：state 与 ref 同步落。 */
+  const setNoticePage = useCallback((page: number) => {
+    noticePageRef.current = page;
+    setNoticePageState(page);
+  }, []);
+  const [trashPage, setTrashPageState] = useState(1);
+  const trashPageRef = useRef(trashPage);
+  /** 写回收站页码：state 与 ref 同步落。 */
+  const setTrashPage = useCallback((page: number) => {
+    trashPageRef.current = page;
+    setTrashPageState(page);
+  }, []);
+
+  /** 统一「回到未登录」（单点拦截回调 + 登出共用）：清会话与数据态——并发 401 幂等。
+   *
+   *  ⚠️ **页码也要归零**：这些 ref 是「下次请求要带的值」，登出后不清就会带进下一个账户——
+   *  A 翻到第 3 页登出，B 登录后第一次请求就是第 3 页，B 最近的条目被静默跳过。
+   *  （`genRef` 只作废在飞响应，管不到「下一个账户的第一次请求」。） */
   const handleUnauthenticated = useCallback(() => {
     genRef.current += 1;
     setMe(null);
@@ -154,7 +185,11 @@ export default function App() {
     setAccountOpen(false);
     setAboutOpen(false); // 弹层也要清——否则换账户/重登时残影（评审 2026-10-13）
     setAboutUpgradeFrom(null);
-  }, []);
+    setDonePage(1);
+    setNoticePage(1);
+    setTrashPage(1);
+    // 页容量相关的偏好（已完成折叠）是**本机习惯**、不是账户数据——保留。
+  }, [setDonePage, setNoticePage, setTrashPage]);
 
   // 启动探测：me 200 → 主界面；401（未登录的正常首屏路径）→ 认证壳；
   // 其余错误（网络/5xx）= 后端不可达——在认证壳上如实提示（评审修复：曾与 401 一并吞掉）。
@@ -183,61 +218,93 @@ export default function App() {
     };
   }, [handleUnauthenticated]);
 
-  /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。会话代次 + 请求序号守卫：旧响应丢弃。 */
-  const loadBoard = useCallback(() => {
-    const gen = genRef.current;
-    const seq = ++boardSeq.current;
-    api
-      .board()
-      .then((b) => {
-        if (genRef.current !== gen || seq !== boardSeq.current) return;
-        setBoard(b);
-        setError(null); // 恢复连线就撤横幅——错误态不滞留
-      })
-      .catch(() => {
-        if (genRef.current !== gen || seq !== boardSeq.current) return;
-        setError("后端服务未连接（apps/server 是否在跑？）");
-      });
-  }, []);
+  /** 已完成段的**折叠**偏好（页码在上面统一声明）：折叠要发给服务端（`folded=1` → 一个 done 行都不查）。 */
+  const [doneFolded, setDoneFoldedState] = useState(() => loadSectionFold("done"));
+  const doneFoldedRef = useRef(doneFolded);
+  /** 写已完成段折叠：state 与 ref 同步落。 */
+  const setDoneFolded = useCallback((folded: boolean) => {
+    doneFoldedRef.current = folded;
+    setDoneFoldedState(folded);
+  }, []); /** 拉看板；后端不在时挂横幅（不打断已渲染内容）。会话代次 + 请求序号守卫：旧响应丢弃。
+   *
+   *  分页（2026-10-27）：**已完成段的翻页与折叠状态归这里**——只有 App 知道要查第几页、
+   *  要不要查；折叠时把 `folded=1` 发给服务端，那边一个 done 行都不查（轮询因此更省）。
+   *
+   *  ⚠️ 折叠偏好另外由 Board 的段头按钮改（界面就在那儿）。改偏好只有一个入口 `setDoneFold`：
+   *  先落偏好、再重拉——**Board 不再自己记 done 的折叠**（否则两处状态各说各话）。 */
+  const loadBoard = useCallback(
+    (opts?: { page?: number; folded?: boolean }) => {
+      const page = opts?.page ?? donePageRef.current;
+      const folded = opts?.folded ?? doneFoldedRef.current;
+      const gen = genRef.current;
+      const seq = ++boardSeq.current;
+      api
+        .board({ page, folded })
+        .then((b) => {
+          if (genRef.current !== gen || seq !== boardSeq.current) return;
+          setBoard(b);
+          setError(null); // 恢复连线就撤横幅——错误态不滞留
+          // 页码越界（最后一条被删/完成）由服务端夹到有效页并如实回报——这里跟过去
+          if (b.doneMeta.page !== page) setDonePage(b.doneMeta.page);
+        })
+        .catch(() => {
+          if (genRef.current !== gen || seq !== boardSeq.current) return;
+          setError("后端服务未连接（apps/server 是否在跑？）");
+        });
+    },
+    [setDonePage],
+  );
 
-  /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份。
+  /** 拉通知（007）：通知页数据 + 活动栏未读徽标共用同一份——**列表分页**（D-136）。
    *  失败用**独立**错误态（别与看板共享 error——看板每 10s 成功轮询会把它清掉，
    *  通知页就会拿假空态说事）。 */
   const [noticesError, setNoticesError] = useState<string | null>(null);
-  const loadNotices = useCallback(() => {
-    const gen = genRef.current;
-    const seq = ++noticesSeq.current;
-    api
-      .notices()
-      .then((n) => {
-        if (genRef.current !== gen || seq !== noticesSeq.current) return;
-        setNotices(n);
-        setNoticesError(null);
-      })
-      .catch(() => {
-        if (genRef.current !== gen || seq !== noticesSeq.current) return;
-        setNoticesError("通知拉取失败——列表可能不是最新的");
-      });
-  }, []);
+  const loadNotices = useCallback(
+    (page?: number) => {
+      const want = page ?? noticePageRef.current;
+      const gen = genRef.current;
+      const seq = ++noticesSeq.current;
+      api
+        .notices(want)
+        .then((n) => {
+          if (genRef.current !== gen || seq !== noticesSeq.current) return;
+          setNotices(n);
+          setNoticesError(null);
+          // 页码越界（最后一条被清除）由服务端夹到有效页并如实回报——这里跟过去
+          if (n.meta.page !== want) setNoticePage(n.meta.page);
+        })
+        .catch(() => {
+          if (genRef.current !== gen || seq !== noticesSeq.current) return;
+          setNoticesError("通知拉取失败——列表可能不是最新的");
+        });
+    },
+    [setNoticePage],
+  );
 
-  /** 拉回收站（007）：进页即拉（清理/恢复都即时刷新，不靠轮询兜）。
+  /** 拉回收站（007）：进页即拉（清理/恢复都即时刷新，不靠轮询兜）——分页，一页 PAGE_SIZE 条。
    *  失败**必须可见**（红线「不许静默」）——否则空列表会被当成「回收站是空的」（假空态）。 */
   const [trashError, setTrashError] = useState<string | null>(null);
-  const loadTrash = useCallback(() => {
-    const gen = genRef.current;
-    const seq = ++trashSeq.current;
-    api
-      .trashList()
-      .then((t) => {
-        if (genRef.current !== gen || seq !== trashSeq.current) return;
-        setTrash(t);
-        setTrashError(null);
-      })
-      .catch(() => {
-        if (genRef.current !== gen || seq !== trashSeq.current) return;
-        setTrashError("回收站拉取失败——列表可能不是最新的");
-      });
-  }, []);
+  const loadTrash = useCallback(
+    (page?: number) => {
+      const want = page ?? trashPageRef.current;
+      const gen = genRef.current;
+      const seq = ++trashSeq.current;
+      api
+        .trashList(want)
+        .then((t) => {
+          if (genRef.current !== gen || seq !== trashSeq.current) return;
+          setTrash(t);
+          setTrashError(null);
+          // 页码越界（最后一条被恢复/清理）由服务端夹到有效页并如实回报——这里跟过去
+          if (t.meta.page !== want) setTrashPage(t.meta.page);
+        })
+        .catch(() => {
+          if (genRef.current !== gen || seq !== trashSeq.current) return;
+          setTrashError("回收站拉取失败——列表可能不是最新的");
+        });
+    },
+    [setTrashPage],
+  );
 
   /** 拉存疑库 open 列表（D-89）：审核页数据 + 活动栏徽标计数共用同一份。
    *  失败置可见错误（不静默——否则审核页会拿旧数据/假空态说事，评审 Critical）。 */
@@ -331,36 +398,43 @@ export default function App() {
     }));
   };
 
-  const allTags = useMemo(() => {
-    if (board === null) return [];
-    return [
-      ...new Set([...board.undated, ...board.scheduled, ...board.done].flatMap((r) => r.item.tags)),
-    ].sort();
-  }, [board]);
+  /** 切已完成段的折叠：偏好与请求一处收敛（唯一入口——见 loadBoard 的注释）。
+   *  重新展开时回到第 1 页（最近完成的在最上面，那才是想看的）。 */
+  const setDoneFold = (folded: boolean) => {
+    saveSectionFold("done", folded);
+    setDoneFolded(folded);
+    setDonePage(1);
+    loadBoard({ page: 1, folded });
+  };
 
-  /** @ 提及候选：看板三段 + 通知（OQ-9：@ 提及候选收录通知）——提及历史信息合理。 */
-  const chatItems = useMemo(() => {
-    const boardRows = board === null ? [] : [...board.undated, ...board.scheduled, ...board.done];
-    const noticeRows = notices?.notices ?? [];
-    return [...boardRows, ...noticeRows].map((r) => ({
-      id: r.item.id,
-      title: itemName(r.item.elements),
-    }));
-  }, [board, notices]);
+  /** 已完成段翻页。 */
+  const gotoDonePage = (page: number) => {
+    setDonePage(page);
+    loadBoard({ page });
+  };
+
+  /** 标签全集：**服务端算好随看板下发**（`board.tags`）——已完成段只给一页，
+   *  客户端从行里收集会凭空少掉一大半标签。 */
+  const allTags = board?.tags ?? [];
+
+  /** @ 提及候选：**服务端给（`board.mentionables`），不从当前页的行里收集**。
+   *
+   *  为什么：已完成段与通知都分页了——从行里收集的话，折叠态下一条已完成都 @ 不到，
+   *  展开时也只有当前页（D-135 review 逮出的能力静默缩水）。这份是「非回收站条目」的全量
+   *  前 500 条（`MENTIONABLE_LIMIT`），与分页无关。 */
+  const chatItems = board?.mentionables ?? [];
 
   /** 通知未读数（活动栏徽标，OQ-10）：纯计数，有未读才显示。
-   *  形状防御：`notices` 字段缺席（异常载荷/接口降级）时按 0 计——徽标缺省不显示，
+   *
+   *  ⚠️ 用服务端的 `unreadTotal`（**全量**），不是数本页——通知列表分页了（D-136），
+   *  数本页会让徽标随翻页忽大忽小，且第 2 页之后有未读时数字偏小。
+   *  形状防御：字段缺席（异常载荷/接口降级）时按 0 计——徽标缺省不显示，
    *  不让一处脏数据把整个界面打白（与详情页「派生失败降级」同一取向）。 */
-  const unreadNoticeCount = useMemo(() => {
-    const rows = notices?.notices ?? [];
-    return rows.filter((r) => !r.viewed).length;
-  }, [notices]);
+  const unreadNoticeCount = notices?.unreadTotal ?? 0;
 
-  /** 通知的标签全集（筛选栏用，与看板 allTags 同性质——只看通知自己的）。 */
-  const noticeTags = useMemo(() => {
-    const rows = notices?.notices ?? [];
-    return [...new Set(rows.flatMap((r) => r.item.tags))].sort();
-  }, [notices]);
+  /** 通知的标签全集：**服务端算好随通知一起下发**（`notices.tags`）——理由同看板 `board.tags`：
+   *  只从本页行里收集会漏掉「只出现在别的页上的标签」，标签栏会随翻页忽隐忽现。 */
+  const noticeTags = notices?.tags ?? [];
 
   /** 通知筛选谓词：语义单一出处 = FilterBar.matchesFilter（与看板共用，防两套真相）。 */
   const noticeVisible = useCallback(
@@ -447,7 +521,12 @@ export default function App() {
             <NoticePanel
               notices={notices?.notices ?? []}
               filter={noticeVisible}
-              onRefresh={loadNotices}
+              onRefresh={() => loadNotices()}
+              meta={notices?.meta ?? null}
+              onPage={(page) => {
+                setNoticePage(page);
+                loadNotices(page);
+              }}
               focus={focus}
             />{" "}
           </>
@@ -456,7 +535,15 @@ export default function App() {
         ) : view === "pipeline" ? (
           <PipelineView />
         ) : view === "trash" ? (
-          <TrashPanel rows={trash?.rows ?? []} onRefresh={loadTrash} />
+          <TrashPanel
+            rows={trash?.rows ?? []}
+            meta={trash?.meta ?? null}
+            onRefresh={() => loadTrash()}
+            onPage={(page) => {
+              setTrashPage(page);
+              loadTrash(page);
+            }}
+          />
         ) : (
           <>
             {/* 顶部整栏筛选（token 堆左、搜索框占满）+ 对话开关 */}
@@ -515,6 +602,9 @@ export default function App() {
               <Board
                 board={board}
                 onRefresh={loadBoard}
+                onDonePage={gotoDonePage}
+                onDoneFold={setDoneFold}
+                doneFolded={doneFolded}
                 focus={focus}
                 filter={filter}
                 onTagClick={toggleFilterTag}
