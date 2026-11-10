@@ -64,12 +64,30 @@ describe("企业微信回调加解密", () => {
     expect(() => decryptCallback(Buffer.alloc(10).toString("base64"), AES_KEY)).toThrow(/长度/);
   });
 
-  it("篡改密文 → 填充校验失败（不静默返回垃圾）", () => {
+  it("密文截断 → 抛（不是可解的形状）", () => {
     const encrypted = encryptForTest("<xml><Event>kf_msg_or_event</Event></xml>", CORP_ID);
     const buf = Buffer.from(encrypted, "base64");
-    // 破坏最后一个字节（密文块尾部），解密后填充极可能非法
-    buf[buf.length - 1] = (buf[buf.length - 1] ?? 0) ^ 0xff;
-    expect(() => decryptCallback(buf.toString("base64"), AES_KEY)).toThrow();
+    // 截掉末尾几个字节 = 长度不再是 16 的整数倍 → 解密前就被长度校验拦下（确定性，不靠概率）
+    const truncated = buf.subarray(0, buf.length - 5);
+    expect(() => decryptCallback(truncated.toString("base64"), AES_KEY)).toThrow();
+  });
+
+  it("篡改密文 → 抛（PKCS#7 填充校验兜底，不静默返回垃圾）", () => {
+    const encrypted = encryptForTest("<xml><Event>kf_msg_or_event</Event></xml>", CORP_ID);
+    const buf = Buffer.from(encrypted, "base64");
+    // 破坏整块的首字节：解密结果面目全非，填充几乎必然非法。
+    // 注：填充校验天然有 1/256 概率「恰好合法」——所以这条只作兜底覆盖，
+    // 真正确定性的拒绝路径看上一条（长度校验）。
+    buf[buf.length - 16] = (buf[buf.length - 16] ?? 0) ^ 0xff;
+    // 允许两种结局：抛错，或（极小概率）解出乱码——两者都不能是「静默返回原文」
+    let threw = false;
+    let xml = "";
+    try {
+      xml = decryptCallback(buf.toString("base64"), AES_KEY).xml;
+    } catch {
+      threw = true;
+    }
+    expect(threw || !xml.includes("kf_msg_or_event")).toBe(true);
   });
 });
 

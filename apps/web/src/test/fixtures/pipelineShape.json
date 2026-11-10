@@ -1,0 +1,50 @@
+{
+  "runs": {
+    "runs": [
+      {
+        "id": "run-chat-1",
+        "source": "chat",
+        "displayName": "前台对话",
+        "receivedAt": "2026-10-20T09:54:05",
+        "eventTime": "2026-10-20T09:54:05",
+        "digestState": "digested",
+        "summary": null,
+        "eventCount": 0
+      },
+      {
+        "id": "run-nc-1",
+        "source": "nc",
+        "displayName": "示例群",
+        "receivedAt": "2026-10-20T07:24:05",
+        "eventTime": "2026-10-20T07:24:05",
+        "digestState": "digested",
+        "summary": null,
+        "eventCount": 0
+      }
+    ]
+  },
+  "detail": {
+    "raw": {
+      "id": "run-chat-1",
+      "content": "帮我记一下，下周三下午三点在三楼会议室开组会。",
+      "source": "chat",
+      "identity": { "displayName": "前台对话" },
+      "receivedAt": "2026-10-20T09:54:05",
+      "eventTime": "2026-10-20T09:54:05",
+      "digestState": "digested"
+    },
+    "events": [],
+    "context": {
+      "turns": [
+        { "role": "user", "content": "我说的那个作业要交了", "at": "2026-11-10T20:00:00" },
+        {
+          "role": "assistant",
+          "content": "你是说「课程设计」那条吗？",
+          "at": "2026-11-10T20:00:08"
+        },
+        { "role": "user", "content": "对，就它", "at": "2026-11-10T20:00:20" }
+      ],
+      "mentions": [{ "id": "item-example", "title": "课程设计" }]
+    }
+  }
+}
