@@ -77,6 +77,7 @@ function emptyDetail(): Response {
       digestState: "digesting",
     },
     events: [],
+    context: null,
   });
 }
 
@@ -114,6 +115,7 @@ function stubApi(): void {
               digestState: "digested",
             },
             events: DETAIL_EVENTS,
+            context: null,
           }),
         );
       }
@@ -163,6 +165,7 @@ function stubApi(): void {
                 by: { actor: "agent0", model: "test" },
               },
             ],
+            context: null,
           }),
         );
       }
@@ -415,6 +418,7 @@ describe("PipelineView（流水视图，specs/005）", () => {
                 digestState: "digesting",
               },
               events: grown ? [first, second] : [first],
+              context: null,
             }),
           );
         }
@@ -499,6 +503,7 @@ describe("图片缓存进度（009：缓存中/成功/失败都看得见）", ()
                   by: { actor: "系统", model: null },
                 },
               ],
+              context: null,
             }),
           );
         }
@@ -512,5 +517,124 @@ describe("图片缓存进度（009：缓存中/成功/失败都看得见）", ()
     await waitFor(() => expect(screen.getByText(/开始缓存本批图片/)).toBeInTheDocument());
     // 失败结果同样可见（降级不静默）
     expect(screen.getByText(/图片缓存：缓存 1 \/ 已有 0 \/ 失败 1/)).toBeInTheDocument();
+  });
+});
+
+describe("提交上下文可见（D-139：上下文影响判类，用户要看得见）", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("chat 批次：默认折叠，点开看到逐轮对话与 @ 提及", async () => {
+    const run = {
+      id: "r-ctx",
+      source: "chat",
+      displayName: "用户对话",
+      receivedAt: "2026-10-28T11:00:00",
+      eventTime: null,
+      digestState: "digested",
+      summary: "应用 1 项变更",
+      eventCount: 1,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/pipeline/runs/r-ctx")) {
+          return Promise.resolve(
+            jsonResponse({
+              raw: {
+                id: "r-ctx",
+                content: "就按它说的改成周三",
+                source: "chat",
+                identity: { displayName: "用户对话" },
+                receivedAt: "2026-10-28T11:00:00",
+                eventTime: null,
+                digestState: "digested",
+              },
+              events: [],
+              context: {
+                turns: [
+                  { role: "user", content: "我说的那个作业", at: "2026-10-28T10:58:00" },
+                  {
+                    role: "assistant",
+                    content: "你是说「交作文」那条？",
+                    at: "2026-10-28T10:58:30",
+                  },
+                ],
+                mentions: [{ id: "i-1", title: "交作文" }],
+              },
+            }),
+          );
+        }
+        if (url.includes("/api/pipeline/runs"))
+          return Promise.resolve(jsonResponse({ runs: [run] }));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<PipelineView />);
+    fireEvent.click(await screen.findByRole("button", { name: /用户对话/ }));
+    const detail = within(await screen.findByTestId("run-detail"));
+
+    // 默认折叠：上下文内容不可见，但入口在
+    const toggle = await detail.findByRole("button", {
+      name: /查看提交时的对话上下文（2 条消息 · @ 提及 1 条）/,
+    });
+    expect(detail.queryByText("我说的那个作业")).not.toBeInTheDocument();
+
+    // 点开：逐轮对话 + 时刻 + @ 提及都在
+    fireEvent.click(toggle);
+    expect(await detail.findByText(/我说的那个作业/)).toBeInTheDocument();
+    expect(detail.getByText(/你是说「交作文」那条？/)).toBeInTheDocument();
+    expect(detail.getByText(/2026-10-28T10:58:00/)).toBeInTheDocument();
+    expect(detail.getByText(/@ 提及：「交作文」/)).toBeInTheDocument();
+    // 说明它不算证据——引文仍只能来自原文
+    expect(detail.getByText(/引文仍只能逐字来自上方原文/)).toBeInTheDocument();
+  });
+
+  it("非 chat 批次（context 为 null）：不渲染上下文入口", async () => {
+    const run = {
+      id: "r-noctx",
+      source: "nc",
+      displayName: "社团群",
+      receivedAt: "2026-10-28T11:00:00",
+      eventTime: null,
+      digestState: "digested",
+      summary: null,
+      eventCount: 1,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes("/api/pipeline/runs/r-noctx")) {
+          return Promise.resolve(
+            jsonResponse({
+              raw: {
+                id: "r-noctx",
+                content: "群里发的通知",
+                source: "nc",
+                identity: { displayName: "社团群" },
+                receivedAt: "2026-10-28T11:00:00",
+                eventTime: null,
+                digestState: "digested",
+              },
+              events: [],
+              context: null,
+            }),
+          );
+        }
+        if (url.includes("/api/pipeline/runs"))
+          return Promise.resolve(jsonResponse({ runs: [run] }));
+        return Promise.resolve(jsonResponse({}));
+      }),
+    );
+
+    render(<PipelineView />);
+    fireEvent.click(await screen.findByRole("button", { name: /社团群/ }));
+    const detail = within(await screen.findByTestId("run-detail"));
+    expect(detail.queryByText(/查看提交时的对话上下文/)).not.toBeInTheDocument();
   });
 });

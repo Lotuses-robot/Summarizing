@@ -11,6 +11,7 @@ import {
   type ChangeList,
   type DigestState,
   type Provenance,
+  type RawContext,
   type RawInput,
 } from "@summarizing/shared";
 import type { Db } from "../storage/db";
@@ -422,7 +423,9 @@ async function elicitChangeList(
 ): Promise<{ list: ChangeList; readMedia: Map<string, string>; rawText: string }> {
   // 消化开始时刻（本轮对话全程不变）：给模型一个明确的「现在」——补年份、判是否已过期都要它
   const digestAt = nowWallClock();
-  const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw, digestAt) }];
+  // 提交上下文（D-139）：只有对话入口的批次有；非 chat / 无历史时为空，简报里就不出现那一段
+  const context = repo.getRawContext(db, raw.id);
+  const messages: ChatMsg[] = [{ role: "user", content: buildUserBrief(raw, digestAt, context) }];
   const readMedia = new Map<string, string>();
   let traced = 0; // 已落 trace 的轮次（1-based；清单解析失败的重试轮不产生 trace，故序号连续——七轮评审）
   let imageBudget = MAX_IMAGE_FETCHES; // 本批取图预算（防模型反复取图撑爆上下文/带宽）
@@ -771,10 +774,15 @@ function readSourceHints(db: Db): repo.SourceDigestHint[] {
 
 /** 拼「这条信息」的用户消息（D-118 的三个时刻：事件时间 / 提交时间 / 消化时间）。
  *
+ *  `context`（D-139）= 对话入口交来的提交上下文。它单独成段、并**明说它是什么**——
+ *  模型必须知道两件事：①它只用来消解指代（「改成周三」的那个「它」是哪条）；
+ *  ②它**不是要记录的内容**，其中的句子也**不能当引文**（围栏只认 content，取了必被拒收）。
+ *
  *  @param raw 待消化的批次
  *  @param now 消化时刻（整轮不变——模型判「今年/是否已过期」的「现在」）
+ *  @param context 提交上下文（非 chat 入口 / 无对话历史时为 null）
  */
-function buildUserBrief(raw: RawInput, now: string): string {
+function buildUserBrief(raw: RawInput, now: string, context: RawContext | null): string {
   const isChat = raw.source === "chat";
   return [
     "[原始信息]",
@@ -792,7 +800,29 @@ function buildUserBrief(raw: RawInput, now: string): string {
       ? `提交时间：${raw.receivedAt}（前台提交这条的原话，即用户说完的时刻——「明天/下周」以此为锚）`
       : `接收时间：${raw.receivedAt}`,
     `消化时间：${now}（现在是这个时刻——判「今年」与是否已过期用它）`,
+    ...(context === null ? [] : ["", ...contextBlock(context)]),
     "",
     "请处理这条信息（按系统规则产出变更清单）。",
   ].join("\n");
+}
+
+/** 上下文段的正文行（D-139）：对话片段逐条带时刻 + @ 提及事项。 */
+function contextBlock(context: RawContext): string[] {
+  const lines = [
+    "【对话上下文——只用来理解下面「内容」在说什么，**不是要记录的信息**】",
+    "- 用户在对话里可能用了指代（「它」「那条」「刚才说的」）；把它对到下面这些话或提及的事项上。",
+    "- ⚠️ 这些句子**不得当作引文**：quotes 只能逐字摘自上面「内容（逐字）」；取自此处一律会被围栏拒收。",
+    "- ⚠️ 不要把上下文里已经说过的信息重复建成新事项——那条在它自己那一批里已经处理过了。",
+  ];
+  if (context.turns.length > 0) {
+    lines.push("", "最近的对话（时间升序）：");
+    for (const t of context.turns) {
+      lines.push(`- [${t.at}] ${t.role === "user" ? "用户" : "前台"}：${t.content}`);
+    }
+  }
+  if (context.mentions.length > 0) {
+    lines.push("", "用户在输入框 @ 提及的事项（id 真实可用 get_item 核实）：");
+    for (const m of context.mentions) lines.push(`- 「${m.title}」(id=${m.id})`);
+  }
+  return lines;
 }

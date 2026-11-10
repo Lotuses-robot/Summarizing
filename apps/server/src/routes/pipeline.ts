@@ -29,6 +29,8 @@ export function registerPipelineRoutes(app: FastifyInstance): void {
     return PipelineRunDetailSchema.parse({
       raw,
       events: repo.listPipelineEvents(req.space.db, id),
+      // 对话提交上下文（D-139）：它影响 agent0 的判类结果，用户必须看得见
+      context: repo.getRawContext(req.space.db, id),
     });
   });
 }

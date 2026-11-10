@@ -17,8 +17,9 @@ import { nowWallClock } from "../shared/time";
  *    保留键 sourceLabel → displayName（列名幂等改名 + 存量 JSON 键改名）。
  *  v6（012 / D-127）：全文检索——raw_inputs 加 tokens / identity_tokens、建 FTS5 虚表 raw_fts，
  *    存量批次切词回填 + 索引重建。
- *  v7（013 / D-130）：系统库新增 relay_settings（部署级信源设置）——纯建表，无存量变换。 */
-export const SCHEMA_VERSION = 7;
+ *  v7（013 / D-130）：系统库新增 relay_settings（部署级信源设置）——纯建表，无存量变换。
+ *  v8（015 / D-139）：raw_inputs 新增 context（对话上下文，仅 source=chat 有值）——纯加列，无存量变换。 */
+export const SCHEMA_VERSION = 8;
 
 /** 备份保留份数（超过按时间清最旧——防无限堆积）。 */
 const BACKUP_KEEP = 5;

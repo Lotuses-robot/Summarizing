@@ -229,6 +229,32 @@ export const RawInputSchema = z.object({
 });
 export type RawInput = z.infer<typeof RawInputSchema>;
 
+// ──────────────── 对话上下文（D-139：前台说的话 agent0 也该懂）────────────────
+
+/** 上下文里的一句对话（前台与用户都算）。时刻是落库的北京墙钟——agent0 判「刚才/昨天」要用。 */
+export const ChatContextTurnSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  at: z.string(),
+});
+export type ChatContextTurn = z.infer<typeof ChatContextTurnSchema>;
+
+/** 对话提交上下文：**只用于消解指代，不是要记录的内容**（与 content 严格分开）。
+ *  只有 source=chat 的批次会带；围栏的引文逐字校验只对 content 做——上下文里的句子永远不能成为证据。 */
+export const RawContextSchema = z.object({
+  turns: z.array(ChatContextTurnSchema), // 本条消息之前的若干轮（时间升序）
+  mentions: z.array(z.object({ id: z.string(), title: z.string() })), // 输入框 @ 提及的事项
+});
+export type RawContext = z.infer<typeof RawContextSchema>;
+
+/** 上下文上限（装配时截断，非报错）：轮数与单轮字数各设一道，防提示词被一段长对话撑爆。
+ *
+ *  `RAW_CONTEXT_TURNS` 的单位是**轮**（一问一答算一轮），不是 `chat_turns` 的行数——
+ *  那张表一条消息一行。装配时按 ×2 折算成行数（`buildRawContext`）。
+ *  曾经的实现在这里按行数取，结果「6 轮」只拿到 3 组问答，指代消解缺一半上下文。 */
+export const RAW_CONTEXT_TURNS = 6;
+export const RAW_CONTEXT_TURN_MAX_CHARS = 500;
+
 /** ingest 请求体（HTTP 边界校验用同一份 schema）。 */
 export const IngestRequestSchema = z.object({
   content: z.string().min(1),
@@ -1052,9 +1078,13 @@ export const PipelineRunSchema = z.object({
 export type PipelineRun = z.infer<typeof PipelineRunSchema>;
 
 /** 进站详情：批次原文 + 全部流水事件（流水视图展开行的数据源）。 */
+/** 进站详情：批次原文 + 全部流水事件（流水视图展开行的数据源）。
+ *  `context` = 对话提交上下文（D-139）：上下文会影响 agent0 的判类结果，所以必须可见——
+ *  否则用户看到「它把这条判成了通知」却不知道它当时看到了什么。非 chat 批次 / 读不出来时为 null。 */
 export const PipelineRunDetailSchema = z.object({
   raw: RawInputSchema,
   events: z.array(PipelineEventSchema),
+  context: RawContextSchema.nullable(),
 });
 export type PipelineRunDetail = z.infer<typeof PipelineRunDetailSchema>;
 

@@ -68,7 +68,8 @@ function ensureSchema(sqlite: Database.Database): void {
       received_at TEXT NOT NULL,
       event_time TEXT,
       digest_state TEXT NOT NULL DEFAULT 'pending',
-      raw TEXT
+      raw TEXT,
+      context TEXT
     );
     CREATE TABLE IF NOT EXISTS pipeline_events (
       id TEXT PRIMARY KEY,
@@ -162,6 +163,8 @@ function ensureSchema(sqlite: Database.Database): void {
   // ── 信源阶段迁移（D-84）——幂等，跑在老库上无害 ──
   // ① raw_inputs 补 raw 归档列（老库无此列）
   addColumnIfMissing(sqlite, "raw_inputs", "raw");
+  // ② v8（D-139）：raw_inputs 补 context 列（对话上下文，仅 source=chat 有值）——纯加列，无存量变换
+  addColumnIfMissing(sqlite, "raw_inputs", "context");
 
   // ── 术语改名迁移（D-127）：source_type → source、source_identity → identity_json ──
   // 列改名幂等：只在该表确实还带着旧列名时改（先例 renamePluginColumnIfNeeded）。

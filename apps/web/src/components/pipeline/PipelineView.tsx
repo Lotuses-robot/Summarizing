@@ -13,6 +13,7 @@ import {
   wallClockToEpoch,
   type PipelineRun,
   type PipelineRunDetail,
+  type RawContext,
 } from "@summarizing/shared";
 import { api } from "../../api";
 import { cn } from "../../lib/cn";
@@ -92,6 +93,52 @@ function RawChangeList({ text }: { text: string }) {
   );
 }
 
+/** 对话提交上下文（D-139）：默认折叠。
+ *
+ *  它影响 agent0 的判类结果，所以必须能看见——否则用户看到「这条被判成了通知」
+ *  却不知道它当时还看到了什么。逐轮列出并带时刻；@ 提及单独一组。 */
+function ContextBlock({ context }: { context: RawContext }) {
+  const [open, setOpen] = useState(false);
+  const turnCount = context.turns.length;
+  const mentionCount = context.mentions.length;
+  return (
+    <div className="mt-1.5 rounded-lg bg-canvas px-2.5 py-1.5">
+      <button
+        className="cursor-pointer text-[11px] text-accent hover:underline"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open
+          ? "收起提交时的对话上下文"
+          : `查看提交时的对话上下文（${turnCount} 条消息${
+              mentionCount > 0 ? ` · @ 提及 ${mentionCount} 条` : ""
+            }）`}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1">
+          <p className="text-[10px] text-ink-muted/70">
+            只用于理解指代（「它」「那条」），不是要记录的内容——引文仍只能逐字来自上方原文。
+          </p>
+          {context.turns.map((t, i) => (
+            <p
+              key={`${t.at}-${String(i)}`}
+              className="fit-text whitespace-pre-wrap text-[11px] leading-relaxed"
+            >
+              <span className="text-ink-muted/60">[{t.at}]</span>{" "}
+              <span className="text-ink-muted">{t.role === "user" ? "用户" : "前台"}：</span>
+              {t.content}
+            </p>
+          ))}
+          {mentionCount > 0 && (
+            <p className="text-[11px] text-ink-muted">
+              @ 提及：{context.mentions.map((m) => `「${m.title}」`).join("、")}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 单批详情：原文 + 纯时间线（最新在上——与状态卡轨迹同向；节点色区分类型）。
  *  随父级轮询刷新：eventCount 变化（有新事件）即重拉——消化中展开的时间线不再冻结。 */
 function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
@@ -130,6 +177,8 @@ function RunDetail({ id, eventCount }: { id: string; eventCount: number }) {
         <p className="fit-text whitespace-pre-wrap rounded-lg bg-canvas px-2.5 py-2 text-xs leading-relaxed">
           {detail.raw.content}
         </p>
+        {/* 对话提交上下文（只有 chat 批次有）——它影响判类结果，必须可见 */}
+        {detail.context !== null && <ContextBlock context={detail.context} />}
       </section>
       <div className="mt-3 space-y-0">
         {events.map((e, i) => {

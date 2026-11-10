@@ -6,7 +6,12 @@ import {
   itemName,
   SearchItemsArgsSchema,
   SearchUncertainArgsSchema,
+  RAW_CONTEXT_TURNS,
+  RAW_CONTEXT_TURN_MAX_CHARS,
+  type ChatContextTurn,
   type ChatHistoryItem,
+  type RawContext,
+  type RawInput,
 } from "@summarizing/shared";
 import { z } from "zod";
 import type { Db } from "../storage/db";
@@ -115,6 +120,9 @@ interface ChatTurnState {
   refTitles: Map<string, string>;
   /** 本回合用户消息里的图片占位 URL——ingest 工具据它把模型漏抄的占位补回原文。 */
   imageUrls: string[];
+  /** 本条提交的上下文（D-139）：本轮开始前取的最近若干轮 + @ 提及。
+   *  随 ingest / 兜底录入 / 寒暄留痕一并落库——三条落档路径共用同一份，不会各算各的。 */
+  context: RawContext | null;
   /** 按信源名查「媒体占位取字节」实现（对话入口用；与其它消化入口同一条口）。 */
   mediaLookup?: MediaFetcherLookup;
 }
@@ -153,11 +161,13 @@ export async function handleChat(
   mediaLookup?: MediaFetcherLookup,
 ): Promise<ChatResult> {
   const tools = makeAgentTools(db, mediaDir);
+  // 上下文必须在 appendChatTurn("user", …) **之前**取——否则会把本条自己算进「之前的对话」
   const state: ChatTurnState = {
     ingested: false,
     actions: [],
     refTitles: new Map(),
     imageUrls: extractImageUrls(message),
+    context: buildRawContext(db, mentions),
     ...(mediaLookup === undefined ? {} : { mediaLookup }),
   };
   // 持久化本轮用户消息（L16：刷新/换设备可回填）——落库即用户话已存，模型再挂也不丢这句
@@ -181,7 +191,7 @@ export async function handleChat(
     if (!state.ingested && (state.actions.length === 0 || claimsRecorded(reply))) {
       const why = state.actions.length === 0 ? "本轮无成功工具调用" : "回复声称已录入";
       process.stderr.write(`[chat] ${why}，按兜底录入：${message.slice(0, 60)}\n`);
-      fallbackIngest(db, llm, modelTag, tools, message, mediaDir, mediaLookup);
+      fallbackIngest(db, llm, modelTag, tools, message, mediaDir, state.context, mediaLookup);
       state.actions.push(ingestAction());
     }
     result = { reply, actions: state.actions, references: pickReferences(state) };
@@ -191,7 +201,16 @@ export async function handleChat(
     // 前台 LLM 挂了 ≠ 消息丢失（D-14）：本轮尚未录入 → 原文走消化管线兜底；已录入过则如实相告
     if (!state.ingested) {
       result = {
-        reply: fallbackIngest(db, llm, modelTag, tools, message, mediaDir, mediaLookup),
+        reply: fallbackIngest(
+          db,
+          llm,
+          modelTag,
+          tools,
+          message,
+          mediaDir,
+          state.context,
+          mediaLookup,
+        ),
         actions: [ingestAction()],
         references: [],
       };
@@ -406,7 +425,7 @@ async function runTool(
           missing.length === 0
             ? content
             : `${content}\n\n${missing.map((u) => `[图片](${u})`).join("\n")}`;
-        const raw = insertChatRaw(db, full);
+        const raw = insertChatRaw(db, full, state.context);
         state.ingested = true;
         state.actions.push(ingestAction());
         kickDigest(
@@ -447,27 +466,56 @@ function fallbackIngest(
   tools: AgentTools,
   message: string,
   mediaDir: string,
+  context: RawContext | null,
   mediaLookup?: MediaFetcherLookup,
 ): string {
-  const raw = insertChatRaw(db, message);
+  const raw = insertChatRaw(db, message, context);
   kickDigest(db, llm, tools, modelTag, raw, "fallback", mediaDir, undefined, mediaLookup);
   return "已记录，正在处理。";
 }
 
-/** 用户对话原文落档（chat 源；事件时间未知——对话里说的「今天」按 null 走有据推断）。 */
-function insertChatRaw(db: Db, content: string) {
+/** 用户对话原文落档（chat 源；事件时间未知——对话里说的「今天」按 null 走有据推断）。
+ *  `context`（D-139）= 本条之前的若干轮对话 + 输入框 @ 提及，由 `buildRawContext` 在
+ *  本条落库**之前**取好（早取晚取差的就是「含不含本条自己」）。 */
+function insertChatRaw(db: Db, content: string, context: RawContext | null): RawInput {
   return repo.insertRawInput(db, {
     content,
     source: "chat",
     identity: { displayName: "用户对话" },
     receivedAt: nowWallClock(),
     eventTime: null,
+    ...(context === null ? {} : { context }),
   });
 }
 
-/** 纯寒暄留痕（D-14）：原文入库即视为已处理（零变更的一种），流水记 digest_done，不进消化。 */
+/** 一条对话消息在 `chat_turns` 里占一行；一轮 = 一问一答 = 两行。 */
+const MESSAGES_PER_TURN = 2;
+
+/** 攒提交上下文：最近 RAW_CONTEXT_TURNS **轮**对话（时间升序）+ @ 提及。
+ *  **从服务端 chat_turns 读，不用客户端传来的 history**——那个可伪造，伪造历史等于给 agent0
+ *  灌任意「上下文」。两者皆空 → null（没有就如实没有，不造空壳）。
+ *  单轮超长按 RAW_CONTEXT_TURN_MAX_CHARS 截断并注明原长度——上下文是辅助，不该挤掉原文的位置。 */
+function buildRawContext(db: Db, mentions: { id: string; title: string }[]): RawContext | null {
+  // chat_turns 一行 = 一条消息（user 或 assistant 各占一行），一轮 = 两行。
+  // 这里按轮折算成行数再取——按行数取会把「6 轮」缩水成 3 组问答。
+  const turns: ChatContextTurn[] = repo
+    .listRecentChatTurns(db, RAW_CONTEXT_TURNS * MESSAGES_PER_TURN)
+    .map((t) => ({
+      role: t.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      content:
+        t.content.length <= RAW_CONTEXT_TURN_MAX_CHARS
+          ? t.content
+          : `${t.content.slice(0, RAW_CONTEXT_TURN_MAX_CHARS)}…（原文 ${t.content.length} 字，此处截断）`,
+      at: t.at,
+    }));
+  if (turns.length === 0 && mentions.length === 0) return null;
+  return { turns, mentions };
+}
+
+/** 纯寒暄留痕（D-14）：原文入库即视为已处理（零变更的一种），流水记 digest_done，不进消化。
+ *  刻意不存上下文——寒暄永远到不了 agent0，存了也没有消费者。 */
 function chitchatAudit(db: Db, content: string, modelTag: string): void {
-  const raw = insertChatRaw(db, content);
+  const raw = insertChatRaw(db, content, null);
   repo.setDigestState(db, raw.id, "digested");
   repo.appendPipelineEvent(db, {
     rawInputId: raw.id,

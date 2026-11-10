@@ -12,6 +12,7 @@ import { handleChat } from "./application/chat";
 import { buildBoard } from "./application/board";
 import { deriveNotices } from "./application/notice";
 import { makeSessionAuth } from "./auth/session";
+import { makeTokenAuth } from "./auth/token";
 import { registerAuthPublicRoutes, registerAuthSessionRoutes } from "./routes/auth";
 import { registerItemRoutes } from "./routes/items";
 import { registerTrashRoutes } from "./routes/trash";
@@ -23,6 +24,7 @@ import { registerUsageRoutes } from "./routes/usage";
 import { registerMediaRoutes } from "./routes/media";
 import { registerDashboardRoutes } from "./routes/dashboard";
 import { registerRouterRoutes } from "./routes/router";
+import { registerV1Routes } from "./routes/v1";
 import { MEDIA_MAX_INPUT_BYTES } from "./shared/mediaTtl";
 import type { SpaceHub } from "./spaces";
 import type { Router } from "./router";
@@ -148,6 +150,21 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub; router?: Ro
   deps.router?.registerRoutes(app);
   // 公开状态面板（011）：无认证，只吐白名单快照；页面自包含，不进 React 构建。
   registerDashboardRoutes(app, { registry: deps.registry, dataRoot: deps.hub.dataRoot });
+
+  // ── 对外 v1 面（D-139）：Bearer 接入令牌鉴权，独立作用域 ──
+  // 为什么独立成一块而不是并进下面的受保护面：会话 hook 覆盖整个 `/api/*`，令牌若能过那道闸，
+  // 拿到进站地址的人就能读明文 AI key、轮换令牌。v1 的路由清单只在本块里，设置/认证永不在其中。
+  // 挂 onRequest（不是 preHandler）：与受保护面同理——未认证请求连 body 都不该被解析。
+  void app.register(async (scope) => {
+    scope.addHook(
+      "onRequest",
+      makeTokenAuth({
+        registry: deps.registry,
+        ensureSpace: (uid) => deps.hub.ensure(uid),
+      }),
+    );
+    registerV1Routes(scope);
+  });
 
   // ── 受保护面（封装作用域：preHandler 一次挂全；路由只读 req.space）──
   void app.register(async (scope) => {

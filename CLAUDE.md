@@ -12,6 +12,7 @@
 | `docs/03-开放问题.md` | **当前批次未决问题 + 活跃约定**。**遇到 01 没写、02 已标待确认的，先查这里，再问用户**。历史过程记录（S1/S2/信源/UI/多用户/上云）已移出仓库（见下方 archive 行） |
 | `docs/04-验收.md` | 验收清单（已完成批次 = 一行结案 + 未完成项 + 测试夹具）；明细已移出仓库 |
 | `docs/14-微信消息对接指南.md` | **上游协议原文 + 接入说明**（wxweb 信源）——上游改协议时以其为准 |
+| `docs/15-对外接口-v1.md` | **对外 v1 接口**（`/api/v1/*`，账户令牌鉴权）——外部 agent / 脚本接入时读这份 |
 | `docs/07-接新源检查单.md`（**信源开发指南**，D-88 升级） / `08-nc对接指南.md` | 信源阶段**操作手册**（接新源全流程 / nc 配置）——长期有效 |
 | `docs/09-信源可行性测试计划.md` | 信源阶段测试计划（含环境陷阱清单）——长期有效 |
 | `docs/11-上云与发布.md` | **上云与发布全流程清单**（2026-10-10 成文；同日晚 **9 决策全拍**）——长期有效的操作手册；多用户/上云阶段以此为准（阶段 0–6 + 决策点总表） |
@@ -76,7 +77,7 @@
 - 每个独立函数首行前必须有 **JSDoc 人话描述**（`jsdoc/require-jsdoc` 强制）——写意图与依据，不复述函数名；描述要能让只读函数名的人看懂结构
 - 🔴 **【边界加固三规矩】（2026-10-09 specs/003 六轮评审复盘，详见 .specify 宪法）**：①修边界字段（schema/协议/输入口）先列**脏形态枚举表**（null/数字/空串/大小写/多行/缺席/超长）一次修全——只修点名场景 = 同洞多轮返工（role 修三轮的教训）；②**结构容错 ≠ 语义兜底**——字段缺失保持缺失（null 直通），绝不顺手编造语义默认值，尤其当下游是 AI 判断依据（time null 曾被兜成接收时刻，踩 01§5.3）；③**改任何值的形状 → grep 全部消费者**回查依赖旧形状的不变式（行协议前缀曾 silently 击穿「content 非空」的空批守卫）
 
-## 当前状态（2026-10-22 · 批次 2 上云已落地：sum.lotuses.cn 运行中；v0.5.0 批次：Token 用量统计 + 图片持久化 + 公开状态面板；v0.5.2：事项/通知判类改尺 + 信源展示解耦；v0.6.0：底部悬浮导航 + 圆形关闭钮 + 带图空回复修复（D-119/D-120）；v0.6.1：桌面端行内挤压顺序；**v0.6.2：清单被拒纠正回路 + 行手势与撤销 + 圆角三档 + 可改标题（D-121–D-124）；v0.6.3：行内按钮退场 + 标签条让位行手势 + 磨玻璃 9rem 同冒与退场镜像（D-125/D-126），已发布**；**未发布：wxweb 信源（微信消息，D-138）**；v0.7.9：已完成/回收站/通知三处分页 + 手势黑幕教程 + 流水可见 AI 提交的变更清单（D-135 / D-136），已发布；v0.7.10：信源声明改存「在岗清单」（D-137），已发布**）
+## 当前状态（2026-11-10 · 批次 2 上云已落地：sum.lotuses.cn 运行中；v0.5.0 批次：Token 用量统计 + 图片持久化 + 公开状态面板；v0.5.2：事项/通知判类改尺 + 信源展示解耦；v0.6.0：底部悬浮导航 + 圆形关闭钮 + 带图空回复修复（D-119/D-120）；v0.6.1：桌面端行内挤压顺序；**v0.6.2：清单被拒纠正回路 + 行手势与撤销 + 圆角三档 + 可改标题（D-121–D-124）；v0.6.3：行内按钮退场 + 标签条让位行手势 + 磨玻璃 9rem 同冒与退场镜像（D-125/D-126），已发布**；v0.7.9：已完成/回收站/通知三处分页 + 手势黑幕教程 + 流水可见 AI 提交的变更清单（D-135 / D-136），已发布；v0.7.10：信源声明改存「在岗清单」（D-137），已发布；v0.8.0：wxweb 信源（微信消息，D-138），已发布；**未发布：对外 v1 接口 + 对话上下文进 agent0（D-139 / D-140）**）
 
 - **路线（D-74；D-87 修订）**：S1 ✅ → S2 ✅ → UI 重搓 ✅ → 信源阶段 ✅ → 后端加固 ✅（D-87/D-88）→ UI 收口 ✅（D-89）→ **spec-kit 试用批次 ✅（specs/001–005）** → **走查批次 ✅（D-94/D-95；265 测试）** → **多用户批次 ✅（specs/006：单机→邀请制多账户服务，304 测试；D-96 立项 / D-98 交付 / D-99 用户卡）** → **批次 2 代码侧上云项 ✅（Docker/schema 迁移/时区/CI/版本规范/runbook；316 测试；镜像与发布链路已验证，见下）** → **批次 3 服务器落地 ✅（sum.lotuses.cn 在线）** → 批次 3 其余（加固/备份 cron/告警——docs/11 阶段 1）→ 批次 4 运营面 → 批次 5 上线 runbook → 知识库。撤回功能暂缓（D-79）；搁置流延后（L-17）；账户删除/导出延后（L-25）。
 - **批次 2 产物（代码侧，2026-10-13）**：①**Docker**（多阶段 `Dockerfile`：构建出前端+esbuild 服务端单文件、运行只带精简 better-sqlite3；`docker-compose.yml` app+caddy、数据 bind mount、app 不直暴公网；`Caddyfile` TLS/安全头/`/hook` 脱日志/XFF 覆写）②**schema 迁移**（`storage/migrate.ts`：`PRAGMA user_version` 门控 + 迁移前自动备份保留 5 份 + 逐库跑；`openGatedDb` 单出处）③**时区 +08:00**（D-97）④**CI**（`.github/workflows/`：check + release[便携包走 windows runner / 镜像 job 随 tag 自动推 ACR]）⑤**版本规范**（`CHANGELOG.md` + `docs/12`）⑥**运维**（`docs/13` runbook + `scripts/upgrade.mjs` + `scripts/server-init.sh`）。✅ **镜像本地构建 + 容器内端到端验证通过**（构建/健康检查/迁移 0→1 + 自动备份/在线备份恢复）；✅ **CI 发布链路已验证**（v0.2.0：便携包挂 Release + 镜像推阿里云 ACR，全绿；要点见 docs/13 二·1——新实例 crpi 域名、secret 填纯域名、推送走 docker build/push 不用 buildx）。
@@ -92,6 +93,7 @@
 - **UI 选型（D-81）**：Tailwind v4 + shadcn 风格（clsx+cn、lucide-react；无黑盒组件库）。**web 自测基建**：happy-dom + @testing-library（`apps/web/src/test/*.test.tsx`，首行 `// @vitest-environment happy-dom`），fetch 替身喂真实 api.ts。
 - **窄屏（移动端）约定（2026-10-22，D-117）**：断点只用 Tailwind 默认 `sm:`（640px）一档——**列表行**标题窄屏独占一行、meta（ddl/标签）换行；**任何左右布局的行**（看板/回收站/通知列表/设置行）都必须给窄屏一个纵向堆叠档，别让唯一可收缩项（通常是标题）被 `shrink-0` 的兄弟挤成零宽。**弹层高度一律 `dvh`**，主容器 `h-dvh`（手机地址栏伸缩）。**触屏**：`pointer-coarse` 档让悬停才显的操作常显，命中区 ≥32px。设置弹层窄屏左栏改顶部横排（`sm:` 起恢复左导航）。
 - **多用户（006；D-98）**：系统库 `data/system.db`（账户登记）+ 每账户一库 `data/users/<uid>.db`；认证（scrypt/签名 cookie 会话/限速）；`Space`+`SpaceHub`（每账户运行时容器：db+llmRef+信源实例+webhook 处理器表）；信源网关 `/hook/<token>/<source>/*`（信源不可挂全局路由，鉴权收敛网关；登记口现名 `WebhookRegistrar`）；运维命令（`npm run admin -- …`：建号/发码/列表/停启/重置）；前端认证壳（登录/注册同壳 + 备案号页脚 + 401 单点拦截）+ **独立用户卡**（D-99）。**AI key 每人自带、无 `.env` 兜底**。
+- **对外 v1 接口（2026-11-10，D-139 / D-140）**：`/api/v1/*`，`Authorization: Bearer <账户接入令牌>`（与 webhook 地址里同一把）。**独立作用域**——设置面/认证面/备份/信源设置/收取规则永不进（拿到进站地址 ≠ 拿到明文 AI key）。实现在 `auth/token.ts` + `routes/v1.ts`（单个文件即完整清单）；与内部端点共用领域函数与 shared schema，**状态动作共用 `application/itemStatus.ts`**（`manualSetStatus` / `restoreFromTrash`，幂等守卫只写一处），图片读回共用 `registerMediaReadRoute`。**不含前台对话**（`POST /api/v1/chat` 刻意不提供）。文档 `docs/15-对外接口-v1.md`。
 - 启动：`npm run dev`（web http://localhost:5173，server:3001；公开状态页 `/dashboard` 经 Vite 代理同源可达）；停止/重置：`npm run stop` / `npm run db:reset`；建账户：`npm run admin -- user:add 你的名字`；配 Router 凭据：`npm run admin -- router:list` / `router:set wecom.secret <值>`。
 - 质量门：`npm run check`（tsc+eslint+vitest）/ `npm run check:dead`（knip）/ `npm run build -w @summarizing/web`。
 - `data/` 固定在仓库根，代码里按绝对路径解析。`.env` 只放**环境变量**（`PORT`/`TRUST_PROXY`/`SESSION_COOKIE_SECURE`/`BASE_URL`）——**AI 接入不在 `.env`**（每账户在设置里配）。

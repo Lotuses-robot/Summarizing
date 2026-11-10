@@ -218,3 +218,54 @@ describe("取消归档迁移（007 FR-018：archived → done）", () => {
     expect(backups).toHaveLength(1);
   });
 });
+
+describe("对话上下文列迁移（015 / D-139：v7 → v8）", () => {
+  it("老库无 context 列 → 开库补列、存量批次 context 为 NULL、新写入可带上下文", () => {
+    const file = path.join(tmpDir(), "ctx.db");
+    // 造一个「v7 形状」的老库：raw_inputs 有全部旧列，独缺 context
+    const raw = new Database(file);
+    raw.pragma("journal_mode = WAL");
+    raw.pragma("user_version = 7");
+    raw.exec(`
+      CREATE TABLE raw_inputs (
+        id TEXT PRIMARY KEY, content TEXT NOT NULL, source TEXT NOT NULL,
+        identity_json TEXT NOT NULL, received_at TEXT NOT NULL, event_time TEXT,
+        digest_state TEXT NOT NULL DEFAULT 'pending', raw TEXT
+      );
+    `);
+    raw
+      .prepare(
+        "INSERT INTO raw_inputs (id, content, source, identity_json, received_at, event_time, digest_state) VALUES (?,?,?,?,?,NULL,'pending')",
+      )
+      .run(
+        "old-1",
+        "老批次的原文",
+        "nc",
+        JSON.stringify({ displayName: "老群" }),
+        "2026-10-01T10:00:00",
+      );
+    raw.close();
+
+    const db = makeDb(file); // 触发 7 → 8
+    // ① 版本已推进
+    expect(readSchemaVersion(db.$client)).toBe(8);
+    // ② 存量批次仍在、context 为 NULL（不编造上下文）
+    const old = repo.getRawInput(db, "old-1");
+    expect(old?.content).toBe("老批次的原文");
+    expect(repo.getRawContext(db, "old-1")).toBeNull();
+    // ③ 新写入可以带上下文并读回
+    const fresh = repo.insertRawInput(db, {
+      content: "新批次",
+      source: "chat",
+      identity: { displayName: "用户对话" },
+      receivedAt: "2026-11-10T10:00:00",
+      eventTime: null,
+      context: {
+        turns: [{ role: "user", content: "之前那句", at: "2026-11-10T09:59:00" }],
+        mentions: [{ id: "i-1", title: "交作文" }],
+      },
+    });
+    expect(repo.getRawContext(db, fresh.id)?.mentions).toEqual([{ id: "i-1", title: "交作文" }]);
+    db.$client.close();
+  });
+});

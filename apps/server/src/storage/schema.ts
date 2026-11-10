@@ -54,6 +54,10 @@ export const rawInputs = sqliteTable("raw_inputs", {
   eventTime: text("event_time"),
   digestState: text("digest_state").notNull().default("pending"), // pending | digesting | digested | failed
   raw: text("raw"), // 信源原始载荷 JSON 留底（D-84；shared RawInput 类型不含它——归档字段，仅 DB）
+  // 提交上下文 JSON（D-139）：对话入口落档时附带的前台对话片段 + @ 提及，供 agent0 消解指代。
+  // 只有 source=chat 的批次会有值；其余入口恒 NULL。**它不是原文的一部分**——围栏的引文逐字
+  // 校验只看 content，模型不得从上下文里取引文（证据链口径不变）。
+  context: text("context"),
   // 检索索引列（D-127）：raw_fts 是**独立的** FTS5 表，写入由 repo.insertRawInput 显式完成
   // （不用触发器——原因见 db.ts）。NULL = 建表前的存量行，由启动时的 backfillSearchIndex 补齐。
   tokens: text("tokens"), // 内容切词（search/tokenize.ts）

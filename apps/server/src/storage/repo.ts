@@ -11,6 +11,7 @@ import {
   ItemSnapshotSchema,
   ItemVersionSchema,
   ProvenanceSchema,
+  RawContextSchema,
   RawInputSchema,
   SettingFieldSchema,
   UncertainInputSchema,
@@ -26,6 +27,7 @@ import {
   type PipelineEvent,
   type PipelineRun,
   type Provenance,
+  type RawContext,
   type RawInput,
   type SettingField,
   type Identity,
@@ -425,6 +427,8 @@ export function itemExists(db: DbOrTx, itemId: string): boolean {
 /** 进站写入的可选归档载荷（DB 存 JSON 串；不进 RawInput 返回类型，D-84）。 */
 export interface RawInputExtras {
   raw?: unknown;
+  /** 对话提交上下文（D-139）：只有 source=chat 的批次带；其余入口省略即 NULL。 */
+  context?: RawContext;
 }
 
 /** 原始文本先落档（01§5.3）：在 AI 之前、状态 pending——原文永不丢失的起点。
@@ -435,13 +439,14 @@ export function insertRawInput(
   db: DbOrTx,
   args: Omit<RawInput, "id" | "digestState"> & RawInputExtras,
 ): RawInput {
-  const { raw, ...rest } = args;
+  const { raw, context, ...rest } = args;
   const row = {
     id: newId(),
     digestState: "pending" as const,
     ...rest,
     identity: JSON.stringify(rest.identity),
     raw: raw === undefined ? null : JSON.stringify(raw),
+    context: context === undefined ? null : JSON.stringify(context),
     tokens: tokenizeContent(rest.content),
     identityTokens: tokenizeIdentity(rest.identity),
   };
@@ -484,6 +489,28 @@ function parseJsonMaybe(text: string | null): unknown {
 export function getRawInput(db: DbOrTx, id: string): RawInput | null {
   const row = db.select().from(s.rawInputs).where(eq(s.rawInputs.id, id)).get();
   return row ? rowToRawInput(row) : null;
+}
+
+/** 按 ID 读批次的**提交上下文**（D-139）；无该列值或非 chat 批次 → null。
+ *
+ *  形状不合法时**不抛**（上下文是辅助信息，读坏了不该让整批消化失败——原文仍在 content 里），
+ *  但也不静默：写一条 stderr 说明「这一批的上下文读不出来」。
+ *  用户看不到上下文本身，但至少能在服务器日志里看见「它没拿到」。 */
+export function getRawContext(db: DbOrTx, id: string): RawContext | null {
+  const row = db
+    .select({ context: s.rawInputs.context })
+    .from(s.rawInputs)
+    .where(eq(s.rawInputs.id, id))
+    .get();
+  if (row?.context === null || row?.context === undefined) return null;
+  const parsed = RawContextSchema.safeParse(parseJsonMaybe(row.context));
+  if (!parsed.success) {
+    process.stderr.write(
+      `[repo] 批次 ${id} 的上下文读不出来（形状不合法，按无上下文处理）：${parsed.error.issues[0]?.message ?? "未知"}\n`,
+    );
+    return null;
+  }
+  return parsed.data;
 }
 
 /** 更新消化状态：pending → digesting（kickDigest 发射即置）/ digested / failed（failed = 「未处理」可见降级，01§5.3）。 */
