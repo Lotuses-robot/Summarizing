@@ -200,6 +200,40 @@ describe("code-review 修复（2026-10-27 分页批次）", () => {
     expect(listMentionables(t.db).items.map((m) => m.id)).not.toContain(item.id);
   });
 
+  it("折叠时 page 如实回报（不硬写 1）；越界同样夹到有效页", async () => {
+    // 回归（2026-11-11 用户实测）：foldedMeta 曾恒回 page:1——客户端「跟服务端回报的页码」，
+    // 于是翻到第 3 页后一次折叠态请求就把游标拨回 1，再展开变回第一页。
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    // 播 45 条已完成 → 3 页（PAGE_SIZE=20）
+    for (let i = 0; i < 45; i += 1) {
+      const item = createItem(t.db, raw, { name: `旧事 ${String(i)}` });
+      repo.appendItemVersion(t.db, {
+        itemId: item.id,
+        action: "complete_item",
+        detail: "标完成",
+        snapshot: { ...item, status: "done" },
+        by: { actor: "用户", model: null },
+      });
+    }
+
+    const p1 = buildBoard(t.db, { page: 1, folded: true });
+    expect(p1.done).toHaveLength(0); // 折叠 = 一行都不查
+    expect(p1.doneMeta.page).toBe(1);
+    expect(p1.doneMeta.folded).toBe(true);
+    expect(p1.doneMeta.total).toBe(45);
+    expect(p1.doneMeta.pageCount).toBe(3);
+
+    // 如实回报调用方要的那一页（此前恒为 1）
+    const p3 = buildBoard(t.db, { page: 3, folded: true });
+    expect(p3.done).toHaveLength(0);
+    expect(p3.doneMeta.page).toBe(3);
+
+    // 越界夹到末页（与展开态同一套夹取语义）
+    const p99 = buildBoard(t.db, { page: 99, folded: true });
+    expect(p99.doneMeta.page).toBe(3);
+  });
+
   it("@ 候选与看板分家：折叠时已完成的也在候选里", async () => {
     const t = await makeTestAccount({ llm: new FakeLlm("t") });
     const raw = seedRaw(t.db);

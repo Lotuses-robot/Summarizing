@@ -60,7 +60,9 @@ function stubApp(opts: { uncertainFail?: boolean } = {}): {
             done: folded
               ? []
               : [makeRow({ id: `d-p${page}`, name: `已完成第 ${page} 页`, status: "done" })],
-            doneMeta: { folded, page: Number(page), pageCount: 2, total: 2 },
+            // 折叠时服务端**恒回 page: 1**（`foldedMeta` 的语义：折叠态没有「当前页」）——
+            // 桩必须照真实行为给，否则「折叠后页码被重置」这类问题测不出来（2026-11-11 实测踩到）。
+            doneMeta: { folded, page: folded ? 1 : Number(page), pageCount: 2, total: 2 },
           }),
         );
       }
@@ -146,6 +148,31 @@ describe("App 接线（D-89：主视图切换 / Esc 分层 / 审核页错误面�
     );
     expect(await screen.findByText("已完成第 2 页")).toBeInTheDocument();
     expect(screen.queryByText("已完成第 1 页")).not.toBeInTheDocument();
+  });
+
+  it("翻到第 2 页 → 折叠 → 展开，回到第 1 页（有意设计：最近完成的在最上面）", async () => {
+    // 行为记录（不是回归）：`setDoneFold` 显式把页码归 1。这条锁住「折叠后展开回第 1 页」，
+    // 免得将来有人以为是 bug 顺手改成「记住页码」。
+    markSwipeHintSeen("board");
+    const { boardUrls } = stubApp();
+    render(<App />);
+    expect(await screen.findByText("日期未知")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("已完成"));
+    expect(await screen.findByText("已完成第 1 页")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("下一页"));
+    await waitFor(() =>
+      expect(boardUrls.some((u) => u.includes("page=2") && u.includes("folded=0"))).toBe(true),
+    );
+    expect(await screen.findByText("已完成第 2 页")).toBeInTheDocument();
+
+    // 折叠 → 再展开
+    fireEvent.click(screen.getByText("已完成"));
+    fireEvent.click(screen.getByText("已完成"));
+    expect(await screen.findByText("已完成第 1 页")).toBeInTheDocument();
+    // 展开时的请求带 page=1（不是上次的 2）——只看看板请求，别被 /api/board/mentionables 干扰
+    const boardOnly = boardUrls.filter((u) => u.startsWith("/api/board?"));
+    await waitFor(() => expect(boardOnly.at(-1)).toContain("page=1"));
   });
 
   it("首屏未登录（401）→ 只显示登录壳，**不**提示「后端未连接」", async () => {

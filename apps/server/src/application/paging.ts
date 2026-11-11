@@ -33,8 +33,14 @@ export function paginate<T>(rows: T[], page: number): { rows: T[]; meta: PageMet
  *  与「这段是空的」严格区分：`folded: true` + `total: 0` 才是空；`folded: true` + `total: 137`
  *  是「有 137 条，但这次没查」。前端据 folded 决定要不要显示「展开」。
  *
- * @param total 本段总条数
+ *  `page` **如实回报调用方要的那一页**（夹到有效范围），不硬写 1——
+ *  硬写 1 会让「翻到第 3 页再折叠」的客户端收到一个不存在的页码，跟着它把游标拨回去。
+ *
+ *  @param total 本段总条数
+ *  @param page 调用方请求的页码（折叠时没取行，但**这个值仍要如实回**）
  */
-export function foldedMeta(total: number): PageMeta {
-  return { folded: true, page: 1, pageCount: Math.ceil(total / PAGE_SIZE), total };
+export function foldedMeta(total: number, page = 1): PageMeta {
+  const pageCount = Math.ceil(total / PAGE_SIZE);
+  const clamped = Math.min(Math.max(Math.trunc(page), 1), Math.max(pageCount, 1));
+  return { folded: true, page: clamped, pageCount, total };
 }

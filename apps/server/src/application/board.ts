@@ -71,7 +71,7 @@ export function buildBoard(
   // 折叠时只数行数：排序要取每条链的完成时刻，省掉它才是这个分页的主要收益。
   const doneRows = rows.filter((r) => r.item.status === "done");
   const donePage = opts.folded
-    ? { rows: [] as ItemRow[], meta: foldedMeta(doneRows.length) }
+    ? { rows: [] as ItemRow[], meta: foldedMeta(doneRows.length, opts.page) }
     : (() => {
         // 一次查询取全批完成时刻（不是逐条查链）：排序需要全部 done 行的时刻，分页切不了这步，
         // 但查询次数可以从 N 降到 1（repo.completedAtMany）。
