@@ -188,6 +188,36 @@ describe("v1 对外接口：读写面", () => {
     expect(RunsResponseSchema.parse(runs.json()).runs.map((r) => r.id)).toContain(id);
   });
 
+  it("拼错的查询参数 → 400 且说清错在哪（不静默取默认值）", async () => {
+    // D-103：填错了就该判错。zod 默认 strip 未知键，`pagee=2` 会被静默当成「没传 page」——
+    // 于是调用方以为自己在翻第 2 页，实际拿到第 1 页，而且毫无提示。
+    const acct = await makeTestAccount();
+    const bad = await acct.app.inject({
+      method: "GET",
+      url: "/api/v1/board?pagee=2",
+      headers: bearer(acct.sourceToken),
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(z.object({ error: z.string() }).parse(bad.json()).error).toContain("pagee");
+
+    // 值非法（参数名对）也 400，但消息里不掺参数清单
+    const badValue = await acct.app.inject({
+      method: "GET",
+      url: "/api/v1/usage?range=year",
+      headers: bearer(acct.sourceToken),
+    });
+    expect(badValue.statusCode).toBe(400);
+    expect(badValue.json()).toHaveProperty("error");
+
+    // 正确参数照常
+    const ok = await acct.app.inject({
+      method: "GET",
+      url: "/api/v1/board?page=1&folded=0",
+      headers: bearer(acct.sourceToken),
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+
   it("投喂缺字段 → 400（不静默存半条）", async () => {
     const acct = await makeTestAccount();
     const res = await acct.app.inject({

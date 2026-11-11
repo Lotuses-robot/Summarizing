@@ -36,22 +36,27 @@ import {
 // 清单为准**——新增一条就得写在这里。
 
 /** 看板查询：page / folded 与 `/api/board` 同口径（见 app.ts 的 BoardQuerySchema）。 */
-const BoardQuerySchema = z.object({
+const BoardQuerySchema = z.strictObject({
   page: z.coerce.number().int().min(1).default(1),
   folded: z.enum(["0", "1"]).default("0"),
 });
 
 /** 列表类查询：一页页码（回收站 / 通知共用）。 */
-const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) });
+const PageQuerySchema = z.strictObject({ page: z.coerce.number().int().min(1).default(1) });
 
 /** @ 候选的过滤参数（q = 前缀/子串，空 = 全量）。 */
-const MentionablesQuerySchema = z.object({ q: z.string().default("") });
+const MentionablesQuerySchema = z.strictObject({ q: z.string().default("") });
 
 /** 台账条数（与内部 `/api/pipeline/runs` 上限同源）。 */
-const RunsQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
+const RunsQuerySchema = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+/** 检索端点接受的参数名（错误提示用）。 */
+const SEARCH_PARAMS = ["query", "source", "identity", "before", "after", "mode", "limit"];
 
 /** 检索参数：查询串里全是一维值，数字/枚举在边界转（`identity` 用 JSON 串，因为它是键值对数组）。 */
-const SearchQuerySchema = z.object({
+const SearchQuerySchema = z.strictObject({
   query: z.string().optional(),
   source: z.string().optional(),
   before: z.string().optional(),
@@ -62,12 +67,38 @@ const SearchQuerySchema = z.object({
 });
 
 /** 用量查询（与 `/api/usage` 同口径：北京墙钟日历日）。 */
-const UsageQuerySchema = z.object({ range: UsageRangeSchema.default("7d") });
+const UsageQuerySchema = z.strictObject({ range: UsageRangeSchema.default("7d") });
 
 /** 存疑库查询（status 缺席 = open）。 */
-const UncertainQuerySchema = z.object({ status: UncertainStatus.default("open") });
+const UncertainQuerySchema = z.strictObject({ status: UncertainStatus.default("open") });
 /** 路径参数：单个 id。 */
 const IdParamsSchema = z.object({ id: z.string() });
+
+/** zod 校验失败 → 人话错误消息。
+ *
+ *  参数 schema 全是 `strictObject`：拼错的键（`pagee` / `rnage`）会被 `unrecognized_keys` 拒掉。
+ *  这条把它翻成「不认识这个参数：pagee（可用的有：page、folded）」——
+ *  只说「参数不合法」等于把 `keys` 里已经写明的答案藏起来（D-103：填错了就该判错，而且要让人看懂错在哪）。
+ *
+ *  参数名对、值不对时**不列参数清单**（那时清单没用，要的是「这个值为什么不行」）。
+ *
+ *  @param error zod 的 ZodError
+ *  @param allowed 该端点合法参数名（仅在「不认识这个参数」时用于提示）
+ */
+function paramError(error: z.ZodError, allowed: string[]): string {
+  const unrecognized = error.issues.find((i) => i.code === "unrecognized_keys");
+  if (unrecognized !== undefined && "keys" in unrecognized) {
+    return `不认识这个参数：${unrecognized.keys.join("、")}（可用的有：${allowed.join("、")}）`;
+  }
+  const first = error.issues[0];
+  const path = first?.path.join(".") ?? "";
+  const name = path === "" ? "参数" : path;
+  // 缺必填与值不合法分开说：zod 原文（`expected string, received undefined`）对外部调用方不够直白
+  if (first?.code === "invalid_type" && first.input === undefined) {
+    return `缺少必填参数：${name}`;
+  }
+  return `${name} 不合法：${first?.message ?? "未知原因"}`;
+}
 
 /** 把一次投喂回执压成 v1 的形状（批次 id + 消化置位结果，不泄露内部状态机细节）。 */
 function ingestReceipt(raw: RawInput, digestState: string): { id: string; digestState: string } {
@@ -96,7 +127,7 @@ export function registerV1Routes(app: FastifyInstance): void {
   app.get("/api/v1/board", async (req, reply) => {
     const parsed = BoardQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "page 必须是 ≥1 的整数；folded 只能是 0 或 1" });
+      return reply.code(400).send({ error: paramError(parsed.error, ["page", "folded"]) });
     }
     return buildBoard(req.space.db, {
       page: parsed.data.page,
@@ -111,11 +142,17 @@ export function registerV1Routes(app: FastifyInstance): void {
     return full;
   });
 
-  // 事项检索：参数形状与 agent0 的 search_items 工具完全相同
+  // 事项检索：参数形状与 agent0 的 search_items 工具完全相同。
+  // 边界先过一层 strict：shared 的 schema 是给工具调用用的（多带键无害），
+  // HTTP 上则要判错——`querry=x` 会被 strip 成「没传 query」，报「query 必填」等于指错方向。
   app.get("/api/v1/items/search", async (req, reply) => {
+    const strict = z.strictObject({ query: z.string().min(1) }).safeParse(req.query);
+    if (!strict.success) {
+      return reply.code(400).send({ error: paramError(strict.error, ["query"]) });
+    }
     const parsed = SearchItemsArgsSchema.safeParse(req.query);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "query 必填且不能为空" });
+      return reply.code(400).send({ error: paramError(parsed.error, ["query"]) });
     }
     return makeAgentTools(req.space.db, req.space.mediaDir).searchItems(parsed.data);
   });
@@ -124,30 +161,36 @@ export function registerV1Routes(app: FastifyInstance): void {
   // 外部 agent 用它做「用户说的『它』是哪条」的候选池；不需要时不必调（看板响应里不再带它）。
   app.get("/api/v1/mentionables", async (req, reply) => {
     const parsed = MentionablesQuerySchema.safeParse(req.query);
-    if (!parsed.success) return reply.code(400).send({ error: "q 必须是字符串" });
+    if (!parsed.success) return reply.code(400).send({ error: paramError(parsed.error, ["q"]) });
     return listMentionables(req.space.db, parsed.data.q);
   });
 
   app.get("/api/v1/notices", async (req, reply) => {
     const parsed = PageQuerySchema.safeParse(req.query);
-    if (!parsed.success) return reply.code(400).send({ error: "page 必须是 ≥1 的整数" });
+    if (!parsed.success) return reply.code(400).send({ error: paramError(parsed.error, ["page"]) });
     return deriveNotices(req.space.db, parsed.data.page);
   });
 
   app.get("/api/v1/trash", async (req, reply) => {
     const parsed = PageQuerySchema.safeParse(req.query);
-    if (!parsed.success) return reply.code(400).send({ error: "page 必须是 ≥1 的整数" });
+    if (!parsed.success) return reply.code(400).send({ error: paramError(parsed.error, ["page"]) });
     return deriveTrashed(req.space.db, parsed.data.page);
   });
 
-  app.get("/api/v1/uncertain", async (req) => {
-    const { status } = UncertainQuerySchema.parse(req.query);
-    return repo.listUncertainByStatus(req.space.db, status);
+  app.get("/api/v1/uncertain", async (req, reply) => {
+    const parsed = UncertainQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: paramError(parsed.error, ["status"]) });
+    }
+    return repo.listUncertainByStatus(req.space.db, parsed.data.status);
   });
 
-  app.get("/api/v1/pipeline/runs", async (req) => {
-    const { limit } = RunsQuerySchema.parse(req.query);
-    return { runs: repo.listPipelineRuns(req.space.db, limit) };
+  app.get("/api/v1/pipeline/runs", async (req, reply) => {
+    const parsed = RunsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: paramError(parsed.error, ["limit"]) });
+    }
+    return { runs: repo.listPipelineRuns(req.space.db, parsed.data.limit) };
   });
 
   app.get("/api/v1/pipeline/runs/:id", async (req, reply) => {
@@ -166,7 +209,7 @@ export function registerV1Routes(app: FastifyInstance): void {
   app.get("/api/v1/search", async (req, reply) => {
     const parsed = SearchQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "查询参数不合法", issues: parsed.error.issues });
+      return reply.code(400).send({ error: paramError(parsed.error, SEARCH_PARAMS) });
     }
     const { identity, ...rest } = parsed.data;
     let identityPairs: { key: string; value: string }[] | undefined;
@@ -208,7 +251,7 @@ export function registerV1Routes(app: FastifyInstance): void {
   app.get("/api/v1/usage", async (req, reply) => {
     const parsed = UsageQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      return reply.code(400).send({ error: "range 取值只能是 today / 7d / 30d" });
+      return reply.code(400).send({ error: paramError(parsed.error, ["range"]) });
     }
     const range: UsageRange = parsed.data.range;
     const days = range === "today" ? 1 : range === "7d" ? 7 : 30;

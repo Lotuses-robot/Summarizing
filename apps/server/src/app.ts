@@ -44,20 +44,20 @@ export const SHUTDOWN_TIMEOUT_MS = 10_000;
 const RawIdParamsSchema = z.object({ id: z.string() });
 
 /** 对话历史查询参数（L16）：limit = 回填多少轮，默认 50、上限 200。 */
-const ChatHistoryQuerySchema = z.object({
+const ChatHistoryQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
 /** 看板查询参数：page = 已完成段页码（默认第 1 页）；folded=1 = 该段折叠、不查行。
  *  `folded` 收 `"0"|"1"` 而不是 boolean：查询串里 `folded=false` 会被 z.coerce.boolean 当 **true**
  *  （非空串恒真），那种形状只该在界面上消失。 */
-const BoardQuerySchema = z.object({
+const BoardQuerySchema = z.strictObject({
   page: z.coerce.number().int().min(1).default(1),
   folded: z.enum(["0", "1"]).default("0"),
 });
 
 /** @ 候选的查询参数：q = 输入框里已打的字（前缀/子串过滤，空 = 全量）。 */
-const MentionablesQuerySchema = z.object({ q: z.string().default("") });
+const MentionablesQuerySchema = z.strictObject({ q: z.string().default("") });
 
 /** webhook 网关参数：token 定空间、source + 通配定处理器。 */
 const HookParamsSchema = z.object({ token: z.string(), source: z.string(), "*": z.string() });

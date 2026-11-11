@@ -9,7 +9,7 @@ import { deriveTrashed } from "../application/trash";
 // 彻底删只发生在清理环节且 >15d 才清理；raw_inputs/fragments/uncertain_inputs 不受影响。
 
 /** 列表查询参数：page 缺席 = 第 1 页，非法 = 400（不猜一个默认页糊过去）。 */
-const TrashQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) });
+const TrashQuerySchema = z.strictObject({ page: z.coerce.number().int().min(1).default(1) });
 
 /** 注册回收站资源路由（GET 列表 / POST purge）。 */
 export function registerTrashRoutes(app: FastifyInstance): void {

@@ -9,7 +9,7 @@ import { nowWallClock } from "../shared/time";
 // needsHuman 倒序）；POST sweep 触发清扫循环（用本空间的库与 llm——清扫归本账户）；
 // PUT /:id 人工移除（审核页的移除图标走这里，处置为 discarded）。
 
-const QuerySchema = z.object({ status: UncertainStatus.default("open") });
+const QuerySchema = z.strictObject({ status: UncertainStatus.default("open") });
 const IdParamsSchema = z.object({ id: z.string() });
 
 /** 注册存疑信息库路由：GET 查询（人工通道排序）/ POST sweep 触发清扫 / PUT /:id 人工移除。 */

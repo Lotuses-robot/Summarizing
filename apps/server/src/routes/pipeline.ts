@@ -7,7 +7,9 @@ import * as repo from "../storage/repo";
 // 数据全来自 raw_inputs（原文档案）与 pipeline_events（批次流水）。库从 `req.space.db` 取。
 
 /** 列表 query：limit = 台账条数（默认 50，上限 200——与 chat history 上限同源）。 */
-const ListQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
+const ListQuerySchema = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
 
 /** 详情 params：批次 id。 */
 const IdParamsSchema = z.object({ id: z.string() });

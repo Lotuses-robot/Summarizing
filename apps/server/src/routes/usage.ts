@@ -19,7 +19,7 @@ function rangeStart(range: UsageRange, now: Date): string {
 }
 
 /** 查询参数（运行时数据一律 zod 解析，不用 `as`）：range 缺席 = 近 7 天，非法 = 400。 */
-const UsageQuerySchema = z.object({ range: UsageRangeSchema.default("7d") });
+const UsageQuerySchema = z.strictObject({ range: UsageRangeSchema.default("7d") });
 
 /** 注册用量路由（受保护面）：GET /api/usage?range=。range 非法 → 400（安全报错，不由 Fastify 兜）。 */
 export function registerUsageRoutes(app: FastifyInstance): void {
