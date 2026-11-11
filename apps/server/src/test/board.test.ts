@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { itemName, PAGE_SIZE, type PageMeta, type RawInput } from "@summarizing/shared";
 import { executeChanges } from "../executor/executor";
 import { makeAgentTools } from "../agent0/tools";
-import { buildBoard } from "../application/board";
+import { buildBoard, listMentionables } from "../application/board";
 import { deriveNotices } from "../application/notice";
 import { deriveTrashed } from "../application/trash";
 import { makeDb } from "../storage/db";
@@ -197,10 +197,10 @@ describe("code-review 修复（2026-10-27 分页批次）", () => {
 
     const board = buildBoard(t.db);
     expect(board.tags).not.toContain("删除后才该消失");
-    expect(board.mentionables.map((m) => m.id)).not.toContain(item.id);
+    expect(listMentionables(t.db).items.map((m) => m.id)).not.toContain(item.id);
   });
 
-  it("@ 提及候选不受分页影响：折叠时已完成的也在候选里", async () => {
+  it("@ 候选与看板分家：折叠时已完成的也在候选里", async () => {
     const t = await makeTestAccount({ llm: new FakeLlm("t") });
     const raw = seedRaw(t.db);
     const item = createItem(t.db, raw, { name: "已完成的旧事" });
@@ -212,10 +212,33 @@ describe("code-review 修复（2026-10-27 分页批次）", () => {
       by: { actor: "用户", model: null },
     });
 
-    // 折叠 → done 行是空的，但 mentionables 是全量口径
+    // 折叠 → done 行是空的，但候选是全量口径（这正是它不能从行里收集的原因）
     const folded = buildBoard(t.db, { page: 1, folded: true });
     expect(folded.done).toHaveLength(0);
-    expect(folded.mentionables).toEqual([{ id: item.id, title: "已完成的旧事" }]);
+    expect(listMentionables(t.db).items).toEqual([{ id: item.id, title: "已完成的旧事" }]);
+  });
+
+  it("@ 候选含通知（01§4.14 要求「看板三段 + 通知」，此前 kind 过滤漏掉了通知）", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "一条通知", kind: "notice" });
+
+    const items = listMentionables(t.db).items;
+    expect(items.map((m) => m.title)).toContain("一条通知");
+  });
+
+  it("@ 候选的 q 过滤：命中标题子串、不命中则空", async () => {
+    const t = await makeTestAccount({ llm: new FakeLlm("t") });
+    const raw = seedRaw(t.db);
+    createItem(t.db, raw, { name: "交高数作业" });
+    createItem(t.db, raw, { name: "社团开会" });
+
+    expect(listMentionables(t.db, "高数").items.map((m) => m.title)).toEqual(["交高数作业"]);
+    expect(listMentionables(t.db, "不存在的词").items).toEqual([]);
+    // 空串 = 不过滤
+    expect(listMentionables(t.db, "").items).toHaveLength(2);
+    // total 是过滤后的池子大小
+    expect(listMentionables(t.db, "高数").total).toBe(1);
   });
 
   it("completedAtMany / trashedAtMany 与单条版口径一致", async () => {

@@ -10,6 +10,7 @@ import type {
   DigestState,
   GetItemResult,
   Item,
+  MentionablesView,
   LoginRequest,
   MeView,
   NoticeView,
@@ -213,6 +214,12 @@ export const api = {
     req(`/api/board?page=${opts.page}&folded=${opts.folded ? "1" : "0"}`).then((r) =>
       to<BoardView>(r),
     ),
+
+  /** @ 提及候选（对话输入框自动补全 + 深链兜底）。
+   *  与看板分开取：看板被 `kind=task` 与分页折叠切过，拿它当候选会漏（折叠时一条已完成都 @ 不到，
+   *  通知更是整个不在看板里）。`q` 可选，用于输入框边打边筛。 */
+  mentionables: (q = ""): Promise<MentionablesView> =>
+    req(`/api/board/mentionables?q=${encodeURIComponent(q)}`).then((r) => to<MentionablesView>(r)),
 
   /** Token 用量（010）：活动栏「用量」仪表盘（三个总数互不重叠；cachedTokens 为 null = 服务商未提供）。 */
   usage: (range: UsageRange): Promise<UsageSummary> =>

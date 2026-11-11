@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import {
   type BoardView,
+  type Mentionable,
   type MeView,
   type NoticeView,
   type NoticeRow,
@@ -99,6 +100,10 @@ export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authProbeError, setAuthProbeError] = useState<string | null>(null);
   const [board, setBoard] = useState<BoardView | null>(null);
+  /** @ 提及候选（非回收站全部条目，时间倒序，上限 500）。**与看板分开取**——
+   *  看板被分页与折叠切过，拿它当候选会漏（折叠时一条已完成都 @ 不到、通知完全不在看板里）。
+   *  两个消费方：对话输入框的自动补全、看板深链的落点兜底（`Board` 收到的是 id 集合）。 */
+  const [mentionables, setMentionables] = useState<Mentionable[]>([]);
   const [notices, setNotices] = useState<NoticeView | null>(null);
   const [trash, setTrash] = useState<TrashView | null>(null);
   const [uncertain, setUncertain] = useState<UncertainInput[]>([]);
@@ -250,6 +255,18 @@ export default function App() {
         .catch(() => {
           if (genRef.current !== gen || seq !== boardSeq.current) return;
           setError("后端服务未连接（apps/server 是否在跑？）");
+        });
+      // 候选与看板**并行取**、各自独立失败：候选挂了不该让看板报错，反之亦然。
+      api
+        .mentionables()
+        .then((m) => {
+          if (genRef.current !== gen) return;
+          // 形状防御：字段缺席（异常载荷/接口降级）时保持上一份，不让一处脏数据把界面打白
+          // （与详情页「派生失败降级」同一取向）。
+          if (Array.isArray(m.items)) setMentionables(m.items);
+        })
+        .catch(() => {
+          // 候选是辅助数据：取不到就保持上一份，不打断主流程、不弹错
         });
     },
     [setDonePage],
@@ -417,12 +434,10 @@ export default function App() {
    *  客户端从行里收集会凭空少掉一大半标签。 */
   const allTags = board?.tags ?? [];
 
-  /** @ 提及候选：**服务端给（`board.mentionables`），不从当前页的行里收集**。
-   *
-   *  为什么：已完成段与通知都分页了——从行里收集的话，折叠态下一条已完成都 @ 不到，
-   *  展开时也只有当前页（D-135 review 逮出的能力静默缩水）。这份是「非回收站条目」的全量
-   *  前 500 条（`MENTIONABLE_LIMIT`），与分页无关。 */
-  const chatItems = board?.mentionables ?? [];
+  /** @ 提及候选：**独立端点取**（`GET /api/board/mentionables`），与看板分页/折叠无关。
+   *  看板被 `kind=task` 与分页折叠切过——拿行当候选会让折叠态的已完成一条都 @ 不到，
+   *  通知更是整个不在看板里（01§4.14 要求候选含通知）。 */
+  const chatItems = mentionables;
 
   /** 通知未读数（活动栏徽标，OQ-10）：纯计数，有未读才显示。
    *
@@ -601,6 +616,7 @@ export default function App() {
             {board !== null ? (
               <Board
                 board={board}
+                mentionables={mentionables}
                 onRefresh={loadBoard}
                 onDonePage={gotoDonePage}
                 onDoneFold={setDoneFold}

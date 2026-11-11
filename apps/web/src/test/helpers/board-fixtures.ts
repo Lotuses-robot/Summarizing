@@ -1,5 +1,11 @@
 // 看板行/看板视图的测试夹具工厂（board.test 与 app.test 共用，避免两处各抄一份形状）。
-import { PAGE_SIZE, type BoardView, type Element, type ItemRow } from "@summarizing/shared";
+import {
+  PAGE_SIZE,
+  type BoardView,
+  type Element,
+  type ItemRow,
+  type Mentionable,
+} from "@summarizing/shared";
 
 /** 造一行看板数据（测试关心的字段外给合法默认）。 */
 export function makeRow(opts: {
@@ -56,12 +62,18 @@ export function view(partial: Partial<BoardView> = {}): BoardView {
       total: done.length,
     },
     tags: [...new Set([...done, ...undated, ...scheduled].flatMap((r) => r.item.tags))].sort(),
-    // @ 提及候选：夹具默认按「看板里有的行」推——服务端是全量口径，测试多数不关心这个差别
-    mentionables: [...done, ...undated, ...scheduled].map((r) => ({
-      id: r.item.id,
-      title: r.item.elements.find((e) => e.label === "name")?.text ?? "",
-    })),
     failedRawInputs: [],
     ...partial,
   };
+}
+
+/** 夹具用的 @ 候选（**独立于看板**）：默认按「看板里有的行」推。
+ *  服务端是全量口径（含已完成、含通知、与分页无关），测试多数不关心这个差别。 */
+export function makeMentionables(
+  view: Pick<BoardView, "done" | "undated" | "scheduled">,
+): Mentionable[] {
+  return [...view.done, ...view.undated, ...view.scheduled].map((r) => ({
+    id: r.item.id,
+    title: r.item.elements.find((e) => e.label === "name")?.text ?? "",
+  }));
 }

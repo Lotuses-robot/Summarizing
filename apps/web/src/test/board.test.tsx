@@ -66,6 +66,7 @@ describe("Board（三段看板，007）", () => {
             done: folded ? [] : [makeRow({ id: "x1", name: "已交表", status: "done" })],
             doneMeta: { folded, page: 1, pageCount: 1, total: 1 },
           })}
+          mentionables={[]}
           onRefresh={() => {}}
           onDonePage={() => {}}
           onDoneFold={setFolded}
@@ -96,6 +97,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -137,6 +139,7 @@ describe("Board（三段看板，007）", () => {
         board={view({
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -173,6 +176,7 @@ describe("Board（三段看板，007）", () => {
         board={view({
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -208,6 +212,7 @@ describe("Board（三段看板，007）", () => {
         board={view({
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -241,6 +246,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -266,6 +272,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "s1", name: "英语作业", tags: ["英语课"], due: "2026-09-30 18:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -309,6 +316,7 @@ describe("Board（三段看板，007）", () => {
         board={view({
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -355,6 +363,7 @@ describe("Board（三段看板，007）", () => {
         board={view({
           scheduled: [makeRow({ id: "s1", name: "英语作业", due: "2026-09-30 18:00" })],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -377,6 +386,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "s2", name: "数学作业", tags: ["数学课"], due: "2026-09-29 18:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -399,6 +409,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "s2", name: "数学作业", tags: ["数学课"], due: "2026-09-29 18:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -424,6 +435,7 @@ describe("Board（三段看板，007）", () => {
             done: folded ? [] : [makeRow({ id: "a1", name: "已了结的事", status: "done" })],
             doneMeta: { folded, page: 1, pageCount: 1, total: 1 },
           })}
+          mentionables={[]}
           onRefresh={() => {}}
           onDonePage={() => {}}
           onDoneFold={setFolded}
@@ -469,6 +481,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "b", name: "社团通知", tags: ["社团"], due: "2026-10-01 09:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -494,6 +507,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "b", name: "事项乙", due: "2026-10-01 09:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -517,6 +531,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "b", name: "社团例会", due: "2026-10-01 09:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -549,6 +564,7 @@ describe("Board（三段看板，007）", () => {
             }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -577,6 +593,7 @@ describe("Board（三段看板，007）", () => {
           ],
           done: [makeRow({ id: "x", name: "完成的旧事项", status: "done", viewed: false })],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -610,6 +627,7 @@ describe("Board（三段看板，007）", () => {
             }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -631,6 +649,7 @@ describe("Board（三段看板，007）", () => {
             makeRow({ id: "b", name: "事项乙", due: "2026-10-01 09:00" }),
           ],
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -658,6 +677,7 @@ describe("Board（三段看板，007）", () => {
           done: [makeRow({ id: "x1", name: "已完成的事", status: "done" })],
           doneMeta: meta,
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={(p) => pages.push(p)}
         onDoneFold={() => {}}
@@ -680,6 +700,7 @@ describe("Board（三段看板，007）", () => {
           done: [makeRow({ id: "x1", name: "已完成的事", status: "done" })],
           doneMeta: { folded: false, page: 1, pageCount: 1, total: 1 },
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={(p) => pages.push(p)}
         onDoneFold={() => {}}
@@ -701,8 +722,8 @@ describe("Board（三段看板，007）", () => {
         board={view({
           done: [],
           doneMeta: { folded: true, page: 1, pageCount: 1, total: 1 },
-          mentionables: [{ id: "d1", title: "已完成的事" }],
         })}
+        mentionables={[{ id: "d1", title: "已完成的事" }]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={(f) => foldedCalls.push(f)}
@@ -721,8 +742,8 @@ describe("Board（三段看板，007）", () => {
         board={view({
           done: [makeRow({ id: "d1", name: "已完成的事", status: "done" })],
           doneMeta: { folded: false, page: 1, pageCount: 1, total: 1 },
-          mentionables: [{ id: "d1", title: "已完成的事" }],
         })}
+        mentionables={[{ id: "d1", title: "已完成的事" }]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={(f) => foldedCalls.push(f)}
@@ -744,6 +765,7 @@ describe("Board（三段看板，007）", () => {
           done: [makeRow({ id: "d1", name: "已完成的事", status: "done" })],
           doneMeta: { folded: false, page: 1, pageCount: 3, total: 45 },
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -765,6 +787,7 @@ describe("Board（三段看板，007）", () => {
           done: [],
           doneMeta: { folded: true, page: 1, pageCount: 1, total: 45 },
         })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -783,6 +806,7 @@ describe("Board（三段看板，007）", () => {
     const { unmount } = render(
       <Board
         board={view({ undated: [makeRow({ id: "u1", name: "某事项" })] })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -805,6 +829,7 @@ describe("Board（三段看板，007）", () => {
     render(
       <Board
         board={view({ undated: [makeRow({ id: "u1", name: "某事项" })] })}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}
@@ -821,6 +846,7 @@ describe("Board（三段看板，007）", () => {
     render(
       <Board
         board={view()}
+        mentionables={[]}
         onRefresh={() => {}}
         onDonePage={() => {}}
         onDoneFold={() => {}}

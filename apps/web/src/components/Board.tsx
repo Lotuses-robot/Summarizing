@@ -8,6 +8,7 @@ import {
   wallClockToEpoch,
   type BoardView,
   type ItemRow,
+  type Mentionable,
 } from "@summarizing/shared";
 import { cn } from "../lib/cn";
 import { UNDO_SECONDS, useSwipeActions } from "../lib/swipe";
@@ -475,6 +476,7 @@ function Section({
  *  日期未知 / 已排期的折叠仍是本机偏好，留在这里。 */
 export function Board({
   board,
+  mentionables,
   onRefresh,
   onDonePage,
   onDoneFold,
@@ -484,6 +486,9 @@ export function Board({
   onTagClick,
 }: {
   board: BoardView;
+  /** @ 提及候选（独立端点，与看板分页/折叠无关）——深链落点兜底用：
+   *  命中即说明「这条存在、只是手上没有它的行」（已完成段折叠时服务端没查行）。 */
+  mentionables: Mentionable[];
   /** 重拉看板（不传参 = 沿用当前页与折叠态）。 */
   onRefresh: () => void;
   /** 已完成段翻页。 */
@@ -549,9 +554,9 @@ export function Board({
    *
    *  为什么不能用 `sectionKeyById`：已完成折叠时里面根本没有 done 行（服务端没查），
    *  拿它判「key === "done"」永远不成立 → 展开分支不可达 → 点 chip 完全没反应（review 逮出）。
-   *  服务端的 `mentionables` 是全量清单（非回收站），命中即说明「这条存在、但手上没有它的行」；
+   *  `mentionables` 是独立的候选清单（非回收站全部条目），命中即说明「这条存在、但手上没有它的行」；
    *  这时展开已完成段让服务端补查。 */
-  const mentionableIds = useMemo(() => new Set(board.mentionables.map((m) => m.id)), [board]);
+  const mentionableIds = useMemo(() => new Set(mentionables.map((m) => m.id)), [mentionables]);
 
   /** 当前筛选下的可见行（段折叠在键盘导航处另行排除）。 */
   const visibleRows = useMemo(() => allRows.filter(visible), [allRows, visible]);

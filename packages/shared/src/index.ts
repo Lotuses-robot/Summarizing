@@ -642,9 +642,9 @@ export type PageMeta = z.infer<typeof PageMetaSchema>;
 
 /** @ 提及候选的条数上限（对话输入框 `@` 的自动补全数据源）。
  *
- *  为什么单独给一份而不是让前端从看板行里收集：看板的已完成段与通知都分页了，
- *  从行里收集会只剩当前页（折叠时一条都没有）——@ 不到旧条目，是静默的能力缩水。
- *  这份是「非回收站的条目，id + 标题」，按最近更新倒序取前 N 条。
+ *  为什么与看板分家：候选是「非回收站的全部条目」，而看板三段被分页与折叠切过——
+ *  把候选塞进看板响应里，折叠态下它要占掉响应的近六成体积（实测 57.9%），
+ *  而外部调用方（v1）根本用不上。`GET /api/board/mentionables` 单独出。
  *
  *  上限 500 是**有意的**：@ 是给「这条 / 它」消歧用的，不是检索入口；
  *  真要找很久以前的东西请用对话里的检索工具。超出部分不进候选，不影响已有条目的读写。 */
@@ -653,6 +653,14 @@ export const MENTIONABLE_LIMIT = 500;
 /** 一条 @ 提及候选（只够做自动补全：id 真实、标题给人看）。 */
 export const MentionableSchema = z.object({ id: z.string(), title: z.string() });
 export type Mentionable = z.infer<typeof MentionableSchema>;
+
+/** `GET /api/board/mentionables` 的响应：最近更新的 N 条候选（时间倒序）——见 `MENTIONABLE_LIMIT`。 */
+export const MentionablesViewSchema = z.object({
+  items: z.array(MentionableSchema),
+  /** 候选池总数（可能大于 items.length，超出上限的部分没下发）。 */
+  total: z.number().int().min(0),
+});
+export type MentionablesView = z.infer<typeof MentionablesViewSchema>;
 
 // 看板三段（01§4.3；D-80 五段 → D-89 四段 → 007 取消归档后三段）：日期未知 → 已排期 → 已完成
 // （存疑段已随 D-89 退场：拿不准的信息进存疑信息库，独立审核页——不再占看板）
@@ -666,8 +674,6 @@ export const BoardViewSchema = z.object({
   /** 全部标签（三段合起来去重排序）——**服务端算**，与分页无关。
    *  客户端自己从行里收集的话，折叠时标签栏会凭空少掉一大批。 */
   tags: z.array(z.string()),
-  /** @ 提及候选（见 `MENTIONABLE_LIMIT`）——与分页无关，折叠时也全都有。 */
-  mentionables: z.array(MentionableSchema),
   failedRawInputs: z.array(RawInputSchema), // 「未处理」横幅
 });
 export type BoardView = z.infer<typeof BoardViewSchema>;

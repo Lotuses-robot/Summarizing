@@ -9,7 +9,7 @@ import * as repo from "./storage/repo";
 import { retryRawInput } from "./agent0/digest";
 import { ingestBatch } from "./application/ingest";
 import { handleChat } from "./application/chat";
-import { buildBoard } from "./application/board";
+import { buildBoard, listMentionables } from "./application/board";
 import { deriveNotices } from "./application/notice";
 import { makeSessionAuth } from "./auth/session";
 import { makeTokenAuth } from "./auth/token";
@@ -55,6 +55,9 @@ const BoardQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   folded: z.enum(["0", "1"]).default("0"),
 });
+
+/** @ 候选的查询参数：q = 输入框里已打的字（前缀/子串过滤，空 = 全量）。 */
+const MentionablesQuerySchema = z.object({ q: z.string().default("") });
 
 /** webhook 网关参数：token 定空间、source + 通配定处理器。 */
 const HookParamsSchema = z.object({ token: z.string(), source: z.string(), "*": z.string() });
@@ -260,6 +263,15 @@ export function makeApp(deps: { registry: RegistryDb; hub: SpaceHub; router?: Ro
       const parsed = BoardQuerySchema.pick({ page: true }).safeParse(req.query);
       if (!parsed.success) return reply.code(400).send({ error: "page 必须是 ≥1 的整数" });
       return deriveNotices(req.space.db, parsed.data.page);
+    });
+
+    // @ 提及候选（D-83）：输入框自动补全的数据源。
+    // 独立成端点而不是挂在看板上——看板被 kind=task 与分页折叠切过，拿它当候选会漏
+    // （折叠时一条已完成都 @ 不到、通知完全不在看板里）；塞进看板响应还会白背近六成体积。
+    scope.get("/api/board/mentionables", async (req, reply) => {
+      const parsed = MentionablesQuerySchema.safeParse(req.query);
+      if (!parsed.success) return reply.code(400).send({ error: "q 必须是字符串" });
+      return listMentionables(req.space.db, parsed.data.q);
     });
 
     // 对话历史回填（L16）：持久化的轮次，前端启动时拉回——解「刷新/换设备对话即失」。

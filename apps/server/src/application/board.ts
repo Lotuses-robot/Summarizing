@@ -7,6 +7,7 @@ import {
   type BoardView,
   type Item,
   type ItemRow,
+  type MentionablesView,
 } from "@summarizing/shared";
 import type { Db } from "../storage/db";
 import * as repo from "../storage/repo";
@@ -110,12 +111,31 @@ export function buildBoard(
     // 标签全集**由服务端算**：done 只下发了一页，客户端从行里收集会凭空少掉一大半。
     // 口径 = 看板里**看得见的**三类（trashed 已在上面滤掉）——只存在于已删除条目的标签不该留在标签栏。
     tags: [...new Set(rows.flatMap((r) => r.item.tags))].sort(),
-    // @ 提及候选同样与分页无关：从行里收集的话，折叠时一条已完成都 @ 不到（D-135 review 逮出）。
-    mentionables: rows
-      .slice()
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.item.id.localeCompare(a.item.id))
-      .slice(0, MENTIONABLE_LIMIT)
-      .map((r) => ({ id: r.item.id, title: itemName(r.item.elements) })),
     failedRawInputs: repo.listRawInputsByState(db, "failed"),
   });
+}
+
+/** @ 提及候选（D-83）：输入框 `@` 的自动补全数据源。
+ *
+ *  **口径 = 非回收站的全部条目（事项 + 通知）**，按最近更新倒序取前 `MENTIONABLE_LIMIT` 条。
+ *  与看板三段分开：看板被 `kind=task` 与分页折叠切过，拿它当候选会漏——折叠时一条已完成都 @ 不到，
+ *  通知更是整个不在看板里（01§4.14 要求候选含通知）。
+ *
+ *  @param db 账户库
+ *  @param query 可选前缀/子串过滤（输入框边打边筛）；空串 = 不过滤
+ */
+export function listMentionables(db: Db, query = ""): MentionablesView {
+  const q = query.trim();
+  // trashed 排除（与看板同口径）：已删除的条目 @ 了也没法用
+  const candidates = repo
+    .deriveItemsWithVersion(db)
+    .filter((r) => r.item.status !== "trashed")
+    .filter((r) => q === "" || itemName(r.item.elements).includes(q))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.item.id.localeCompare(a.item.id));
+  return {
+    items: candidates
+      .slice(0, MENTIONABLE_LIMIT)
+      .map((r) => ({ id: r.item.id, title: itemName(r.item.elements) })),
+    total: candidates.length,
+  };
 }

@@ -2,7 +2,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import sharp from "sharp";
-import { BoardViewSchema, SearchRawsResultSchema } from "@summarizing/shared";
+import {
+  BoardViewSchema,
+  MentionablesViewSchema,
+  SearchRawsResultSchema,
+} from "@summarizing/shared";
 import { cleanupAllTestAccounts, makeTestAccount, makeTestRealm } from "./helpers/app";
 import * as repo from "../storage/repo";
 import { storeImageBytes } from "../application/media";
@@ -61,6 +65,61 @@ describe("v1 对外接口：令牌鉴权", () => {
     expect(body).toHaveProperty("undated");
     expect(body).toHaveProperty("scheduled");
     expect(body).toHaveProperty("doneMeta");
+    // @ 候选已拆成独立端点：看板响应里不再带它（它占折叠态响应近六成体积）
+    expect(body).not.toHaveProperty("mentionables");
+  });
+
+  it("@ 候选：独立端点，含通知、支持 q 过滤", async () => {
+    const acct = await makeTestAccount();
+    const raw = repo.insertRawInput(acct.db, {
+      content: "测试",
+      source: "agent",
+      identity: { displayName: "测试" },
+      receivedAt: "2026-11-11T10:00:00",
+      eventTime: null,
+    });
+    /** 播一条事项或通知（经版本链的真实写入路径）。 */
+    const mk = (id: string, name: string, kind: "task" | "notice"): void => {
+      repo.appendItemVersion(acct.db, {
+        itemId: id,
+        action: "create_item",
+        detail: "新建",
+        snapshot: {
+          elements: [{ label: "name", text: name }],
+          tags: [],
+          status: "todo",
+          kind,
+          doubtNote: null,
+        },
+        by: { actor: "agent0", model: null },
+      });
+    };
+    mk("m-task", "交高数作业", "task");
+    mk("m-notice", "通知：调课", "notice");
+    void raw;
+
+    const all = await acct.app.inject({
+      method: "GET",
+      url: "/api/v1/mentionables",
+      headers: bearer(acct.sourceToken),
+    });
+    expect(all.statusCode).toBe(200);
+    const view = MentionablesViewSchema.parse(all.json());
+    expect(view.items.map((i) => i.id).sort()).toEqual(["m-notice", "m-task"]);
+    expect(view.total).toBe(2);
+
+    const filtered = await acct.app.inject({
+      method: "GET",
+      url: `/api/v1/mentionables?q=${encodeURIComponent("高数")}`,
+      headers: bearer(acct.sourceToken),
+    });
+    expect(MentionablesViewSchema.parse(filtered.json()).items.map((i) => i.id)).toEqual([
+      "m-task",
+    ]);
+
+    // 未认证 → 401
+    const noAuth = await acct.app.inject({ method: "GET", url: "/api/v1/mentionables" });
+    expect(noAuth.statusCode).toBe(401);
   });
 
   it("同一个令牌也能走 webhook 网关（用户定：一把令牌两种用途）", async () => {

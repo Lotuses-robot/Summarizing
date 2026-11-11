@@ -11,7 +11,7 @@ import {
   type RawInput,
 } from "@summarizing/shared";
 import * as repo from "../storage/repo";
-import { buildBoard } from "../application/board";
+import { buildBoard, listMentionables } from "../application/board";
 import { deriveNotices } from "../application/notice";
 import { deriveTrashed } from "../application/trash";
 import { ingestBatch } from "../application/ingest";
@@ -43,6 +43,9 @@ const BoardQuerySchema = z.object({
 
 /** 列表类查询：一页页码（回收站 / 通知共用）。 */
 const PageQuerySchema = z.object({ page: z.coerce.number().int().min(1).default(1) });
+
+/** @ 候选的过滤参数（q = 前缀/子串，空 = 全量）。 */
+const MentionablesQuerySchema = z.object({ q: z.string().default("") });
 
 /** 台账条数（与内部 `/api/pipeline/runs` 上限同源）。 */
 const RunsQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50) });
@@ -115,6 +118,14 @@ export function registerV1Routes(app: FastifyInstance): void {
       return reply.code(400).send({ error: "query 必填且不能为空" });
     }
     return makeAgentTools(req.space.db, req.space.mediaDir).searchItems(parsed.data);
+  });
+
+  // @ 提及候选：与界面的自动补全同一个数据源（非回收站全部条目，时间倒序，上限 500）。
+  // 外部 agent 用它做「用户说的『它』是哪条」的候选池；不需要时不必调（看板响应里不再带它）。
+  app.get("/api/v1/mentionables", async (req, reply) => {
+    const parsed = MentionablesQuerySchema.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: "q 必须是字符串" });
+    return listMentionables(req.space.db, parsed.data.q);
   });
 
   app.get("/api/v1/notices", async (req, reply) => {
